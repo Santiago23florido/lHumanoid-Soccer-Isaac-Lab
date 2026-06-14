@@ -84,6 +84,34 @@ Figures must be reproducible from disk — no manual plotting steps.
 
 ## 7. Linking experiments to theory
 
+### Phase 1 executable handoff (Windows)
+
+First validate the complete path:
+
+```powershell
+.\scripts\run_phase1.ps1 -Smoke
+```
+
+Then launch the predeclared long sweep:
+
+```powershell
+.\scripts\run_phase1.ps1
+```
+
+The long run tunes each model once at `N=256`, freezes the selected
+hyperparameters, and retrains DeLaN and the MLP ensemble at
+`N = 64, 128, 256, 512, 1024, 2048` with the same five seeds. Outputs are
+written under `logs/sample_complexity/<timestamp>/`:
+
+- `sample_complexity_results.json`: configuration, per-seed errors, and
+  empirical `kappa` at the predeclared MSE thresholds.
+- `sample_complexity.csv`: flat analysis table.
+- `sample_complexity.png`: log-log one-step acceleration MSE versus `N`.
+
+The theory claim is supported only if the structured curve reaches a
+predeclared MSE threshold with fewer transitions across seeds. A single
+favorable seed or a post-hoc threshold is not evidence.
+
 The data-regime sweep is the bridge: plot model error (or steps-to-threshold)
 vs. `N` for both model classes and compare the empirical sample-complexity ratio
 to the `κ` predicted by the bound in `theory/`. Agreement (even approximate) is

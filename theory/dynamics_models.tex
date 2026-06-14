@@ -414,6 +414,25 @@ mean with a percentile-bootstrap 95\% confidence interval. The data-efficiency
 story is the curve of model error (and, later, task return) versus the number of
 real transitions $N$.
 
+\paragraph{Pre-registered next run.}
+The executable sweep in \texttt{scripts/run\_sample\_complexity.py} tunes each
+model once at $N=256$ and freezes those hyperparameters. It then evaluates
+\[
+  N\in\{64,128,256,512,1024,2048\}
+\]
+with the same five seeds and held-out set.
+For each predeclared target $\eta\in\{10^{-1},5\!\times\!10^{-2},10^{-2}\}$ it
+reports
+\[
+  \hat\kappa(\eta)
+  :=\frac{\min\{N:\widehat\epsacc_{\mathrm{MLP}}(N)\le\eta\}}
+  {\min\{N:\widehat\epsacc_{\mathrm{DeLaN}}(N)\le\eta\}}.
+\]
+The claim is empirically unsupported when DeLaN does not reach the threshold
+earlier across seeds, when the result depends on a post-hoc threshold, or when
+the gap disappears under matched optimization and parameter-budget controls.
+This is the immediate handoff from the completed derivations to model runs.
+
 \begin{thebibliography}{9}
 \bibitem{lutter2019delan} M.~Lutter, C.~Ritter, J.~Peters.
   \emph{Deep Lagrangian Networks: Using Physics as Model Prior for Deep

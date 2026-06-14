@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Executable theory and Phase-1 handoff.**
+  - One-step MSE/RMSE convention, finite-horizon control bound, beta-mixing
+    on-policy assumption, and conditional (not separation) claim framing.
+  - Executable Cholesky complexity counts and a mechanical LQR surrogate whose
+    generated constants/results are embedded in the committed theory PDF.
+  - Matched multi-budget sample-complexity sweep with empirical `kappa`, smoke
+    configuration, and a Windows PowerShell launcher for the next long runs.
 - **Windows 11 + CUDA deployment path.**
   - Conda environment and Isaac Sim 5.1 compatibility pins.
   - Headless CUDA/PhysX smoke test and Windows-safe Kit shutdown.

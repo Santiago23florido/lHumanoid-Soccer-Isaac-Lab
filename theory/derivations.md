@@ -116,3 +116,17 @@ The free model has `6 d^2` coefficients. The mechanical model has
 `d(d+1)/2` for mass, the same for stiffness, and `d` for damping, for a total
 of `d^2 + 2d`. This gives an exact dimension ratio in the surrogate, while the
 nonlinear Franka claim remains conditional.
+
+## 8. Experiment handoff
+
+The next commands are:
+
+```powershell
+.\scripts\run_phase1.ps1 -Smoke
+.\scripts\run_phase1.ps1
+```
+
+The long sweep tunes once, freezes hyperparameters, uses matched data and seeds,
+and reports empirical `kappa(target_mse) = N_comparator / N_structured` only at
+predeclared thresholds. This is the falsification step for the conditional
+upper-bound story.

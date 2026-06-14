@@ -31,6 +31,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "Generating executable theory constants failed."
 }
 
+& $pythonExe (Join-Path $repoRoot "scripts\run_lqr_surrogate.py")
+if ($LASTEXITCODE -ne 0) {
+    throw "Running the LQR surrogate failed."
+}
+
 Push-Location $theoryDir
 try {
     1..2 | ForEach-Object {

@@ -78,7 +78,7 @@ unstructured comparator.
 - [x] Pick one-step acceleration MSE as the statistical metric.
 - [x] Resolve `sqrt(epsilon)` versus `epsilon`.
 - [x] Derive and execute the Cholesky complexity proxy `kappa`.
-- [ ] Implement the fully computable LQR surrogate.
+- [x] Implement the fully computable LQR surrogate.
 - [x] State the on-policy beta-mixing and coverage assumptions.
 - [x] Use "conditional improved upper bound" framing.
 
@@ -98,3 +98,21 @@ PDF. For `d=7`:
 Only the first two isolate the Cholesky restriction. The latter two also include
 architecture width and ensemble size. All are complexity proxies for upper
 bounds, not statistical lower bounds.
+
+## 7. LQR surrogate ledger
+
+The executable anchor is `scripts/run_lqr_surrogate.py`.
+
+1. Build a coupled linear mass-spring-damper system.
+2. Discretize it with the same semi-implicit Euler convention as DeLaN.
+3. Fit unrestricted `(A,B)` by ridge least squares.
+4. Fit SPD mass, SPD stiffness, and diagonal damping by constrained least
+   squares, using the free estimate only as one initialization.
+5. Solve the discrete Riccati equation for each estimated model.
+6. Evaluate each controller on the true dynamics with a Lyapunov equation.
+7. Write JSON results and a LaTeX table consumed by the PDF.
+
+The free model has `6 d^2` coefficients. The mechanical model has
+`d(d+1)/2` for mass, the same for stiffness, and `d` for damping, for a total
+of `d^2 + 2d`. This gives an exact dimension ratio in the surrogate, while the
+nonlinear Franka claim remains conditional.

@@ -77,7 +77,24 @@ unstructured comparator.
 
 - [x] Pick one-step acceleration MSE as the statistical metric.
 - [x] Resolve `sqrt(epsilon)` versus `epsilon`.
-- [ ] Derive and execute the Cholesky complexity proxy `kappa`.
+- [x] Derive and execute the Cholesky complexity proxy `kappa`.
 - [ ] Implement the fully computable LQR surrogate.
 - [x] State the on-policy beta-mixing and coverage assumptions.
 - [x] Use "conditional improved upper bound" framing.
+
+## 6. Concrete kappa ledger
+
+`scripts/generate_theory_constants.py` computes all values inserted into the
+PDF. For `d=7`:
+
+- Cholesky emits `d(d+1)/2 = 28` mass entries; a dense head emits `d^2 = 49`.
+- `kappa_output = (d^2 + 1) / (d(d+1)/2 + 1)`.
+- `kappa_chol,param` compares otherwise identical energy networks and isolates
+  the Cholesky head.
+- `kappa_direct` compares the configured deterministic direct MLP to DeLaN.
+- `kappa_ensemble` compares the configured five-member probabilistic ensemble
+  to DeLaN.
+
+Only the first two isolate the Cholesky restriction. The latter two also include
+architecture width and ensemble size. All are complexity proxies for upper
+bounds, not statistical lower bounds.

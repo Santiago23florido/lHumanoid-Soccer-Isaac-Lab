@@ -20,6 +20,7 @@
 \newcommand{\epsacc}{\varepsilon_{\mathrm{acc}}}
 \newcommand{\dacc}{\delta_{\mathrm{acc}}}
 \newcommand{\Ccov}{C_{\mathrm{cov}}}
+\input{generated/complexity_constants.tex}
 
 \title{Physics-Structured Dynamics Models for Model-Based RL\\
 \large Lagrangian formulation, network parameterization, and the controller}
@@ -208,6 +209,60 @@ the structured class can have a smaller estimation-complexity term.  This is
 not yet a two-sided separation.  A separation would additionally require a
 matching lower bound for the unstructured class, which is outside the present
 result and will not be implied by empirical curves alone.
+
+\subsection{A concrete, executable complexity proxy}
+\label{sec:kappa}
+For $d$ generalized coordinates, a dense mass-matrix head emits $d^2$
+functions, while the Cholesky head emits only $d(d+1)/2$. Including the scalar
+potential head gives the output-coordinate ratio
+\begin{equation}
+  \kappa_{\mathrm{out}}
+  :=\frac{d^2+1}{d(d+1)/2+1}.
+  \label{eq:kappa-output}
+\end{equation}
+For the Franka ($d=\TheoryDof$), the executable count is
+$\FullMassEntries$ versus $\CholeskyEntries$ mass entries, hence
+$\kappa_{\mathrm{out}}=\KappaOutput$.
+
+Output coordinates alone overstate the gain when hidden layers dominate.
+Using the exact MLP parameter-count formula
+\[
+  P(n_0,\ldots,n_L)=\sum_{\ell=1}^{L}(n_{\ell-1}+1)n_\ell,
+\]
+the repository's two $[128,128]$ energy heads contain
+$P_{\mathrm{DeLaN}}=\DelanParameters$ trainable parameters. Replacing only the
+Cholesky head by a dense $d\times d$ mass head gives
+$P_{\mathrm{full-energy}}=\FullMassEnergyParameters$, so the portion isolated
+to Cholesky is
+\[
+  \kappa_{\mathrm{chol,param}}
+  :=P_{\mathrm{full-energy}}/P_{\mathrm{DeLaN}}
+  =\KappaCholeskyParameters.
+\]
+This modest value is the honest architecture-level effect of Cholesky alone.
+
+For the configured direct deterministic MLP, the exact count is
+$P_{\mathrm{MLP}}=\DirectMlpParameters$, yielding
+$\kappa_{\mathrm{direct}}=\KappaDirectParameters$. The five-member
+probabilistic ensemble has $P_{\mathrm{ens}}=\EnsembleParameters$ and
+$\kappa_{\mathrm{ens}}=\KappaEnsembleParameters$. These latter ratios include
+the chosen widths and ensemble size; they are not intrinsic consequences of
+Lagrangian mechanics.
+
+To connect the count to a sample upper bound, suppose the class-specific
+estimation term has the standard form
+\[
+  \epsacc(\hat f_{\mathcal H};\rho)
+  \le \varepsilon_{\mathrm{approx}}(\mathcal H)
+  +A_{\mathcal H}
+  \sqrt{\frac{P_{\mathcal H}\log(cN_{\mathrm{eff}})+\log(1/\delta)}
+  {N_{\mathrm{eff}}}}.
+\]
+If approximation errors and constants $A_{\mathcal H}$ are controlled, the
+certified samples needed for a fixed estimation tolerance scale linearly in
+$P_{\mathcal H}$; the ratio of those \emph{upper-bound requirements} is the
+corresponding $\kappa=P_{\mathcal U}/P_{\mathcal S}$. This remains a
+conditional upper-bound comparison, not a lower bound on the MLP.
 
 \section{Model architectures (what we use in each case)}
 \label{sec:arch}

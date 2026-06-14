@@ -21,5 +21,5 @@ Isaac Lab:
 
 Train with::
 
-    python scripts/train_rl.py --task LMBRL-Franka-Reach-v0 --headless --num_envs 1024
+    python scripts/train_rl.py --task LMBRL-Franka-Reach-v0 --headless --num_envs 256
 """

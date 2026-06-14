@@ -6,8 +6,8 @@ project's ``LMBRL-Franka-Reach-v0`` environment, and runs PPO via RSL-RL.
 
 Examples
 --------
-    # Train headless on an 8 GB GPU (good default env count):
-    python scripts/train_rl.py --headless --num_envs 1024 --max_iterations 1000
+    # Train headless on an 8 GB GPU (conservative default):
+    python scripts/train_rl.py --headless --num_envs 256 --max_iterations 1000
 
     # Quick smoke run:
     python scripts/train_rl.py --headless --num_envs 64 --max_iterations 10
@@ -25,6 +25,10 @@ all such imports live below ``AppLauncher(...)`` on purpose.
 from __future__ import annotations
 
 import argparse
+import importlib.metadata as metadata
+import os
+import sys
+import traceback
 
 from isaaclab.app import AppLauncher
 
@@ -33,7 +37,9 @@ from isaaclab.app import AppLauncher
 # ---------------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Train PPO on the Franka reach task (RSL-RL).")
 parser.add_argument("--task", type=str, default="LMBRL-Franka-Reach-v0", help="Registered task id.")
-parser.add_argument("--num_envs", type=int, default=None, help="Number of parallel envs (overrides cfg).")
+parser.add_argument(
+    "--num_envs", type=int, default=None, help="Number of parallel envs (overrides cfg)."
+)
 parser.add_argument("--max_iterations", type=int, default=None, help="PPO training iterations.")
 parser.add_argument("--seed", type=int, default=None, help="Random seed.")
 AppLauncher.add_app_launcher_args(parser)
@@ -45,26 +51,31 @@ simulation_app = app_launcher.app
 # ---------------------------------------------------------------------------
 # Everything below runs with the simulator live.
 # ---------------------------------------------------------------------------
-import os
-from datetime import datetime
+from datetime import datetime  # noqa: E402, I001
 
-import gymnasium as gym
-from rsl_rl.runners import OnPolicyRunner
+import gymnasium as gym  # noqa: E402
+from rsl_rl.runners import OnPolicyRunner  # noqa: E402
 
-from isaaclab.utils.dict import print_dict
-from isaaclab.utils.io import dump_yaml
+from isaaclab.utils.dict import print_dict  # noqa: E402
+from isaaclab.utils.io import dump_yaml  # noqa: E402
 
-from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
+from isaaclab_rl.rsl_rl import (  # noqa: E402
+    RslRlVecEnvWrapper,
+    handle_deprecated_rsl_rl_cfg,
+)
 
 # Registers LMBRL-Franka-Reach-v0 / -Play-v0 and pulls in the cfg classes.
-import lagrangian_mbrl.rl.tasks  # noqa: F401
-from lagrangian_mbrl.rl.agents.rsl_rl_ppo_cfg import FrankaReachPPORunnerCfg
-from lagrangian_mbrl.rl.franka_reach_env_cfg import FrankaReachEnvCfg
+import lagrangian_mbrl.rl.tasks  # noqa: E402, F401
+from lagrangian_mbrl.rl.agents.rsl_rl_ppo_cfg import (  # noqa: E402
+    FrankaReachPPORunnerCfg,
+)
+from lagrangian_mbrl.rl.franka_reach_env_cfg import FrankaReachEnvCfg  # noqa: E402
 
 
 def main() -> None:
     env_cfg = FrankaReachEnvCfg()
     agent_cfg = FrankaReachPPORunnerCfg()
+    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, metadata.version("rsl-rl-lib"))
 
     # --- apply CLI overrides ---
     if args_cli.num_envs is not None:
@@ -105,5 +116,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
-    simulation_app.close()
+    try:
+        main()
+    except BaseException:
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        if sys.platform == "win32":
+            os._exit(1)
+        simulation_app.close()
+        raise
+    else:
+        # Graceful Kit shutdown can deadlock on Windows with Isaac Sim 5.1.
+        simulation_app.close(skip_cleanup=sys.platform == "win32")

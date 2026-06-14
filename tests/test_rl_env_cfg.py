@@ -19,7 +19,9 @@ try:
         FrankaReachEnvCfg_PLAY,
     )
 except Exception as exc:  # pragma: no cover - needs a launched sim app on some setups
-    pytest.skip(f"Isaac Lab present but cfg import needs a live app: {exc}", allow_module_level=True)
+    pytest.skip(
+        f"Isaac Lab present but cfg import needs a live app: {exc}", allow_module_level=True
+    )
 
 
 def test_env_cfg_targets_franka_end_effector():
@@ -49,7 +51,8 @@ def test_play_cfg_is_small_and_clean():
 
 def test_ppo_cfg_network_and_iterations():
     cfg = FrankaReachPPORunnerCfg()
-    assert cfg.policy.actor_hidden_dims == [256, 128, 64]
-    assert cfg.policy.critic_hidden_dims == [256, 128, 64]
-    assert cfg.policy.activation == "elu"
+    assert cfg.actor.hidden_dims == [256, 128, 64]
+    assert cfg.critic.hidden_dims == [256, 128, 64]
+    assert cfg.actor.activation == "elu"
+    assert cfg.obs_groups == {"actor": ["policy"], "critic": ["policy"]}
     assert cfg.max_iterations > 0

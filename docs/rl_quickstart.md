@@ -8,7 +8,7 @@ Isaac Lab. It complements the model-based / DeLaN track described in
 > Prerequisite: a working Isaac Lab install (see
 > [`setup_guide.md`](setup_guide.md)) and this package installed into that same
 > environment: `pip install -e ".[rl,dev]"`. All commands assume the Isaac Lab
-> conda env is active (`conda activate isaaclab`).
+> conda env is active (`conda activate env_isaaclab`).
 
 ## The problem (MDP)
 
@@ -27,8 +27,8 @@ The PPO agent (actor-critic MLP `[256, 128, 64]`, ELU) is in
 ## Train
 
 ```bash
-# Headless, good default for an 8 GB GPU (RTX 4070):
-python scripts/train_rl.py --headless --num_envs 1024 --max_iterations 1000
+# Headless, conservative default for an 8 GB GPU (RTX 4070 Laptop):
+python scripts/train_rl.py --headless --num_envs 256 --max_iterations 1000
 
 # Quick smoke run (verify the loop end-to-end):
 python scripts/train_rl.py --headless --num_envs 64 --max_iterations 10
@@ -51,10 +51,10 @@ python scripts/play_rl.py --headless --num_envs 16 \
 ## VRAM tips (8 GB)
 
 - Always run training `--headless`.
-- Start at `--num_envs 1024`; drop to 256–512 if you hit out-of-memory, or push
-  to 2048 if you have headroom.
+- Start at `--num_envs 256`; drop to 64-128 if you hit out-of-memory. Increase
+  only after checking VRAM with `nvidia-smi`.
 - Reach is easy — the stock `[64, 64]` policy also solves it if you want faster
-  iterations (edit `actor_hidden_dims` / `critic_hidden_dims`).
+  iterations (edit `actor.hidden_dims` / `critic.hidden_dims`).
 
 ## Tasks
 

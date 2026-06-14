@@ -16,34 +16,52 @@ Uses the small ``-Play-v0`` scene (few envs, no observation noise).
 from __future__ import annotations
 
 import argparse
+import importlib.metadata as metadata
+import os
+import sys
+import traceback
 
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Play a trained PPO policy on the Franka reach task.")
-parser.add_argument("--task", type=str, default="LMBRL-Franka-Reach-Play-v0", help="Registered task id.")
-parser.add_argument("--checkpoint", type=str, required=True, help="Path to a saved RSL-RL model_*.pt.")
-parser.add_argument("--num_envs", type=int, default=None, help="Number of parallel envs (overrides cfg).")
-parser.add_argument("--steps", type=int, default=1000, help="Number of environment steps to roll out.")
+parser.add_argument(
+    "--task", type=str, default="LMBRL-Franka-Reach-Play-v0", help="Registered task id."
+)
+parser.add_argument(
+    "--checkpoint", type=str, required=True, help="Path to a saved RSL-RL model_*.pt."
+)
+parser.add_argument(
+    "--num_envs", type=int, default=None, help="Number of parallel envs (overrides cfg)."
+)
+parser.add_argument(
+    "--steps", type=int, default=1000, help="Number of environment steps to roll out."
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
-import torch
-import gymnasium as gym
-from rsl_rl.runners import OnPolicyRunner
+import gymnasium as gym  # noqa: E402, I001
+import torch  # noqa: E402
+from rsl_rl.runners import OnPolicyRunner  # noqa: E402
 
-from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
+from isaaclab_rl.rsl_rl import (  # noqa: E402
+    RslRlVecEnvWrapper,
+    handle_deprecated_rsl_rl_cfg,
+)
 
-import lagrangian_mbrl.rl.tasks  # noqa: F401  (registers the task ids)
-from lagrangian_mbrl.rl.agents.rsl_rl_ppo_cfg import FrankaReachPPORunnerCfg
-from lagrangian_mbrl.rl.franka_reach_env_cfg import FrankaReachEnvCfg_PLAY
+import lagrangian_mbrl.rl.tasks  # noqa: E402, F401  (registers the task ids)
+from lagrangian_mbrl.rl.agents.rsl_rl_ppo_cfg import (  # noqa: E402
+    FrankaReachPPORunnerCfg,
+)
+from lagrangian_mbrl.rl.franka_reach_env_cfg import FrankaReachEnvCfg_PLAY  # noqa: E402
 
 
 def main() -> None:
     env_cfg = FrankaReachEnvCfg_PLAY()
     agent_cfg = FrankaReachPPORunnerCfg()
+    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, metadata.version("rsl-rl-lib"))
     if args_cli.num_envs is not None:
         env_cfg.scene.num_envs = args_cli.num_envs
     if args_cli.device is not None:
@@ -68,5 +86,15 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
-    simulation_app.close()
+    try:
+        main()
+    except BaseException:
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        if sys.platform == "win32":
+            os._exit(1)
+        simulation_app.close()
+        raise
+    else:
+        simulation_app.close(skip_cleanup=sys.platform == "win32")

@@ -23,5 +23,15 @@ logs are available.
 """
 
 from lagrangian_mbrl.pipeline.registry import MODEL_REGISTRY, build_model, model_hp_space
+from lagrangian_mbrl.pipeline.sample_complexity import (
+    SampleComplexityConfig,
+    run_sample_complexity,
+)
 
-__all__ = ["MODEL_REGISTRY", "build_model", "model_hp_space"]
+__all__ = [
+    "MODEL_REGISTRY",
+    "SampleComplexityConfig",
+    "build_model",
+    "model_hp_space",
+    "run_sample_complexity",
+]

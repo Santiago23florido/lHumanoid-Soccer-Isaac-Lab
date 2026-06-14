@@ -32,9 +32,8 @@ from __future__ import annotations
 
 import math
 
-from isaaclab.utils import configclass
-
 import isaaclab_tasks.manager_based.manipulation.reach.mdp as mdp
+from isaaclab.utils import configclass
 from isaaclab_tasks.manager_based.manipulation.reach.reach_env_cfg import ReachEnvCfg
 
 # Pre-defined, physically-calibrated Franka Panda articulation.
@@ -43,9 +42,9 @@ from isaaclab_assets import FRANKA_PANDA_CFG  # isort: skip
 # End-effector body used for the reach command and tracking rewards.
 EE_BODY_NAME = "panda_hand"
 
-# Default parallel-environment count, sized to fit ~8 GB of VRAM for this task.
+# Conservative default for an 8 GB laptop GPU. Scale up after checking VRAM.
 # Override at the CLI with ``--num_envs`` once you know your headroom.
-DEFAULT_NUM_ENVS = 1024
+DEFAULT_NUM_ENVS = 256
 
 
 @configclass
@@ -65,7 +64,9 @@ class FrankaReachEnvCfg(ReachEnvCfg):
         self.rewards.end_effector_position_tracking_fine_grained.params["asset_cfg"].body_names = [
             EE_BODY_NAME
         ]
-        self.rewards.end_effector_orientation_tracking.params["asset_cfg"].body_names = [EE_BODY_NAME]
+        self.rewards.end_effector_orientation_tracking.params["asset_cfg"].body_names = [
+            EE_BODY_NAME
+        ]
 
         # --- action: scaled joint-position targets around the default pose ---
         self.actions.arm_action = mdp.JointPositionActionCfg(

@@ -1,0 +1,15 @@
+source: two_link
+models: [delan, mlp_ensemble]
+budgets: [64, 128, 256, 512, 1024, 2048]
+n_val: 2048
+tuning_n_train: 256
+seeds: [0, 1, 2, 3, 4]
+hpo_trials: 20
+hpo_epochs: 150
+train_epochs: 600
+dtype: float64
+n_bootstrap: 10000
+target_mses: [0.1, 0.05, 0.01]
+structured_model: delan
+comparator_model: mlp_ensemble
+out_dir: logs/sample_complexity

@@ -21,10 +21,9 @@ easy task, so feel free to shrink back to ``[64, 64]`` for faster iteration.
 from __future__ import annotations
 
 from isaaclab.utils import configclass
-
 from isaaclab_rl.rsl_rl import (
+    RslRlMLPModelCfg,
     RslRlOnPolicyRunnerCfg,
-    RslRlPpoActorCriticCfg,
     RslRlPpoAlgorithmCfg,
 )
 
@@ -38,14 +37,18 @@ class FrankaReachPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 50
     experiment_name = "lmbrl_franka_reach"
     run_name = ""
+    obs_groups = {"actor": ["policy"], "critic": ["policy"]}
 
-    policy = RslRlPpoActorCriticCfg(
-        init_noise_std=1.0,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
-        actor_hidden_dims=[256, 128, 64],
-        critic_hidden_dims=[256, 128, 64],
+    actor = RslRlMLPModelCfg(
+        hidden_dims=[256, 128, 64],
         activation="elu",
+        obs_normalization=False,
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
+    )
+    critic = RslRlMLPModelCfg(
+        hidden_dims=[256, 128, 64],
+        activation="elu",
+        obs_normalization=False,
     )
 
     algorithm = RslRlPpoAlgorithmCfg(

@@ -1,11 +1,14 @@
-% Compile: pdflatex dynamics_models.tex  (self-contained; no external .bib needed)
+% Compile on Windows: powershell -ExecutionPolicy Bypass -File build_theory.ps1
 \documentclass[11pt]{article}
 
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
-\usepackage{booktabs}
+\usepackage{booktabs,tabularx}
 \usepackage{bm}
 \usepackage[hidelinks]{hyperref}
+
+\newtheorem{assumption}{Assumption}
+\newtheorem{proposition}{Proposition}
 
 \newcommand{\q}{\bm{q}}
 \newcommand{\qd}{\dot{\bm{q}}}
@@ -13,6 +16,12 @@
 \newcommand{\R}{\mathbb{R}}
 \newcommand{\M}{\bm{M}}
 \newcommand{\Lo}{\bm{L}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\epsacc}{\varepsilon_{\mathrm{acc}}}
+\newcommand{\dacc}{\delta_{\mathrm{acc}}}
+\newcommand{\Ccov}{C_{\mathrm{cov}}}
+\input{generated/complexity_constants.tex}
+\input{generated/lqr_surrogate_constants.tex}
 
 \title{Physics-Structured Dynamics Models for Model-Based RL\\
 \large Lagrangian formulation, network parameterization, and the controller}
@@ -28,8 +37,9 @@ $(\q,\qd,\bm{\tau})\mapsto\qdd$, to use as the predictive model inside a
 model-based reinforcement-learning (MBRL) loop. This note states the
 Euler--Lagrange equations the dynamics obey, shows \emph{exactly where the
 neural network enters} a Deep Lagrangian Network (DeLaN), lists the architectures
-used for the structured model and the unstructured baselines, and specifies the
-controller that plans through the learned model.
+used for the structured model and the unstructured baselines, fixes the
+statistical error convention used by the project, and specifies the controller
+that plans through the learned model.
 \end{abstract}
 
 \section{Problem}
@@ -40,9 +50,9 @@ according to the manipulator equation
 \M(\q)\,\qdd + \bm{c}(\q,\qd) + \bm{g}(\q) = \bm{\tau},
 \label{eq:manip}
 \end{equation}
-where $\M(\q)\succ0$ is the (symmetric positive-definite) mass/inertia matrix,
-$\bm{c}$ collects Coriolis/centrifugal terms, and $\bm{g}$ is the gravitational
-force. The learning target is the \emph{forward dynamics}
+Here $\M(\q)\succ0$ is the symmetric positive-definite mass matrix.
+The vector $\bm{c}$ collects Coriolis and centrifugal terms, while $\bm{g}$ is
+the gravitational force. The learning target is the \emph{forward dynamics}
 \begin{equation}
 \qdd = \M(\q)^{-1}\!\left(\bm{\tau}-\bm{c}(\q,\qd)-\bm{g}(\q)\right).
 \label{eq:fwd}
@@ -104,11 +114,238 @@ forward-dynamics residual (predicted vs.\ measured $\qdd$) and the
 inverse-dynamics residual (predicted vs.\ measured $\bm\tau$), with input
 normalization fit on the training set.
 
+\section{Statistical target and finite-horizon guarantee}
+\label{sec:bound}
+The statistical target is the held-out \emph{one-step acceleration MSE}
+\begin{equation}
+  \epsacc(\hat f;\rho)
+  := \E_{(\bm{x},\bm{\tau})\sim\rho}
+  \left[\left\|\hat f(\bm{x},\bm{\tau})
+  - f^\star(\bm{x},\bm{\tau})\right\|_2^2\right],
+  \qquad \bm{x}=(\q,\qd).
+  \label{eq:acc-mse}
+\end{equation}
+We write $\dacc:=\sqrt{\epsacc}$ for its root mean-squared error.  The
+$H$-step rollout MSE remains an important diagnostic, but it is not the
+statistical primitive in the bound: it already contains closed-loop
+distribution shift and compounding error, which the simulation argument below
+handles explicitly.
+
+The code uses semi-implicit Euler with step $\Delta t$:
+\[
+  \qd^+ = \qd+\Delta t\,f(\bm{x},\bm{\tau}),\qquad
+  \q^+ = \q+\Delta t\,\qd^+.
+\]
+Consequently an acceleration error $\bm e=\hat f-f^\star$ induces the exact
+one-step state-transition error
+\begin{equation}
+  \left\|\hat F(\bm{x},\bm{\tau})-F^\star(\bm{x},\bm{\tau})\right\|_2
+  = c_{\Delta t}\|\bm e\|_2,\qquad
+  c_{\Delta t}:=\Delta t\sqrt{1+\Delta t^2}.
+  \label{eq:integration-error}
+\end{equation}
+
+\begin{assumption}[Coverage and Lipschitz values]
+\label{ass:coverage}
+For every policy used by the optimality comparison and every time
+$t\in\{0,\ldots,H-1\}$, the relevant state--action occupancy $d_t^\pi$ is
+absolutely continuous with respect to the aggregated training distribution
+$\rho$, with density ratio at most $\Ccov$.  The continuation value at time
+$t+1$ is $L_{t+1}$-Lipschitz in the Euclidean state norm.
+\end{assumption}
+
+\begin{proposition}[MSE-to-control conversion]
+\label{prop:simulation}
+Let $\hat\pi$ be $\varepsilon_{\mathrm{opt}}$-optimal for the learned transition
+$\hat F$, and let $\pi^\star$ be optimal for $F^\star$. Under
+Assumption~\ref{ass:coverage},
+\begin{equation}
+  J_{F^\star}(\pi^\star)-J_{F^\star}(\hat\pi)
+  \le
+  2c_{\Delta t}\!\left(\sum_{t=0}^{H-1}L_{t+1}\right)
+  \sqrt{\Ccov\,\epsacc(\hat f;\rho)}
+  +\varepsilon_{\mathrm{opt}}.
+  \label{eq:main-bound}
+\end{equation}
+\end{proposition}
+
+\paragraph{Proof sketch.}
+Apply the finite-horizon value-difference identity to a fixed policy and bound
+each transition perturbation by the Lipschitz constant of the continuation
+value.  Change measure from $d_t^\pi$ to $\rho$ using the density-ratio bound,
+then apply Cauchy--Schwarz and \eqref{eq:integration-error}.  Applying the
+fixed-policy bound once to $\pi^\star$ and once to $\hat\pi$, and inserting the
+learned-model planning error, gives \eqref{eq:main-bound}. If
+$L_{t+1}\le L_V(H-t-1)$, then the leading constant is at most
+$c_{\Delta t}L_VH(H-1)$, displaying the usual $O(H^2)$ amplification.
+
+\paragraph{Resolution of the square root.}
+Equation~\eqref{eq:main-bound} is proportional to
+$\sqrt{\epsacc}$ because \eqref{eq:acc-mse} is a \emph{squared} error.  The same
+bound is linear in the RMSE $\dacc$.  We therefore report MSE in experiments,
+take its square root only when inserting it into a control-performance bound,
+and never use the same symbol for both quantities.
+
+\subsection{On-policy data are not treated as i.i.d.}
+Data are collected in rounds.  Conditional on the history before round $m$,
+the policy $\pi_m$ is frozen and its Markov chain is assumed stationary after
+burn-in and geometrically $\beta$-mixing:
+\[
+  \beta_m(k)\le B_m\exp(-k/\tau_m).
+\]
+For a block length $b$, alternating blocks yield
+$N_{\mathrm{eff}}=\lfloor N/(2b)\rfloor$ approximately independent blocks; $b$
+is chosen so the coupling remainder
+$2N_{\mathrm{eff}}\beta_m(b)$ is below the allocated failure probability.
+Supervised generalization is applied conditionally within each round and then
+union-bounded over rounds.  The training distribution is the data-aggregation
+mixture $\rho=\sum_m\alpha_m d^{\pi_m}$.  Assumption~\ref{ass:coverage} is still
+required for the final policy; without it, the theorem makes no claim about
+unvisited regions \cite{mohri2010mixing}.
+
+\paragraph{Claim scope.}
+The paper's current claim is a \emph{conditional improvement of an upper
+bound}: under realizability, coverage, mixing, and comparable optimization,
+the structured class can have a smaller estimation-complexity term.  This is
+not yet a two-sided separation.  A separation would additionally require a
+matching lower bound for the unstructured class, which is outside the present
+result and will not be implied by empirical curves alone.
+
+\subsection{A concrete, executable complexity proxy}
+\label{sec:kappa}
+For $d$ generalized coordinates, a dense mass-matrix head emits $d^2$
+functions, while the Cholesky head emits only $d(d+1)/2$. Including the scalar
+potential head gives the output-coordinate ratio
+\begin{equation}
+  \kappa_{\mathrm{out}}
+  :=\frac{d^2+1}{d(d+1)/2+1}.
+  \label{eq:kappa-output}
+\end{equation}
+For the Franka ($d=\TheoryDof$), the executable count is
+$\FullMassEntries$ versus $\CholeskyEntries$ mass entries, hence
+$\kappa_{\mathrm{out}}=\KappaOutput$.
+
+Output coordinates alone overstate the gain when hidden layers dominate.
+Using the exact MLP parameter-count formula
+\[
+  P(n_0,\ldots,n_L)=\sum_{\ell=1}^{L}(n_{\ell-1}+1)n_\ell,
+\]
+the repository's two $[128,128]$ energy heads contain
+$P_{\mathrm{DeLaN}}=\DelanParameters$ trainable parameters. Replacing only the
+Cholesky head by a dense $d\times d$ mass head gives
+$P_{\mathrm{full-energy}}=\FullMassEnergyParameters$, so the portion isolated
+to Cholesky is
+\[
+  \kappa_{\mathrm{chol,param}}
+  :=P_{\mathrm{full-energy}}/P_{\mathrm{DeLaN}}
+  =\KappaCholeskyParameters.
+\]
+This modest value is the honest architecture-level effect of Cholesky alone.
+
+For the configured direct deterministic MLP, the exact count is
+$P_{\mathrm{MLP}}=\DirectMlpParameters$, yielding
+$\kappa_{\mathrm{direct}}=\KappaDirectParameters$. The five-member
+probabilistic ensemble has $P_{\mathrm{ens}}=\EnsembleParameters$ and
+$\kappa_{\mathrm{ens}}=\KappaEnsembleParameters$. These latter ratios include
+the chosen widths and ensemble size; they are not intrinsic consequences of
+Lagrangian mechanics.
+
+To connect the count to a sample upper bound, suppose the class-specific
+estimation term has the standard form
+\[
+  \epsacc(\hat f_{\mathcal H};\rho)
+  \le \varepsilon_{\mathrm{approx}}(\mathcal H)
+  +A_{\mathcal H}
+  \sqrt{\frac{P_{\mathcal H}\log(cN_{\mathrm{eff}})+\log(1/\delta)}
+  {N_{\mathrm{eff}}}}.
+\]
+If approximation errors and constants $A_{\mathcal H}$ are controlled, the
+certified samples needed for a fixed estimation tolerance scale linearly in
+$P_{\mathcal H}$; the ratio of those \emph{upper-bound requirements} is the
+corresponding $\kappa=P_{\mathcal U}/P_{\mathcal S}$. This remains a
+conditional upper-bound comparison, not a lower bound on the MLP.
+
+\section{Fully computable LQR surrogate}
+\label{sec:lqr}
+The analytic anchor, in the spirit of the computable LQR comparisons of
+Tu and Recht \cite{tu2019lqr}, is the linear mechanical system
+\begin{equation}
+  \M\qdd+\bm{D}\qd+\bm{K}\q=\bm{u},
+  \qquad \M\succ0,\quad \bm{K}\succ0,\quad
+  \bm{D}=\operatorname{diag}(\bm d)\succeq0.
+  \label{eq:linear-mechanics}
+\end{equation}
+Semi-implicit Euler yields an exactly known linear transition
+$\bm{x}^+=\bm{A}\bm{x}+\bm{B}\bm{u}$:
+\[
+\bm A=
+\begin{bmatrix}
+\bm I-\Delta t^2\M^{-1}\bm K &
+\Delta t(\bm I-\Delta t\M^{-1}\bm D)\\
+-\Delta t\M^{-1}\bm K & \bm I-\Delta t\M^{-1}\bm D
+\end{bmatrix},
+\qquad
+\bm B=
+\begin{bmatrix}\Delta t^2\M^{-1}\\ \Delta t\M^{-1}\end{bmatrix}.
+\]
+An unrestricted estimator has
+$p_{\mathrm{free}}=(2d)(2d+d)=6d^2$ coefficients. The mechanical class has
+\[
+  p_{\mathrm{mech}}
+  =\underbrace{\frac{d(d+1)}2}_{\M\ {\rm via\ Cholesky}}
+   +\underbrace{\frac{d(d+1)}2}_{\bm K\ {\rm symmetric}}
+   +\underbrace{d}_{\bm D\ {\rm diagonal}}
+  =d^2+2d.
+\]
+For the executable $\LqrDof$-DoF surrogate below,
+$p_{\mathrm{free}}=\LqrUnstructuredDimension$,
+$p_{\mathrm{mech}}=\LqrStructuredDimension$, and their dimension ratio is
+$\kappa_{\mathrm{LQR}}=\LqrDimensionKappa$.
+
+Given samples $(\bm{x}_i,\bm{u}_i,\bm{x}_i^+)$, the free model is ridge least
+squares. The mechanical estimator minimizes the same one-step residual over
+the lower-dimensional parameters: Cholesky factors for $\M$ and $\bm K$, and
+log diagonal entries for $\bm D$. An algebraic projection of the free estimate
+provides one initialization, while a fixed nominal mechanical model provides
+a second; the lower-residual initialization is optimized. Every operation is
+implemented in \texttt{theory/lqr\_surrogate.py}.
+
+For quadratic cost
+\[
+  J(\bm L)=\E\sum_{t=0}^{\infty}
+  \left(\bm{x}_t^\top\bm Q\bm{x}_t+
+  \bm{u}_t^\top\bm R\bm{u}_t\right),\qquad \bm{u}_t=-\bm L\bm{x}_t,
+\]
+the estimated controller is obtained from the discrete algebraic Riccati
+equation. It is evaluated on the \emph{true} dynamics using the Lyapunov
+equation
+\[
+  \bm P_{\bm L}=\bm Q+\bm L^\top\bm R\bm L+
+  (\bm A-\bm B\bm L)^\top\bm P_{\bm L}(\bm A-\bm B\bm L),
+  \qquad J(\bm L)=\operatorname{tr}(\bm P_{\bm L}\bm\Sigma_0).
+\]
+Thus identification error, stability, controller synthesis, and cost gap are
+all directly computable.
+
+\begin{table}[h]
+\centering
+\input{generated/lqr_surrogate_table.tex}
+\caption{Seed-averaged relative LQR cost gap on the true system. ``Free'' is
+unrestricted $(A,B)$ least squares; ``mech.'' is constrained mechanical least
+squares. The table is regenerated by \texttt{scripts/run\_lqr\_surrogate.py}.}
+\label{tab:lqr-surrogate}
+\end{table}
+
+This surrogate is an analytic and executable anchor, not a proof that the same
+numerical ratio transfers to nonlinear DeLaN. Its role is to show a setting in
+which the structural dimension, estimator, Riccati controller, and downstream
+cost are all observable before running the Franka experiments.
+
 \section{Model architectures (what we use in each case)}
 \label{sec:arch}
 \begin{table}[h]
 \centering
-\begin{tabular}{@{}lll@{}}
+\begin{tabularx}{\textwidth}{@{}p{0.17\textwidth}p{0.22\textwidth}X@{}}
 \toprule
 Role & Model & Architecture \\
 \midrule
@@ -119,7 +356,7 @@ Unstructured baseline & MLP ensemble (PETS) \cite{chua2018pets} &
   $K{=}5$ probabilistic MLPs $[256,256,256]$, SiLU, Gaussian $\qdd$ head \\
 Minimal reference & MLP & single deterministic MLP $[256,256,256]$, SiLU \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \caption{Models compared. The structured model constrains the hypothesis class
 to physically consistent dynamics; the ensemble is the strong unstructured
 baseline and supplies epistemic uncertainty for planning. Widths/activations are
@@ -177,6 +414,25 @@ mean with a percentile-bootstrap 95\% confidence interval. The data-efficiency
 story is the curve of model error (and, later, task return) versus the number of
 real transitions $N$.
 
+\paragraph{Pre-registered next run.}
+The executable sweep in \texttt{scripts/run\_sample\_complexity.py} tunes each
+model once at $N=256$ and freezes those hyperparameters. It then evaluates
+\[
+  N\in\{64,128,256,512,1024,2048\}
+\]
+with the same five seeds and held-out set.
+For each predeclared target $\eta\in\{10^{-1},5\!\times\!10^{-2},10^{-2}\}$ it
+reports
+\[
+  \hat\kappa(\eta)
+  :=\frac{\min\{N:\widehat\epsacc_{\mathrm{MLP}}(N)\le\eta\}}
+  {\min\{N:\widehat\epsacc_{\mathrm{DeLaN}}(N)\le\eta\}}.
+\]
+The claim is empirically unsupported when DeLaN does not reach the threshold
+earlier across seeds, when the result depends on a post-hoc threshold, or when
+the gap disappears under matched optimization and parameter-budget controls.
+This is the immediate handoff from the completed derivations to model runs.
+
 \begin{thebibliography}{9}
 \bibitem{lutter2019delan} M.~Lutter, C.~Ritter, J.~Peters.
   \emph{Deep Lagrangian Networks: Using Physics as Model Prior for Deep
@@ -198,6 +454,14 @@ real transitions $N$.
 \bibitem{williams2017mppi} G.~Williams, A.~Aldrich, E.~A.~Theodorou.
   \emph{Model Predictive Path Integral Control.} Journal of Guidance, Control,
   and Dynamics, 2017.
+\bibitem{agarwal2022rltheory} A.~Agarwal, N.~Jiang, S.~M.~Kakade, W.~Sun.
+  \emph{Reinforcement Learning: Theory and Algorithms.} Online monograph, 2022.
+\bibitem{mohri2010mixing} M.~Mohri, A.~Rostamizadeh.
+  \emph{Stability Bounds for Stationary $\phi$-mixing and $\beta$-mixing
+  Processes.} Journal of Machine Learning Research, 2010.
+\bibitem{tu2019lqr} S.~Tu, B.~Recht.
+  \emph{The Gap Between Model-Based and Model-Free Methods on the Linear
+  Quadratic Regulator: An Asymptotic Viewpoint.} COLT, 2019.
 \end{thebibliography}
 
 \end{document}

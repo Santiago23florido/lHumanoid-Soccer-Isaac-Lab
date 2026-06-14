@@ -22,6 +22,7 @@ keywords = [
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
     "Operating System :: POSIX :: Linux",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -38,7 +39,7 @@ dependencies = [
     "omegaconf>=2.3",
     "pyyaml>=6.0",
     "tqdm>=4.65",
-    "wandb>=0.16",
+    "wandb>=0.16,<0.20",
     "tensorboard>=2.14",
     "matplotlib>=3.7",
     "pandas>=2.0",
@@ -47,7 +48,8 @@ dependencies = [
 
 [project.optional-dependencies]
 rl = [
-    "rsl-rl-lib>=2.0",      # PPO baseline (Isaac Lab default trainer)
+    "rsl-rl-lib==5.0.1",    # version bundled with Isaac Lab 2.3.2
+    "tensordict==0.8.3",    # newer releases crash inside Isaac Sim 5.1 on Windows
     "skrl>=1.1",            # alternative RL library
 ]
 hpo = [
@@ -55,7 +57,7 @@ hpo = [
 ]
 dev = [
     "pytest>=7.4",
-    "pytest-cov>=4.1",
+    "pytest-cov>=4.1,<6.0",
     "ruff>=0.4",
     "black>=24.0",
     "mypy>=1.8",

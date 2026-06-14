@@ -79,22 +79,28 @@ lagrangian-mbrl-franka/
 
 ## Installation
 
-> **Target platform:** Linux, single NVIDIA RTX 4070 (12 GB). See
+> **Target platform:** Windows 11 or Linux with an NVIDIA GPU. The validated
+> Windows setup uses an RTX 4070 Laptop GPU (8 GB), Conda, CUDA-enabled
+> PyTorch 2.7, Isaac Sim 5.1, and Isaac Lab 2.3.2. See
 > [`docs/setup_guide.md`](docs/setup_guide.md) for the detailed, step-by-step
 > guide (this is a summary).
 
-1. **Isaac Sim + Isaac Lab (2.x).** Follow the official Isaac Lab install guide:
-   <https://isaac-sim.github.io/IsaacLab/>. Use the conda/venv workflow it
-   recommends and verify a headless Franka environment launches.
-2. **This package** (into the same environment Isaac Lab uses):
-   ```bash
-   git clone <your-fork-url> lagrangian-mbrl-franka
-   cd lagrangian-mbrl-franka
-   pip install -e .            # or: pip install -r requirements.txt
+1. **Create the Conda environment:**
+   ```powershell
+   conda env create -f environment-windows.yml
+   conda activate env_isaaclab
    ```
-3. **Verify:**
-   ```bash
+2. **Install Isaac Sim 5.1 + Isaac Lab 2.3.2.** Follow the exact Windows
+   commands in [`docs/setup_guide.md`](docs/setup_guide.md).
+3. **This package** (into the same environment Isaac Lab uses):
+   ```powershell
+   python -m pip install -r requirements-windows-isaacsim.txt
+   python -m pip install -e ".[rl,hpo,dev]"
+   ```
+4. **Verify:**
+   ```powershell
    python -c "import lagrangian_mbrl; print(lagrangian_mbrl.__version__)"
+   python scripts/smoke_isaac_cuda.py --headless
    pytest -q
    ```
 
@@ -110,8 +116,8 @@ python scripts/train.py experiment=dln_mbrl
 # Train an unstructured MLP-ensemble MBRL baseline:
 python scripts/train.py experiment=dln_mbrl model=mlp
 
-# Train a model-free PPO baseline (via RSL-RL / SKRL):
-python scripts/train.py experiment=ppo_baseline
+# Train the validated model-free PPO baseline with RSL-RL:
+python scripts/train_rl.py --headless --num_envs 256 --max_iterations 1000
 ```
 
 Configs are composed from [`configs/`](configs/) (Hydra-style overrides). Each

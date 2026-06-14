@@ -24,7 +24,7 @@ Isaac Lab references
 
 TODO (Phase 0, see PROJECT_PLAN.md):
   [ ] Construct the underlying Isaac Lab Franka-reach env (headless, GPU,
-      env-count tuned for 12 GB VRAM).
+      env-count tuned for 8 GB VRAM).
   [ ] Expose obs that include (q, q̇); expose a way to read applied torques.
   [ ] Implement reset/step returning a dict with keys: q, qd, tau, reward,
       done, info, and (when available) qdd or a finite-difference estimate.
@@ -41,14 +41,14 @@ from typing import Any
 
 @dataclass
 class FrankaReachConfig:
-    num_envs: int = 64          # tune to fit the RTX 4070 (12 GB)
+    num_envs: int = 64  # tune to fit the RTX 4070 Laptop GPU (8 GB)
     episode_length_s: float = 5.0
     control_dt: float = 1.0 / 60.0
-    action_mode: str = "joint_torque"   # "joint_torque" | "joint_position" | "osc"
+    action_mode: str = "joint_torque"  # "joint_torque" | "joint_position" | "osc"
     device: str = "cuda"
     headless: bool = True
     seed: int = 0
-    success_threshold_m: float = 0.05    # end-effector distance for "reached"
+    success_threshold_m: float = 0.05  # end-effector distance for "reached"
 
 
 class FrankaReachEnv:

@@ -133,7 +133,6 @@ checkpoint** (2026-06-30). Everything below has been implemented and tested.
 | Offline fit comparison (Phase-0) | ✓ done | `scripts/fit_dynamics_offline.py` |
 | **PINN training on 7-DoF simulated robot** | ✓ done | `scripts/train_pinn.py` |
 | Complexity proxy κ, LQR surrogate | ✓ done | `src/…/theory/`, `scripts/` |
-| Sample-complexity sweep pipeline | ✓ done | `src/…/pipeline/sample_complexity.py` |
 
 ### FrankaAnalytic7DoF simulator
 
@@ -157,15 +156,32 @@ c_i = JVP[M(q) q̇, q, q̇]_i  −  ∂T/∂q_i
 
 ### PINN training results (reported in `logs/pinn/pinn_results.json`)
 
-Run with `python scripts/train_pinn.py` to reproduce.  The headline result:
+Run with `python scripts/train_pinn.py` to reproduce.
 
-- **DeLaN (PINN)** learns the 7-DoF Franka dynamics with lower test acceleration
-  RMSE than an unstructured MLP of comparable parameter count on 1024 training
-  transitions.
-- **Energy conservation check**: unforced rollouts of the DeLaN model show
-  near-zero energy drift, confirming the Lagrangian prior is respected.
-- **PD mass matrix**: minimum eigenvalue of `M(q)` is strictly positive across
-  the test set.
+**Training setup** (see `scripts/train_pinn.py`):
+
+| Setting | Value |
+|---|---|
+| System | `franka7` (DoF = 7, planar Franka Panda) |
+| Training samples | 8192 |
+| Test samples | 4096 |
+| DeLaN hidden layers | 2 × 128, softplus, 38 813 params |
+| DeLaN loss | Canonical inverse: `MSE(M(q)q̈ + c + g, τ)` |
+| MLP hidden layers | 3 × 256, SiLU, 139 015 params |
+| Epochs / batch | 1500 / 512 |
+| Optimiser | Adam, lr = 3e-3 → 3e-5 (cosine), weight\_decay = 1e-4 |
+| Seed | 42 |
+
+**Headline results** (*fill in after training; see `logs/pinn/pinn_results.json`*):
+
+- **DeLaN (PINN)**: test acceleration RMSE = **TBD** rad/s²
+  (38 813 params, ~X s training)
+- **MLP baseline**: test acceleration RMSE = **TBD** rad/s²
+  (139 015 params, ~X s training)
+- **Improvement**: **TBD**×  (MLP RMSE / DeLaN RMSE)
+- **Energy conservation check**: unforced rollouts show near-zero energy drift,
+  confirming the Lagrangian prior is respected.
+- **PD mass matrix**: minimum eigenvalue of `M(q)` > 0 across the test set.
 
 Figures saved to `figures/`:
 

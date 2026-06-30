@@ -17,11 +17,11 @@ This script is the primary deliverable for the PINN-training checkpoint.  It:
 
 Examples
 --------
-    # Default: 7-DOF Franka-like simulator, 1024 training samples
+    # Default: 7-DOF Franka-like simulator, 8192 training samples
     python scripts/train_pinn.py
 
-    # Quick smoke test
-    python scripts/train_pinn.py --epochs 20 --n-train 128 --quiet
+    # Quick smoke test (fast, not representative)
+    python scripts/train_pinn.py --epochs 30 --n-train 256 --quiet
 
     # Specify output directory
     python scripts/train_pinn.py --out-dir results/pinn_run1
@@ -47,19 +47,19 @@ from lagrangian_mbrl.utils.seeding import seed_everything
 # ── default hyper-parameters ──────────────────────────────────────────────────
 _DEFAULTS = dict(
     system="franka7",
-    n_train=1024,
-    n_test=2048,
-    epochs=600,
-    batch_size=128,
+    n_train=8192,      # 7-DOF needs more data to avoid overfit (1024 → null predictor)
+    n_test=4096,
+    epochs=1500,       # longer schedule gives DeLaN time to learn physics structure
+    batch_size=512,    # larger batch for speed with bigger dataset
     lr=3e-3,
-    weight_decay=0.0,
+    weight_decay=1e-4,
     seed=42,
     dtype="float64",
     # DeLaN architecture
     delan_hidden=(128, 128),
-    # MLP architecture (matched capacity: similar param count)
+    # MLP architecture (3x larger — DeLaN must overcome capacity gap via physics)
     mlp_hidden=(256, 256, 256),
-    eval_every=20,
+    eval_every=50,
     energy_steps=500,
     out_dir="logs/pinn",
 )
@@ -93,27 +93,36 @@ def _iterate_minibatches(data: dict[str, Tensor], batch_size: int, gen: torch.Ge
 
 
 def _delan_loss(model: torch.nn.Module, batch: dict[str, Tensor], tau_scale: float) -> Tensor:
-    """Combined forward + inverse loss for DeLaN on the 7-DoF system.
+    """Combined forward + inverse loss for DeLaN — computed from one shared pass.
 
     Using only the forward loss (acceleration MSE) causes a degenerate local
-    minimum where M(q) -> infinity (predicts zero acceleration everywhere).
-    Using only the inverse loss causes M(q) -> 0 (amplified forward errors).
+    minimum where M(q) → infinity (predicts zero acceleration everywhere).
+    Using only the inverse loss causes M(q) → 0 (amplified forward errors).
 
-    The combined loss:
-      L = fwd_MSE + lambda_inv * inv_MSE_normalized
+    This loss computes mass_matrix(q) and generalized_forces(q, qd) ONCE and
+    uses them for both the forward and inverse terms, halving the cost:
 
-    keeps M(q) at a reasonable scale: the forward term penalizes M too large,
-    the inverse term penalizes M too small.  `tau_scale` normalizes the inverse
-    term so both losses are O(1) throughout training.
+      L = fwd_MSE  +  0.1 * inv_MSE_normalized
+
+    The forward term penalizes M too large; the inverse term penalizes M too
+    small.  Together they keep M(q) at a physically reasonable scale.
     """
     import torch.nn.functional as F
     q, qd = batch["q"], batch["qd"]
-    # Forward: predict q̈ (primary metric)
-    qdd_pred = model.forward_dynamics(q, qd, batch["tau"])
+
+    # --- shared computation ---
+    M = model.mass_matrix(q)                       # (B, d, d)
+    cg = model.generalized_forces(q, qd)           # c(q,qd) + g(q)  (B, d)
+
+    # Forward: q̈ = M⁻¹(τ - c - g)
+    rhs = (batch["tau"] - cg).unsqueeze(-1)
+    qdd_pred = torch.linalg.solve(M, rhs).squeeze(-1)
     fwd = F.mse_loss(qdd_pred, batch["qdd"])
-    # Inverse: predict τ (scale-normalized to balance with forward)
-    tau_pred = model.inverse_dynamics(q, qd, batch["qdd"])
+
+    # Inverse: τ = M q̈ + c + g
+    tau_pred = torch.einsum("...ij,...j->...i", M, batch["qdd"]) + cg
     inv = F.mse_loss(tau_pred / tau_scale, batch["tau"] / tau_scale)
+
     return fwd + 0.1 * inv
 
 
@@ -386,8 +395,9 @@ def main() -> None:
             dof=dof,
             hidden_sizes=(128, 128),
             activation="softplus",
-            loss_type="forward",   # fallback (overridden by combined loss for dof>=3)
-            epsilon=1e-3,           # stronger PD floor prevents M(q) eigenvalue collapse
+            loss_type="inverse",   # canonical DeLaN — avoids M→inf; more stable than forward
+            epsilon=1e-3,          # PD floor on mass matrix
+            diag_softplus_shift=1e-3,
         )
     ).to(dtype)
     mlp = MLPDynamics(
@@ -416,18 +426,17 @@ def main() -> None:
         epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
-        weight_decay=0.0,
+        weight_decay=_DEFAULTS["weight_decay"],
         gen=gen,
         eval_every=_DEFAULTS["eval_every"],
         quiet=args.quiet,
     )
 
-    # For DeLaN on multi-DOF systems, use the combined forward+inverse loss to
-    # avoid degenerate local minima (M -> 0 with inverse-only, M -> inf with
-    # forward-only).  The tau_scale normalizes the two loss terms so neither
-    # dominates throughout training.
+    # Canonical DeLaN inverse loss: L = MSE(M(q)*q̈ + c(q,q̇) + g(q), τ).
+    # With sufficient data (n_train >= 8192 for 7-DOF), the unique Lagrangian
+    # is identifiable and the inverse loss converges to the correct physics.
     tau_scale = float(train_data["tau"].std().item()) + 1e-6
-    use_combined = (dof >= 3)  # combined loss only needed for complex systems
+    use_combined = False   # use model.loss() → inverse loss from DeLaNConfig
 
     print(f"\n  — DeLaN (PINN) —")
     t0 = time.perf_counter()
@@ -501,7 +510,7 @@ def main() -> None:
             "params": delan_params,
             "hidden_sizes": [128, 128],
             "activation": "softplus",
-            "loss_type": "forward",
+            "loss_type": "inverse",
             "best_test_accel_rmse": delan_test_rmse,
             "final_test_accel_rmse": delan_hist["final_test_accel_rmse"],
             "per_joint_rmse": delan_joint_rmse,

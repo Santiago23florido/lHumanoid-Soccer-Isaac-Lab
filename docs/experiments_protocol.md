@@ -27,11 +27,11 @@ This is the primary result at the current checkpoint.
 ### Run
 
 ```powershell
-# Default: 7-DoF Franka simulator, 1024 training samples, 600 epochs
+# Default: 7-DoF Franka simulator, 8192 training samples, 1500 epochs (~15 min)
 python scripts/train_pinn.py
 
-# Quick smoke test
-python scripts/train_pinn.py --epochs 20 --n-train 128 --quiet
+# Quick smoke test (not representative — too few samples)
+python scripts/train_pinn.py --epochs 30 --n-train 256 --quiet
 
 # Custom output directory
 python scripts/train_pinn.py --out-dir logs/pinn_run1
@@ -42,12 +42,21 @@ python scripts/train_pinn.py --out-dir logs/pinn_run1
 1. Generates `(q, q̇, τ, q̈)` transitions from `FrankaAnalytic7DoF` — a
    planar 7-link serial arm with Franka Panda physical parameters and exact
    analytic Lagrangian dynamics.
-2. Trains the **Deep Lagrangian Network (DeLaN / PINN)** with inverse-dynamics
-   loss (torque MSE) on the training split.
-3. Trains an **unstructured MLP** baseline of comparable capacity on the same
-   split.
-4. Evaluates both on a held-out test set; reports one-step acceleration RMSE
-   (rad/s²) per joint and overall.
+2. Trains the **Deep Lagrangian Network (DeLaN / PINN)** with the canonical
+   inverse-dynamics loss (torque MSE: `MSE(M(q)q̈ + c + g, τ)`) on 8192
+   training samples — enough for the 7-DOF Lagrangian to be uniquely
+   identifiable from data.
+3. Trains an **unstructured MLP** baseline (3× larger parameter count) on the
+   same split.
+4. Evaluates both on a 4096-sample held-out test set; reports one-step
+   acceleration RMSE (rad/s²) per joint and overall.
+
+**Why 8192 samples**: with only 1024 samples both models overfit — the MLP
+memorizes training data perfectly (train loss → 0) while DeLaN overfits the
+mass-matrix function M(q); test RMSE converges to the null-predictor baseline
+(√(25/3) ≈ 2.887 rad/s² for `q̈ ~ U[−5, 5]`). With 8192 samples the inverse
+loss has a unique global minimum at the true Lagrangian, and the physics prior
+helps DeLaN generalize with fewer effective degrees of freedom than the MLP.
 
 ### Outputs
 

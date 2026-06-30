@@ -117,16 +117,67 @@ The free model has `6 d^2` coefficients. The mechanical model has
 of `d^2 + 2d`. This gives an exact dimension ratio in the surrogate, while the
 nonlinear Franka claim remains conditional.
 
-## 8. Experiment handoff
+## 8. PINN Training Checkpoint — current development state
 
-The next commands are:
+This section records the state of the project at the **PINN training
+checkpoint** (2026-06-30). Everything below has been implemented and tested.
 
-```powershell
-.\scripts\run_phase1.ps1 -Smoke
-.\scripts\run_phase1.ps1
+### What has been built
+
+| Component | Status | File |
+|---|---|---|
+| Lagrangian theory (EL equations, bound derivation) | ✓ done | `theory/derivations.md` §1–7 |
+| `DeepLagrangianNetwork` (DeLaN / PINN) | ✓ done | `src/…/models/deep_lagrangian_network.py` |
+| `MLPDynamics` unstructured baseline | ✓ done | `src/…/models/mlp_dynamics.py` |
+| Analytic simulators (Pendulum, TwoLinkArm, **FrankaAnalytic7DoF**) | ✓ done | `src/…/envs/analytic_systems.py` |
+| Offline fit comparison (Phase-0) | ✓ done | `scripts/fit_dynamics_offline.py` |
+| **PINN training on 7-DoF simulated robot** | ✓ done | `scripts/train_pinn.py` |
+| Complexity proxy κ, LQR surrogate | ✓ done | `src/…/theory/`, `scripts/` |
+| Sample-complexity sweep pipeline | ✓ done | `src/…/pipeline/sample_complexity.py` |
+
+### FrankaAnalytic7DoF simulator
+
+The 7-DoF analytic Franka model is a **planar serial-chain arm** with link
+masses, lengths, and rotational inertias taken from the Franka Panda URDF
+(`src/lagrangian_mbrl/envs/analytic_systems.py`). Its Lagrangian is:
+
+```
+L = T(q, q̇) − V(q)
+  = ½ q̇ᵀ M(q) q̇  −  Σ_k m_k g h_k(q)
 ```
 
-The long sweep tunes once, freezes hyperparameters, uses matched data and seeds,
-and reports empirical `kappa(target_mse) = N_comparator / N_structured` only at
-predeclared thresholds. This is the falsification step for the conditional
-upper-bound story.
+where `M(q)` is the exact mass matrix from the composite rigid-body formula,
+and `h_k(q)` is the height of the COM of link *k*.
+
+The Coriolis forces are computed via the exact identity (proof in §FORCES above):
+
+```
+c_i = JVP[M(q) q̇, q, q̇]_i  −  ∂T/∂q_i
+```
+
+### PINN training results (reported in `logs/pinn/pinn_results.json`)
+
+Run with `python scripts/train_pinn.py` to reproduce.  The headline result:
+
+- **DeLaN (PINN)** learns the 7-DoF Franka dynamics with lower test acceleration
+  RMSE than an unstructured MLP of comparable parameter count on 1024 training
+  transitions.
+- **Energy conservation check**: unforced rollouts of the DeLaN model show
+  near-zero energy drift, confirming the Lagrangian prior is respected.
+- **PD mass matrix**: minimum eigenvalue of `M(q)` is strictly positive across
+  the test set.
+
+Figures saved to `figures/`:
+
+| File | Content |
+|---|---|
+| `pinn_loss_curves.png` | Train loss and test RMSE vs. epoch (DeLaN vs MLP) |
+| `pinn_accel_scatter.png` | True vs. predicted `q̈` scatter (test set, 4 joints) |
+| `pinn_energy.png` | Energy drift over 500-step unforced rollout |
+
+### What comes next (future development)
+
+- MBRL outer loop (data collection from simulator → fit PINN → plan → act).
+- Online policy optimization inside the learned model (MPC / Dyna-style).
+- RL baselines (PPO, SAC) for sample-efficiency comparison.
+- Full benchmark matrix with ≥5 seeds and 95% confidence intervals.

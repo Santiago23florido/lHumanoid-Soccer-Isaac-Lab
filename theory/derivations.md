@@ -158,15 +158,15 @@ c_i = JVP[M(q) q̇, q, q̇]_i  −  ∂T/∂q_i
 
 Run with `python scripts/fit_dynamics_offline.py` (completes in ~30 s, seed=0):
 
-| Model | Params | Val accel MSE (rad/s²)² |
+| Model | Params | Val accel RMSE (rad/s²) |
 |---|---|---|
-| DeLaN (PINN) | 34,308 | **0.93** |
-| MLP (unstructured) | 133,890 | 4.51 |
-| Improvement | — | **4.83×** |
+| DeLaN (PINN) | 34,308 | **0.97** |
+| MLP (unstructured) | 133,890 | 2.12 |
+| Improvement | — | **2.19×** |
 
-DeLaN achieves 4.83× lower validation error with 3.9× fewer parameters on 256
-training samples from the 2-DoF arm. This establishes the physics-prior
-advantage at small data regimes.
+DeLaN achieves 2.19× lower validation RMSE with 3.9× fewer parameters on 256
+training samples from the 2-DoF arm (MSE ratio 4.83×). This confirms the
+physics-prior advantage at small data regimes.
 
 ### PINN training results — 7-DoF Franka (reported in `logs/pinn/pinn_results.json`)
 

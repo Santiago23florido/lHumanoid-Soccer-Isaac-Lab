@@ -92,13 +92,13 @@ python scripts/fit_dynamics_offline.py --system pendulum --n-train 64
 
 **Verified result** (seed=0):
 
-| Model | Params | Val accel MSE (rad/s²)² |
+| Model | Params | Val accel RMSE (rad/s²) |
 |---|---|---|
-| DeLaN (PINN) | 34,308 | **0.93** |
-| MLP (unstructured) | 133,890 | 4.51 |
-| **Improvement** | — | **4.83×** |
+| DeLaN (PINN) | 34,308 | **0.97** |
+| MLP (unstructured) | 133,890 | 2.12 |
+| **Improvement** | — | **2.19×** |
 
-DeLaN achieves 4.83× lower validation acceleration MSE with 3.9× fewer
+DeLaN achieves 2.19× lower validation RMSE (4.83× lower MSE) with 3.9× fewer
 parameters, using only 256 training transitions from the 2-DoF arm.
 
 ---

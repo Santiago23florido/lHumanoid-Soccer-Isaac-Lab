@@ -36,9 +36,6 @@ Franka simulator and validated against an unstructured MLP baseline.
   model class needs `O(N/κ)` transitions for the same model error, with `κ ≥ 1`
   the capacity reduction from the physics constraints.
 
-- **Sample-complexity sweep** — empirical `κ(N)` curve comparing DeLaN to MLP
-  across data regimes `N = 64…2048` (`scripts/run_sample_complexity.py`).
-
 ### Quick start
 
 ```powershell
@@ -49,7 +46,8 @@ conda activate lagrangian-mbrl
 # 2. Install the package
 pip install -e ".[dev]"
 
-# 3. Train the PINN on the 7-DoF Franka simulator
+# 3. Train the PINN on the 7-DoF Franka simulator (~30-40 min on CPU)
+#    Results saved to logs/pinn/pinn_results.json and figures/
 python scripts/train_pinn.py
 
 # 4. Run unit tests

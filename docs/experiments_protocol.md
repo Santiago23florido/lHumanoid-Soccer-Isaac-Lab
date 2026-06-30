@@ -17,7 +17,6 @@ The following experiments are implemented and reproducible:
 | **PINN training on 7-DoF Franka simulator** | `scripts/train_pinn.py` | `logs/pinn/`, `figures/` |
 | Theory constants (κ proxy, Cholesky ratio) | `scripts/generate_theory_constants.py` | `theory/` |
 | LQR mechanical surrogate | `scripts/run_lqr_surrogate.py` | `theory/` |
-| Sample-complexity sweep (DeLaN vs MLP, data-regime) | `scripts/run_sample_complexity.py` | `logs/sample_complexity/` |
 
 ---
 
@@ -93,22 +92,7 @@ python scripts/run_lqr_surrogate.py
 
 ---
 
-## 4. Sample-complexity sweep
-
-```powershell
-# Smoke test (fast)
-python scripts/run_sample_complexity.py --smoke
-
-# Full sweep (DeLaN vs MLP at N = 64, 128, 256, 512, 1024, 2048)
-python scripts/run_sample_complexity.py
-```
-
-Output: `logs/sample_complexity/<timestamp>/sample_complexity.png`
-(log-log MSE vs. N; the empirical κ curve supporting the theory bound).
-
----
-
-## 5. Reproducibility requirements
+## 4. Reproducibility requirements
 
 - Fix and record the random seed (`--seed`); default is 42 for the PINN script.
 - Results in `logs/pinn/pinn_results.json` include the seed, epoch count, and

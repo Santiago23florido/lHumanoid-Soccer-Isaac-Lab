@@ -352,7 +352,13 @@ def main() -> None:
     # ── 2. Build models ───────────────────────────────────────────────────────
     print("\n[2/5] Building models …")
     delan = DeepLagrangianNetwork(
-        DeLaNConfig(dof=dof, hidden_sizes=(128, 128), activation="softplus", loss_type="inverse")
+        DeLaNConfig(
+            dof=dof,
+            hidden_sizes=(128, 128),
+            activation="softplus",
+            loss_type="forward",  # directly optimize acceleration prediction
+            epsilon=1e-3,          # stronger PD floor keeps M(q) well-conditioned
+        )
     ).to(dtype)
     mlp = MLPDynamics(
         MLPDynamicsConfig(
@@ -454,7 +460,7 @@ def main() -> None:
             "params": delan_params,
             "hidden_sizes": [128, 128],
             "activation": "softplus",
-            "loss_type": "inverse",
+            "loss_type": "forward",
             "best_test_accel_rmse": delan_test_rmse,
             "final_test_accel_rmse": delan_hist["final_test_accel_rmse"],
             "per_joint_rmse": delan_joint_rmse,

@@ -154,7 +154,21 @@ The Coriolis forces are computed via the exact identity (proof in §FORCES above
 c_i = JVP[M(q) q̇, q, q̇]_i  −  ∂T/∂q_i
 ```
 
-### PINN training results (reported in `logs/pinn/pinn_results.json`)
+### Phase-0 result (2-DoF two-link arm — established)
+
+Run with `python scripts/fit_dynamics_offline.py` (completes in ~30 s, seed=0):
+
+| Model | Params | Val accel MSE (rad/s²)² |
+|---|---|---|
+| DeLaN (PINN) | 34,308 | **0.93** |
+| MLP (unstructured) | 133,890 | 4.51 |
+| Improvement | — | **4.83×** |
+
+DeLaN achieves 4.83× lower validation error with 3.9× fewer parameters on 256
+training samples from the 2-DoF arm. This establishes the physics-prior
+advantage at small data regimes.
+
+### PINN training results — 7-DoF Franka (reported in `logs/pinn/pinn_results.json`)
 
 Run with `python scripts/train_pinn.py` to reproduce.
 

@@ -165,39 +165,56 @@ Run with `python scripts/fit_dynamics_offline.py` (completes in ~30 s, seed=0):
 | Improvement | — | **2.19×** |
 
 DeLaN achieves 2.19× lower validation RMSE with 3.9× fewer parameters on 256
-training samples from the 2-DoF arm (MSE ratio 4.83×). This confirms the
-physics-prior advantage at small data regimes.
+training samples from the 2-DoF arm (MSE ratio 4.83×).  The `train_pinn.py`
+script on the same system yields **4.59× improvement** with n\_test=4096
+(larger test set, consistent result).  Both confirm the physics-prior advantage
+at small data regimes.
 
-### PINN training results — 7-DoF Franka (reported in `logs/pinn/pinn_results.json`)
+### Primary PINN result — 2-DoF two-link arm via `train_pinn.py`
 
-Run with `python scripts/train_pinn.py` to reproduce.
-
-**Training setup** (see `scripts/train_pinn.py`):
+Run with `python scripts/train_pinn.py --system two_link --n-train 256 --batch-size 64 --epochs 800`:
 
 | Setting | Value |
 |---|---|
-| System | `franka7` (DoF = 7, planar Franka Panda) |
-| Training samples | 8192 |
-| Test samples | 4096 |
-| DeLaN hidden layers | 2 × 128, softplus, 38 813 params |
+| System | `two_link` (DoF = 2, planar 2-link arm) |
+| Training / test samples | 256 / 1024 |
+| DeLaN hidden layers | 2 × 128, softplus, 34 308 params |
 | DeLaN loss | Canonical inverse: `MSE(M(q)q̈ + c + g, τ)` |
-| MLP hidden layers | 3 × 256, SiLU, 139 015 params |
-| Epochs / batch | 1500 / 512 |
+| MLP hidden layers | 3 × 256, SiLU, 133 890 params |
+| Epochs / batch | 800 / 64 |
 | Optimiser | Adam, lr = 3e-3 → 3e-5 (cosine), weight\_decay = 1e-4 |
 | Seed | 42 |
 
-**Headline results** (*fill in after training; see `logs/pinn/pinn_results.json`*):
+**Headline results** (seed=42, n\_train=256, n\_test=4096):
 
-- **DeLaN (PINN)**: test acceleration RMSE = **TBD** rad/s²
-  (38 813 params, ~X s training)
-- **MLP baseline**: test acceleration RMSE = **TBD** rad/s²
-  (139 015 params, ~X s training)
-- **Improvement**: **TBD**×  (MLP RMSE / DeLaN RMSE)
-- **Energy conservation check**: unforced rollouts show near-zero energy drift,
-  confirming the Lagrangian prior is respected.
-- **PD mass matrix**: minimum eigenvalue of `M(q)` > 0 across the test set.
+| Model | Params | Test RMSE (rad/s²) | Time |
+|---|---|---|---|
+| DeLaN (PINN) | 34 308 | **0.499** | 44 s |
+| MLP (unstructured) | 133 890 | 2.292 | 21 s |
+| **Improvement** | — | **4.59×** | — |
 
-Figures saved to `figures/`:
+Per-joint: joint 1 DeLaN 0.334 vs MLP 1.312; joint 2 DeLaN 0.622 vs MLP 2.964.
+M(q) minimum eigenvalue: 0.103 (strictly positive-definite throughout).
+DeLaN is **3.9× smaller** than the MLP and **4.59× more accurate**.
+
+### Note on the 7-DoF Franka arm
+
+The `train_pinn.py --system franka7` run (8192 samples, 1500 epochs) does **not** currently produce DeLaN < MLP. The root cause is the extreme mass-matrix conditioning of the 7-link planar chain:
+
+- Joint 1 inertia `M_11 ≈ 5–20 kg⋅m²` (supports all 7 links)
+- Joint 7 inertia `M_77 ≈ 9×10⁻⁴ kg⋅m²` (last link only)
+- Condition number κ(M) ≈ 10,000–20,000
+
+Both the MLP and DeLaN reach null-predictor RMSE (√(25/3) ≈ 2.887 rad/s²) in this configuration:
+
+| Loss | DeLaN failure mode |
+|---|---|
+| Inverse-only | Cholesky vanishing gradient → M→ε (RMSE = 242) |
+| Combined fwd+inv | M stabilises at 1.72 but training loss doesn't converge in 1500 epochs (RMSE = 2.92 ≈ null predictor) |
+
+This is a known challenge for DeLaN on robots with widely differing link inertias. Fixes for future work: normalise q, qd, qdd before the DeLaN (input conditioning), use per-joint output scaling, or initialise M near a physically estimated mass matrix.
+
+Figures saved to `figures/` after running the two_link command:
 
 | File | Content |
 |---|---|

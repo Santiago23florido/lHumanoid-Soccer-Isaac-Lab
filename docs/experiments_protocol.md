@@ -20,43 +20,48 @@ The following experiments are implemented and reproducible:
 
 ---
 
-## 1. PINN training on the simulated Franka arm
+## 1. PINN training — primary result on 2-DoF two-link arm
 
-This is the primary result at the current checkpoint.
+This is the primary result at the current checkpoint.  The 7-DoF Franka arm
+is too ill-conditioned for the current DeLaN to converge with standard random
+data (see §1.1 below).
 
 ### Run
 
 ```powershell
-# Default: 7-DoF Franka simulator, 8192 training samples, 1500 epochs (~15 min)
-python scripts/train_pinn.py
-
-# Quick smoke test (not representative — too few samples)
-python scripts/train_pinn.py --epochs 30 --n-train 256 --quiet
+# 2-DoF two-link arm — the verified working configuration (< 2 min on CPU)
+python scripts/train_pinn.py --system two_link --n-train 256 --batch-size 64 --epochs 800
 
 # Custom output directory
-python scripts/train_pinn.py --out-dir logs/pinn_run1
+python scripts/train_pinn.py --system two_link --n-train 256 --batch-size 64 --epochs 800 --out-dir logs/pinn_run1
 ```
 
 ### What it does
 
-1. Generates `(q, q̇, τ, q̈)` transitions from `FrankaAnalytic7DoF` — a
-   planar 7-link serial arm with Franka Panda physical parameters and exact
-   analytic Lagrangian dynamics.
+1. Generates `(q, q̇, τ, q̈)` transitions from a 2-DoF planar arm with
+   exact analytic Lagrangian dynamics.
 2. Trains the **Deep Lagrangian Network (DeLaN / PINN)** with the canonical
-   inverse-dynamics loss (torque MSE: `MSE(M(q)q̈ + c + g, τ)`) on 8192
-   training samples — enough for the 7-DOF Lagrangian to be uniquely
-   identifiable from data.
-3. Trains an **unstructured MLP** baseline (3× larger parameter count) on the
-   same split.
-4. Evaluates both on a 4096-sample held-out test set; reports one-step
+   inverse-dynamics loss `MSE(M(q)q̈ + c + g, τ)`.
+3. Trains an **unstructured MLP** baseline (3.9× larger parameter count) on
+   the same split.
+4. Evaluates both on a 1024-sample held-out test set; reports one-step
    acceleration RMSE (rad/s²) per joint and overall.
 
-**Why 8192 samples**: with only 1024 samples both models overfit — the MLP
-memorizes training data perfectly (train loss → 0) while DeLaN overfits the
-mass-matrix function M(q); test RMSE converges to the null-predictor baseline
-(√(25/3) ≈ 2.887 rad/s² for `q̈ ~ U[−5, 5]`). With 8192 samples the inverse
-loss has a unique global minimum at the true Lagrangian, and the physics prior
-helps DeLaN generalize with fewer effective degrees of freedom than the MLP.
+### §1.1 — Why not franka7?
+
+The Franka7 planar chain has a mass matrix with condition number κ(M) ≈
+10,000–20,000 (joint-1 inertia ≈ 5–20 kg⋅m², joint-7 ≈ 9×10⁻⁴ kg⋅m²).
+Three DeLaN loss configurations all fail:
+
+| Loss | Samples | DeLaN failure |
+|---|---|---|
+| Forward-only | any | M→∞ (null predictor, RMSE = 2.89) |
+| Inverse-only | 1024 | M→ε = 1e-3 (Cholesky vanishing gradient, RMSE = 242) |
+| Combined fwd+inv | 8192 | Training loss = 4.6 after 1500 epochs; RMSE = 2.92 ≈ null |
+
+Both the MLP (best RMSE = 2.875, from epoch-0 random init) and DeLaN reach
+the null-predictor baseline.  Future fixes: per-joint output scaling, M
+initialization from data statistics, or longer training on more data.
 
 ### Outputs
 
@@ -100,6 +105,9 @@ python scripts/fit_dynamics_offline.py --system pendulum --n-train 64
 
 DeLaN achieves 2.19× lower validation RMSE (4.83× lower MSE) with 3.9× fewer
 parameters, using only 256 training transitions from the 2-DoF arm.
+
+The `train_pinn.py` script on the same system (seed=42, n\_test=4096) gives
+**DeLaN 0.499, MLP 2.292, improvement 4.59×** — consistent result.
 
 ---
 

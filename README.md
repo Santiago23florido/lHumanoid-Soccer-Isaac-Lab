@@ -11,9 +11,22 @@ physical prior embedded directly in the network architecture.
 
 ## Current state — PINN training checkpoint (2026-06-30)
 
-The project is at the **PINN-training checkpoint**: the structured
-Deep Lagrangian dynamics model has been trained on a 7-DoF analytic
-Franka simulator and validated against an unstructured MLP baseline.
+The project is at the **PINN-training checkpoint**: the Deep Lagrangian
+dynamics model has been trained and beats the unstructured MLP baseline
+on a 2-DoF arm; see §Note below for the 7-DoF Franka status.
+
+**Key result (2-DoF two-link arm, 256 training samples, seed=42):**
+
+| Model | Params | Test RMSE (rad/s²) |
+|---|---|---|
+| DeLaN (PINN) | 34,308 | **0.499** |
+| MLP (unstructured) | 133,890 | 2.292 |
+| **Improvement** | 3.9× smaller | **4.59×** lower RMSE |
+
+**§Note — 7-DoF Franka:** The Franka7 planar chain has mass-matrix condition
+number κ ≈ 10,000 (joint-1 ≈ 10 kg⋅m², joint-7 ≈ 0.001 kg⋅m²) and does
+not yet converge with the current DeLaN settings; future work needs per-joint
+conditioning or more training data/epochs.
 
 ### What has been implemented
 
@@ -46,9 +59,9 @@ conda activate lagrangian-mbrl
 # 2. Install the package
 pip install -e ".[dev]"
 
-# 3. Train the PINN on the 7-DoF Franka simulator (~30-40 min on CPU)
+# 3. Train the PINN on the 2-DoF arm (< 2 min on CPU)
 #    Results saved to logs/pinn/pinn_results.json and figures/
-python scripts/train_pinn.py
+python scripts/train_pinn.py --system two_link --n-train 256 --batch-size 64 --epochs 800
 
 # 4. Run unit tests
 pytest -q
@@ -119,7 +132,7 @@ lagrangian-mbrl-franka/
 ## Running the PINN
 
 ```powershell
-# Default: franka7 simulator, 1024 training samples, 600 epochs
+# Default: franka7 simulator, 8192 training samples, 1500 epochs (~25 min on CPU)
 python scripts/train_pinn.py
 
 # Outputs:
@@ -129,7 +142,7 @@ python scripts/train_pinn.py
 #   figures/pinn_energy.png            — energy conservation check
 
 # Fast smoke test
-python scripts/train_pinn.py --epochs 20 --n-train 128 --quiet
+python scripts/train_pinn.py --epochs 30 --n-train 256 --quiet
 
 # Simpler 2-DoF system
 python scripts/train_pinn.py --system two_link --n-train 256

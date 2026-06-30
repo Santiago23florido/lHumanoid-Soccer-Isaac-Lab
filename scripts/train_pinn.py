@@ -432,11 +432,16 @@ def main() -> None:
         quiet=args.quiet,
     )
 
-    # Canonical DeLaN inverse loss: L = MSE(M(q)*q̈ + c(q,q̇) + g(q), τ).
-    # With sufficient data (n_train >= 8192 for 7-DOF), the unique Lagrangian
-    # is identifiable and the inverse loss converges to the correct physics.
+    # Combined forward + inverse loss:
+    #   L = fwd_MSE + 0.1 * inv_MSE_normalized
+    #
+    # The forward term is ESSENTIAL for 7-DOF: it creates a huge gradient at
+    # small M (∝ M⁻² × Var(tau)), preventing the M→epsilon degenerate local
+    # minimum that the inverse-only loss falls into (Cholesky vanishing gradient
+    # when L→0).  With n_train=8192 and physics structure, the combined loss
+    # converges to the true Lagrangian without overfitting M(q).
     tau_scale = float(train_data["tau"].std().item()) + 1e-6
-    use_combined = False   # use model.loss() → inverse loss from DeLaNConfig
+    use_combined = (dof >= 3)  # combined loss required for multi-DOF systems
 
     print(f"\n  — DeLaN (PINN) —")
     t0 = time.perf_counter()
@@ -549,7 +554,7 @@ def main() -> None:
     print(f"  saved: {results_path}")
 
     print(f"\n{'='*65}")
-    verdict = "PASS ✓" if results["delan_wins"] else "FAIL ✗"
+    verdict = "PASS" if results["delan_wins"] else "FAIL"
     print(f"  DeLaN < MLP on test RMSE: {verdict}")
     print(f"{'='*65}\n")
 

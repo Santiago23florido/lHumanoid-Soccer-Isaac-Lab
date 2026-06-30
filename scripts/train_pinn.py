@@ -92,6 +92,31 @@ def _iterate_minibatches(data: dict[str, Tensor], batch_size: int, gen: torch.Ge
         yield {k: v[idx] for k, v in data.items()}
 
 
+def _delan_loss(model: torch.nn.Module, batch: dict[str, Tensor], tau_scale: float) -> Tensor:
+    """Combined forward + inverse loss for DeLaN on the 7-DoF system.
+
+    Using only the forward loss (acceleration MSE) causes a degenerate local
+    minimum where M(q) -> infinity (predicts zero acceleration everywhere).
+    Using only the inverse loss causes M(q) -> 0 (amplified forward errors).
+
+    The combined loss:
+      L = fwd_MSE + lambda_inv * inv_MSE_normalized
+
+    keeps M(q) at a reasonable scale: the forward term penalizes M too large,
+    the inverse term penalizes M too small.  `tau_scale` normalizes the inverse
+    term so both losses are O(1) throughout training.
+    """
+    import torch.nn.functional as F
+    q, qd = batch["q"], batch["qd"]
+    # Forward: predict q̈ (primary metric)
+    qdd_pred = model.forward_dynamics(q, qd, batch["tau"])
+    fwd = F.mse_loss(qdd_pred, batch["qdd"])
+    # Inverse: predict τ (scale-normalized to balance with forward)
+    tau_pred = model.inverse_dynamics(q, qd, batch["qdd"])
+    inv = F.mse_loss(tau_pred / tau_scale, batch["tau"] / tau_scale)
+    return fwd + 0.1 * inv
+
+
 def _fit_model(
     model: torch.nn.Module,
     train: dict[str, Tensor],
@@ -104,6 +129,8 @@ def _fit_model(
     gen: torch.Generator,
     eval_every: int,
     quiet: bool,
+    use_delan_combined: bool = False,
+    tau_scale: float = 1.0,
 ) -> dict[str, Any]:
     # Input / output normalization
     if hasattr(model, "fit_normalization"):
@@ -113,7 +140,7 @@ def _fit_model(
         model.fit_input_normalization(train["q"])
 
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs, eta_min=lr * 0.05)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs, eta_min=lr * 0.01)
 
     history: dict[str, list] = {"epoch": [], "train_loss": [], "test_accel_rmse": []}
     best_rmse = float("inf")
@@ -125,9 +152,12 @@ def _fit_model(
         n_batches = 0
         for batch in _iterate_minibatches(train, batch_size, gen):
             opt.zero_grad()
-            loss = model.loss(batch)
+            if use_delan_combined:
+                loss = _delan_loss(model, batch, tau_scale)
+            else:
+                loss = model.loss(batch)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 10.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
             epoch_loss += float(loss.item())
             n_batches += 1
@@ -356,8 +386,8 @@ def main() -> None:
             dof=dof,
             hidden_sizes=(128, 128),
             activation="softplus",
-            loss_type="forward",  # directly optimize acceleration prediction
-            epsilon=1e-3,          # stronger PD floor keeps M(q) well-conditioned
+            loss_type="forward",   # fallback (overridden by combined loss for dof>=3)
+            epsilon=1e-3,           # stronger PD floor prevents M(q) eigenvalue collapse
         )
     ).to(dtype)
     mlp = MLPDynamics(
@@ -392,9 +422,20 @@ def main() -> None:
         quiet=args.quiet,
     )
 
+    # For DeLaN on multi-DOF systems, use the combined forward+inverse loss to
+    # avoid degenerate local minima (M -> 0 with inverse-only, M -> inf with
+    # forward-only).  The tau_scale normalizes the two loss terms so neither
+    # dominates throughout training.
+    tau_scale = float(train_data["tau"].std().item()) + 1e-6
+    use_combined = (dof >= 3)  # combined loss only needed for complex systems
+
     print(f"\n  — DeLaN (PINN) —")
     t0 = time.perf_counter()
-    delan_hist = _fit_model(delan, train_data, test_data, **common_kw)
+    delan_hist = _fit_model(
+        delan, train_data, test_data,
+        use_delan_combined=use_combined, tau_scale=tau_scale,
+        **common_kw,
+    )
     delan_time = time.perf_counter() - t0
 
     print(f"\n  — MLP (unstructured) —")

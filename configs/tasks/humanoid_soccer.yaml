@@ -1,0 +1,31 @@
+task_id: HumanoidSoccer-Direct-v0
+episode_length_s: 20.0
+
+field:
+  length_m: 12.0
+  width_m: 8.0
+  goal_width_m: 2.0
+
+ball:
+  radius_m: 0.11
+  mass_kg: 0.43
+
+curriculum:
+  phase_0: stand_and_balance
+  phase_1: walk_to_ball
+  phase_2: dribble
+  phase_3: shoot_on_goal
+  phase_4: defend_and_multi_agent
+
+reward_terms:
+  alive: 1.0
+  upright: 1.0
+  velocity_tracking: 0.5
+  ball_approach: 0.5
+  ball_control: 1.0
+  goal_progress: 2.0
+
+termination_terms:
+  fall_height_m: 0.45
+  out_of_bounds: true
+  max_episode_time: true

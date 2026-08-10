@@ -57,7 +57,17 @@ python -m pip install -e source\humanoid_soccer_lab
 python scripts\list_tasks.py
 ```
 
-4. Train or play after the environment is implemented:
+4. View the first humanoid-only scene:
+
+```powershell
+# From an Isaac Lab source checkout:
+.\isaaclab.bat -p C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_humanoid.py
+
+# Or from a Python environment that already imports isaaclab:
+python scripts\view_humanoid.py
+```
+
+5. Train or play after the environment is implemented:
 
 ```powershell
 python scripts\train.py --task HumanoidSoccer-Direct-v0

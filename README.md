@@ -57,7 +57,23 @@ python -m pip install -e source\humanoid_soccer_lab
 python scripts\list_tasks.py
 ```
 
-4. Train or play after the environment is implemented:
+4. View the first humanoid-only scene:
+
+```powershell
+# From an Isaac Lab source checkout:
+.\isaaclab.bat -p C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_humanoid.py
+
+# On this Windows machine with the env_isaaclab Conda environment:
+& "C:\Users\USER\miniconda3\shell\condabin\conda-hook.ps1"
+conda activate env_isaaclab
+cd C:\IsaacLab
+.\isaaclab.bat -p "C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_humanoid.py" --device cuda:0 --rendering_mode performance --reset-interval 500
+
+# Or from a Python environment that already imports isaaclab:
+python scripts\view_humanoid.py
+```
+
+5. Train or play after the environment is implemented:
 
 ```powershell
 python scripts\train.py --task HumanoidSoccer-Direct-v0

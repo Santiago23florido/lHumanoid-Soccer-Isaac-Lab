@@ -34,10 +34,14 @@ parser.add_argument(
     default=True,
     help="Continuously command the default joint pose with implicit actuators.",
 )
+parser.add_argument(
+    "--max-steps",
+    type=int,
+    default=0,
+    help="Stop after N simulation steps. Use 0 to run until the app closes.",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
-if not args_cli.experience:
-    args_cli.experience = "isaacsim.exp.base.python.kit"
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -100,6 +104,7 @@ def run_simulator(
     origins: torch.Tensor,
     reset_interval: int,
     hold_joints: bool,
+    max_steps: int,
 ) -> None:
     """Run the viewer simulation loop."""
     robot = entities["humanoid"]
@@ -119,6 +124,8 @@ def run_simulator(
         sim.step()
         robot.update(sim_dt)
         count += 1
+        if max_steps > 0 and count >= max_steps:
+            break
 
 
 def main() -> None:
@@ -138,9 +145,13 @@ def main() -> None:
         scene_origins,
         reset_interval=args_cli.reset_interval,
         hold_joints=args_cli.hold_joints,
+        max_steps=args_cli.max_steps,
     )
 
 
 if __name__ == "__main__":
-    main()
-    simulation_app.close()
+    try:
+        main()
+    finally:
+        fast_headless_smoke = args_cli.headless and args_cli.max_steps > 0
+        simulation_app.close(wait_for_replicator=not fast_headless_smoke, skip_cleanup=fast_headless_smoke)

@@ -63,6 +63,12 @@ python scripts\list_tasks.py
 # From an Isaac Lab source checkout:
 .\isaaclab.bat -p C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_humanoid.py
 
+# On this Windows machine with the env_isaaclab Conda environment:
+& "C:\Users\USER\miniconda3\shell\condabin\conda-hook.ps1"
+conda activate env_isaaclab
+cd C:\IsaacLab
+.\isaaclab.bat -p "C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_humanoid.py" --device cuda:0 --rendering_mode performance --reset-interval 500
+
 # Or from a Python environment that already imports isaaclab:
 python scripts\view_humanoid.py
 ```

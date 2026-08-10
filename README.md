@@ -67,7 +67,7 @@ python scripts\list_tasks.py
 & "C:\Users\USER\miniconda3\shell\condabin\conda-hook.ps1"
 conda activate env_isaaclab
 cd C:\IsaacLab
-.\isaaclab.bat -p "C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_humanoid.py" --device cuda:0 --rendering_mode performance --reset-interval 500
+.\isaaclab.bat -p "C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_humanoid.py" --device cuda:0 --rendering_mode performance --reset-interval 500 --kit_args=--/app/vulkan=false
 
 # Or from a Python environment that already imports isaaclab:
 python scripts\view_humanoid.py

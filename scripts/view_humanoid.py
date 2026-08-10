@@ -153,5 +153,5 @@ if __name__ == "__main__":
     try:
         main()
     finally:
-        fast_headless_smoke = args_cli.headless and args_cli.max_steps > 0
-        simulation_app.close(wait_for_replicator=not fast_headless_smoke, skip_cleanup=fast_headless_smoke)
+        bounded_run = args_cli.max_steps > 0
+        simulation_app.close(wait_for_replicator=not bounded_run, skip_cleanup=bounded_run)

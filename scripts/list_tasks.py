@@ -1,7 +1,7 @@
 """List scaffolded task IDs and viewer scripts for this project."""
 
 TASKS = ["HumanoidSoccer-Direct-v0"]
-VIEWERS = ["scripts/view_humanoid.py"]
+VIEWERS = ["scripts/view_nao.py"]
 
 
 def main() -> None:

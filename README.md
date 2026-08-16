@@ -1,8 +1,7 @@
 # Humanoid Soccer Isaac Lab
 
-Scaffold for an Isaac Lab external project focused on humanoid robots that
-learn soccer behaviors: standing, walking, balancing under contact, dribbling,
-shooting, defending, and multi-agent team play.
+Isaac Lab project for humanoid robot soccer research, built on the SoftBank
+Robotics / Aldebaran **NAO H25 V5.0**.
 
 The previous Franka Lagrangian MBRL work is preserved on:
 
@@ -10,80 +9,180 @@ The previous Franka Lagrangian MBRL work is preserved on:
 archive/franka-lagrangian-mbrl-2026-07-25
 ```
 
-## Current Scope
+## Phase 1 — NAO model integrated into Isaac Sim (current)
 
-This repository is intentionally only a project structure reset. It defines the
-directories, package boundaries, configuration placeholders, task entry points,
-and documentation layout needed before implementing physics, assets, rewards,
-or policies.
+The NAO is imported from its upstream URDF, converted to USD, and loads as a
+valid free-floating PhysX articulation with correct masses, inertias, joint
+limits and collision geometry.
 
-## Repository Layout
+Verified on Isaac Sim 5.1.0 / Isaac Lab 2.3.2, Windows 11, RTX 4070:
 
-```text
-.
-|-- assets/                         # Future USD, robot, field, and ball assets
-|   |-- balls/
-|   |-- fields/
-|   `-- robots/humanoid/
-|-- configs/                        # Plain planning configs before Isaac Lab cfgs exist
-|   |-- robots/
-|   |-- sim/
-|   |-- tasks/
-|   `-- training/
-|-- docs/                           # Architecture, asset pipeline, and roadmap
-|-- scripts/                        # Train/play/list entry point scaffolds
-|-- source/humanoid_soccer_lab/     # Isaac Lab external extension package
-|   |-- config/extension.toml
-|   |-- humanoid_soccer_lab/
-|   |   |-- assets/
-|   |   `-- tasks/direct/humanoid_soccer/
-|   |-- pyproject.toml
-|   `-- setup.py
-`-- tests/                          # Structure checks that do not require Isaac Lab
-```
+| Property | Value |
+| --- | --- |
+| Robot | `NaoH25V50` (NAO H25, version 5.0) |
+| Bodies | 43 |
+| Joints / DOFs | 42 (25 independently actuated + 17 upstream `mimic`) |
+| Articulation root | `base_link`, **not** fixed to the world |
+| Total mass | 5.3054 kg, matching the URDF exactly |
+| Fixed frames merged | 36 sensor frames (cameras, sonars, FSRs, bumpers, IMU, tactile) |
 
-## Intended Isaac Lab Workflow
+**Phase 1 contains no reinforcement learning.** No rewards, observations,
+actions, soccer, ball, locomotion, balance controller, training code, PPO,
+policy networks or multi-agent environments. The robot has no controller and
+collapses under gravity when the simulation starts — that fall is precisely
+what validates the articulation, its collision geometry and gravity.
 
-1. Install Isaac Lab separately.
-2. Install this extension in editable mode:
+## Setup
+
+### 1. Install Isaac Lab
+
+Install Isaac Lab separately (this project is developed against a source
+checkout at `C:\IsaacLab`, Isaac Lab 2.3.2 / Isaac Sim 5.1.0).
+
+### 2. Install this extension
 
 ```powershell
 python -m pip install -e source\humanoid_soccer_lab
 ```
 
-3. List registered tasks once the task implementation exists:
+### 3. Fetch the NAO meshes (one time)
+
+The NAO geometry is licensed CC BY-NC-ND 4.0 and upstream permits
+redistribution only through an installer that obtains the user's explicit
+assent, so **this repository ships no mesh file**. Fetch them onto your machine:
 
 ```powershell
-python scripts\list_tasks.py
+python scripts\fetch_nao_meshes.py
 ```
 
-4. View the first humanoid-only scene:
+The script prints the license and requires you to type `I ACCEPT` before
+downloading anything; pass `--accept-license` to skip the prompt in automation.
+It downloads the official ROS Noetic `nao_meshes` package, verifies its SHA-256,
+and extracts it using only the Python standard library — **native Windows, no
+WSL, no Ubuntu, no ROS, no 7-Zip**.
+
+## Smoke test — the one command
 
 ```powershell
-# From an Isaac Lab source checkout:
-.\isaaclab.bat -p C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_humanoid.py
-
-# On this Windows machine with the env_isaaclab Conda environment:
 & "C:\Users\USER\miniconda3\shell\condabin\conda-hook.ps1"
 conda activate env_isaaclab
 cd C:\IsaacLab
-.\isaaclab.bat -p "C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_humanoid.py" --device cuda:0 --rendering_mode performance --reset-interval 500 --kit_args=--/app/vulkan=false
-
-# Or from a Python environment that already imports isaaclab:
-python scripts\view_humanoid.py
+.\isaaclab.bat -p "C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_nao.py" --device cuda:0 --rendering_mode performance --kit_args=--/app/vulkan=false
 ```
 
-5. Train or play after the environment is implemented:
+`--rendering_mode performance --kit_args=--/app/vulkan=false` forces Direct3D 12
+and is required on this machine, where the RTX/Vulkan path crashes at GUI
+startup. Headless runs do not need it:
 
 ```powershell
-python scripts\train.py --task HumanoidSoccer-Direct-v0
-python scripts\play.py --task HumanoidSoccer-Direct-v0
+.\isaaclab.bat -p "C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_nao.py" --device cuda:0 --headless --max-steps 1
 ```
 
-## First Implementation Targets
+The command does everything automatically: on first run it generates the derived
+URDF, converts it to USD (~10 s, cached in `assets/generated/nao/`), builds the
+scene and loads the robot. **No manual import through the Isaac Sim GUI.**
 
-1. Import or author the humanoid USD/articulation and actuator model.
-2. Create the soccer field, ball asset, contact sensors, and reset logic.
-3. Implement a single-agent direct RL task for standing and ball approach.
-4. Add reward terms for balance, gait regularity, ball control, and shooting.
-5. Expand to multi-agent play only after the single-agent task is stable.
+### Expected behavior
+
+1. Isaac Sim opens showing a NAO hovering ~2.7 cm above a ground plane.
+2. Diagnostics print to the terminal: robot name, body count, joint count, DOF
+   count read back from the articulation, per-body masses, the full joint limit
+   table with effort and velocity limits, total mass, and the articulation root.
+3. Checks report `PASS` for geometry/scale and for physics/gravity.
+4. Physics starts and the robot collapses to the ground and stays there.
+
+See [`docs/view_nao.md`](docs/view_nao.md) for options and troubleshooting.
+
+## Tests
+
+```powershell
+python -m pytest
+```
+
+They need neither Isaac Sim nor rendering. Mesh-dependent tests skip themselves
+if the bootstrap has not been run.
+
+## Source attribution and licensing
+
+This repository contains **no original NAO model**. Full provenance, upstream
+commit SHAs, the exact files copied, and the licensing decisions are documented
+in [`third_party/nao/README.md`](third_party/nao/README.md).
+
+| Component | Upstream | Commit | License |
+| --- | --- | --- | --- |
+| URDF (`assets/robots/nao/urdf/nao.urdf`, verbatim) | [ros-naoqi/nao_robot](https://github.com/ros-naoqi/nao_robot) | `6747646` | BSD 3-Clause, © 2009-2013 A. Hornung, University of Freiburg |
+| Meshes and texture (fetched, untracked) | [ros-naoqi/nao_meshes](https://github.com/ros-naoqi/nao_meshes) | `7c5b9f3` | CC BY-NC-ND 4.0, © Aldebaran / SoftBank Robotics |
+
+The top-level [`LICENSE`](LICENSE) covers **only this project's own code**. It
+does not apply to, and does not relicense, any upstream NAO asset.
+
+Two consequences are load-bearing, and are argued in full in
+`third_party/nao/README.md`:
+
+- **Meshes are never committed.** Upstream allows redistribution only via an
+  installer that obtains the user's assent, so they are fetched locally.
+- **The generated USD is never committed.** It embeds the licensed geometry, so
+  under CC BY-NC-ND 4.0 §2(a)(1)(B) it may be produced for non-commercial use
+  but not shared. `assets/generated/` is untracked.
+
+**Non-commercial only.** Any commercial use of this project would require
+removing the NAO geometry or a separate license from SoftBank Robotics.
+
+## Repository layout
+
+```text
+.
+|-- assets/
+|   |-- robots/nao/
+|   |   |-- urdf/nao.urdf        # tracked, BSD, verbatim upstream
+|   |   |-- meshes/ texture/     # UNTRACKED, CC BY-NC-ND, fetched locally
+|   |   `-- README.md
+|   `-- generated/nao/           # UNTRACKED build artifacts (derived URDF, USD)
+|-- configs/                     # planning configs
+|-- docs/                        # architecture, asset pipeline, viewer guide
+|-- scripts/
+|   |-- fetch_nao_meshes.py      # one-time licensed asset bootstrap
+|   `-- view_nao.py              # canonical Phase 1 smoke test
+|-- source/humanoid_soccer_lab/  # Isaac Lab external extension
+|   `-- humanoid_soccer_lab/
+|       |-- assets/
+|       |   |-- nao.py           # NAO_CFG ArticulationCfg
+|       |   |-- nao_usd.py       # derived URDF + USD conversion
+|       |   `-- nao_paths.py     # layout, stdlib only
+|       `-- tasks/               # RL scaffold, intentionally unimplemented
+|-- third_party/nao/             # attribution and upstream licenses
+`-- tests/
+```
+
+## Known limitations
+
+- **No controller.** The robot falls over immediately. Intended for Phase 1.
+- **Meshes must be fetched** once per checkout; they cannot be redistributed.
+- **The URDF zero pose is unreachable.** `LElbowRoll` is limited to
+  `[-1.545, -0.035]` and `RElbowRoll` to `[0.035, 1.545]`, because a NAO elbow
+  cannot fully straighten. Defaults are clamped into the URDF's own limits.
+- **Finger links carry placeholder inertials** of 2e-06 kg with 1.1e-09 inertia
+  in the upstream URDF. They are imported as-is. Because they are `mimic`
+  joints they are imported as PhysX mimic constraints; with the drives left at
+  zero the articulation is stable, but these links remain the least trustworthy
+  part of the model and residual finger jitter is visible.
+- **Joint drives are zero.** No stiffness or damping is invented. Later RL work
+  must set gains through `NAO_CFG.actuators`.
+- **Four links have no geometry.** `LElbow`, `RElbow`, `l_gripper` and
+  `r_gripper` carry inertia but no visual or collision mesh upstream, producing
+  harmless "unresolved reference" warnings.
+- **Collision geometry is convex hulls** of the upstream collision STLs. Good
+  enough for foot contact; revisit before fine manipulation.
+- **Windows GUI needs the Direct3D 12 flags** shown above.
+- **Isaac Sim emits deprecation warnings** while merging the 36 fixed sensor
+  frames. Merging is required: 27 of those links have no inertial at all.
+
+## Next phases
+
+Not started, and intentionally out of scope here:
+
+1. Actuator model and joint gains for the NAO.
+2. Soccer field, ball asset, contact sensors, reset logic.
+3. Single-agent direct RL task for standing and ball approach.
+4. Reward terms for balance, gait regularity, ball control, shooting.
+5. Multi-agent play once the single-agent task is stable.

@@ -7,15 +7,15 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_PATHS = [
     "README.md",
     "CHANGELOG.md",
-    "configs/robots/humanoid.yaml",
+    "configs/robots/nao.yaml",
     "configs/sim/isaac_lab.yaml",
     "configs/tasks/humanoid_soccer.yaml",
     "configs/training/rsl_rl_ppo.yaml",
     "docs/architecture.md",
-    "docs/view_humanoid.md",
+    "docs/view_nao.md",
     "scripts/train.py",
     "scripts/play.py",
-    "scripts/view_humanoid.py",
+    "scripts/view_nao.py",
     "source/humanoid_soccer_lab/config/extension.toml",
     "source/humanoid_soccer_lab/humanoid_soccer_lab/tasks/direct/humanoid_soccer/__init__.py",
 ]
@@ -34,12 +34,23 @@ def test_task_id_is_registered_in_scaffold() -> None:
     assert "HumanoidSoccer-Direct-v0" in task_init.read_text(encoding="utf-8")
 
 
-def test_humanoid_viewer_uses_isaac_lab_launcher() -> None:
-    viewer = ROOT / "scripts/view_humanoid.py"
+def test_nao_viewer_uses_isaac_lab_launcher() -> None:
+    viewer = ROOT / "scripts/view_nao.py"
     text = viewer.read_text(encoding="utf-8")
     assert "AppLauncher" in text
-    assert "HUMANOID_CFG" in text
+    assert "get_nao_cfg" in text
     assert "SimulationContext" in text
+
+
+def test_placeholder_humanoid_viewer_was_replaced_by_the_nao_one() -> None:
+    result = subprocess.run(
+        ["git", "ls-files", "scripts/view_humanoid.py"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == ""
 
 
 def test_legacy_lagrangian_package_removed_from_main() -> None:

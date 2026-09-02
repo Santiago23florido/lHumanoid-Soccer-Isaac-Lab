@@ -177,6 +177,21 @@ def test_capturable_velocity_bounds_the_perturbation_curriculum() -> None:
     )
 
 
+def test_capturability_uses_com_and_polygon_in_the_same_frame() -> None:
+    pose = nk.NOMINAL_STAND_JOINT_POS
+    frames = nk.forward_kinematics(pose)
+    com_x = nk.center_of_mass(pose)[0]
+    foot_mid_x = (frames["l_sole"][0, 3] + frames["r_sole"][0, 3]) / 2
+    omega = nk.lipm_omega(nk.com_height_above_soles(pose))
+    bounds = nk.capturable_com_velocity(pose)
+    assert bounds["forward"] == pytest.approx(
+        omega * (foot_mid_x + nk.SUPPORT_POLYGON_X[1] - com_x)
+    )
+    assert bounds["backward"] == pytest.approx(
+        omega * (com_x - foot_mid_x - nk.SUPPORT_POLYGON_X[0])
+    )
+
+
 # --------------------------------------------------------------------------
 # The constants must match the geometry they claim to describe
 # --------------------------------------------------------------------------

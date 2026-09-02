@@ -615,7 +615,10 @@ def capturable_com_velocity(
     model = load_model(urdf_path)
     height = com_height_above_soles(pose, urdf_path)
     omega = lipm_omega(height)
-    com = center_of_mass(pose, urdf_path)
+    poses = forward_kinematics(pose, urdf_path)
+    sole_midpoint = 0.5 * (poses["l_sole"][:3, 3] + poses["r_sole"][:3, 3])
+    # The support bounds are defined about the soles, not about base_link.
+    com = center_of_mass(pose, urdf_path) - sole_midpoint
 
     x_min, x_max = SUPPORT_POLYGON_X
     _, (_, y_max) = support_polygon_double_stance()

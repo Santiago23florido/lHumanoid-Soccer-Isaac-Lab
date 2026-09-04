@@ -22,6 +22,13 @@ Two corrections make this specific to a standing biped rather than generic.
 Needs only NumPy, so it runs without Isaac Sim::
 
     python scripts/derive_gains.py
+
+The scalar inverted-pendulum design is a gain-sizing approximation, not a
+linearisation of the constrained multibody robot. In particular, the Euclidean
+CoM lever used here is not the axis-specific gravity Hessian for every leg
+joint, and double-support load sharing need not remain equal. The small held
+hand/wrist gains in nao.py include engineering floors; they are not reproduced
+exactly by the open-chain inertia calculation.
 """
 
 from __future__ import annotations
@@ -42,8 +49,8 @@ LEG_NATURAL_FREQUENCY = 12.0
 """Target closed-loop frequency for the leg joints, in rad/s.
 
 Roughly twice the open-loop unstable pole of the standing robot (5.53 rad/s) and
-well inside the 100 Hz control loop, which leaves about eight physics steps per
-closed-loop period.
+well inside the 100 Hz reference loop. At 200 Hz physics there are about 105
+steps per 2*pi/12 oscillation period and 17 steps per 1/12 time scale.
 """
 
 ARM_NATURAL_FREQUENCY = 20.0

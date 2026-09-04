@@ -42,6 +42,8 @@ import math
 import sys
 from pathlib import Path
 
+from stand_metrics import Recorder, minimum_margin, validate_run
+
 # Isaac Sim terminates the process from inside simulation_app.close(), which
 # discards anything still sitting in a block-buffered stdout. Switch to line
 # buffering before printing anything or the diagnostics vanish when piped.
@@ -60,6 +62,12 @@ from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Hold the NAO upright with a joint PD controller.")
 parser.add_argument(
+    "--metrics-file",
+    type=Path,
+    default=None,
+    help="Optional JSON output with time series and run parameters, in SI units.",
+)
+parser.add_argument(
     "--duration",
     type=float,
     default=10.0,
@@ -70,8 +78,8 @@ parser.add_argument(
     type=float,
     default=0.0,
     help=(
-        "Forward centre-of-mass velocity in m/s to impose as a push. "
-        "0 disables the push. The zero-step capturable limit is printed at startup."
+        "Root linear velocity increment along world x in m/s. Negative pushes backward. "
+        "0 disables the push. Ideal LIPM velocity bounds are printed at startup."
     ),
 )
 parser.add_argument(
@@ -93,6 +101,14 @@ parser.add_argument(
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+if args_cli.push_at is None:
+    args_cli.push_at = args_cli.settle_time + (args_cli.duration - args_cli.settle_time) * 0.5
+try:
+    validate_run(
+        args_cli.duration, args_cli.settle_time, args_cli.push_velocity, args_cli.push_at
+    )
+except ValueError as exc:
+    parser.error(str(exc))
 
 # Fail fast, before paying for an Isaac Sim launch, if the geometry is absent.
 from humanoid_soccer_lab.assets.nao_paths import describe_missing_meshes, meshes_are_available
@@ -276,28 +292,6 @@ def center_of_pressure(
     )
 
 
-class Recorder:
-    """Accumulates the per-step metrics the summary is built from."""
-
-    def __init__(self) -> None:
-        self.com_offset: list[float] = []
-        self.dcm_offset: list[float] = []
-        self.cop_offset: list[float] = []
-        self.base_height: list[float] = []
-        self.tilt: list[float] = []
-        self.ankle_torque: list[float] = []
-        self.fell_at: float | None = None
-        self.recovered_at: float | None = None
-
-    @staticmethod
-    def _summarise(values: list[float]) -> str:
-        if not values:
-            return "    (no samples)"
-        peak = max(values, key=abs)
-        mean = sum(values) / len(values)
-        return f"mean {mean:+.4f}   peak {peak:+.4f}"
-
-
 def report_startup(robot: Articulation, ankle_ids: list[int], foot_ids: list[int]) -> None:
     """Print what the robot and the theory say before any stepping happens."""
     bounds = nk.capturable_com_velocity()
@@ -312,7 +306,8 @@ def report_startup(robot: Articulation, ankle_ids: list[int], foot_ids: list[int
     print("=" * 78)
     print(f"  bodies / joints            : {robot.num_bodies} / {robot.num_joints}")
     print(f"  total mass                 : {float(robot.data.default_mass[0].sum()):.4f} kg")
-    print(f"  commanded joints           : {len(nk.ACTUATED_JOINTS)} of {robot.num_joints} DOFs")
+    print(f"  joints with active PD      : {len(nk.ACTUATED_JOINTS + nk.HELD_JOINTS)}")
+    print(f"  joints reserved for policy : {len(nk.ACTUATED_JOINTS)} of {robot.num_joints} DOFs")
     print(f"  control rate               : {1.0 / (PHYSICS_DT * CONTROL_DECIMATION):.0f} Hz")
     print(f"  foot bodies                : {[robot.body_names[i] for i in foot_ids]}")
     print(f"  ankle pitch joints         : {[robot.joint_names[i] for i in ankle_ids]}")
@@ -337,13 +332,14 @@ def report_startup(robot: Articulation, ankle_ids: list[int], foot_ids: list[int
     binding = "foot geometry" if x_max < 2 * ankle_effort / weight else "ankle torque"
     print(f"    binding constraint       : {binding}")
 
-    print("\n  ZERO-STEP CAPTURABILITY (no stepping, ankle strategy only)")
+    print("\n  IDEAL LIPM ZERO-STEP BOUNDS (nominal geometry, not a PD guarantee)")
     print(f"    forward                  : {bounds['forward']:.3f} m/s")
     print(f"    backward                 : {bounds['backward']:.3f} m/s")
     print(f"    lateral                  : {bounds['lateral']:.3f} m/s")
     print(f"    forward impulse          : {bounds['forward_impulse']:.3f} N s")
-    if args_cli.push_velocity > 0.0:
-        ratio = args_cli.push_velocity / bounds["forward"]
+    if args_cli.push_velocity != 0.0:
+        direction = "forward" if args_cli.push_velocity > 0.0 else "backward"
+        ratio = abs(args_cli.push_velocity) / bounds[direction]
         verdict = "inside" if ratio <= 1.0 else "BEYOND"
         print(
             f"    requested push           : {args_cli.push_velocity:.3f} m/s "
@@ -365,8 +361,6 @@ def run(sim: SimulationContext, robot: Articulation) -> Recorder:
     ankle_effort = next(j.effort for j in model.joints if j.name == "LAnklePitch")
 
     push_at = args_cli.push_at
-    if push_at is None:
-        push_at = args_cli.settle_time + (args_cli.duration - args_cli.settle_time) * 0.5
 
     recorder = Recorder()
     steps = int(args_cli.duration / PHYSICS_DT)
@@ -375,6 +369,8 @@ def run(sim: SimulationContext, robot: Articulation) -> Recorder:
     print(f"\n  running {args_cli.duration:.1f} s ({steps} physics steps)...")
 
     for step in range(steps):
+        if not simulation_app.is_running():
+            break
         elapsed = step * PHYSICS_DT
 
         if step % CONTROL_DECIMATION == 0:
@@ -383,16 +379,29 @@ def run(sim: SimulationContext, robot: Articulation) -> Recorder:
             # an offset on top of the same targets.
             robot.set_joint_position_target(targets)
 
-        if args_cli.push_velocity > 0.0 and not pushed and elapsed >= push_at:
+        if args_cli.push_velocity != 0.0 and not pushed and elapsed >= push_at:
             velocity = robot.data.root_com_vel_w.clone()
             velocity[:, 0] += args_cli.push_velocity
             robot.write_root_com_velocity_to_sim(velocity)
             pushed = True
-            print(f"    push at t={elapsed:.2f} s: +{args_cli.push_velocity:.2f} m/s forward")
+            recorder.pushed_at = elapsed
+            print(f"    push at t={elapsed:.2f} s: {args_cli.push_velocity:+.2f} m/s along world x")
 
         robot.write_data_to_sim()
         sim.step()
         robot.update(PHYSICS_DT)
+
+        # Data now describes the END of this physics step. Falling during the
+        # settling window is still a failure, even though its metrics are omitted.
+        elapsed = (step + 1) * PHYSICS_DT
+        height = float(robot.data.root_pos_w[0, 2])
+        tilt = float(robot.data.projected_gravity_b[0, 2])
+        fallen = height < FALL_BASE_HEIGHT or tilt > FALL_TILT_COSINE
+        if fallen and recorder.fell_at is None:
+            recorder.fell_at = elapsed
+            print(f"    FELL at t={elapsed:.2f} s (height {height:.3f} m, tilt {tilt:+.3f})")
+        elif not fallen and recorder.fell_at is not None and recorder.recovered_at is None:
+            recorder.recovered_at = elapsed
 
         if elapsed < args_cli.settle_time:
             continue
@@ -402,27 +411,23 @@ def run(sim: SimulationContext, robot: Articulation) -> Recorder:
         origin = feet.mean(dim=1)
 
         dcm = divergent_component(com_pos, com_vel, NAO_STAND_LIPM_OMEGA)
+        recorder.time.append(elapsed)
         recorder.com_offset.append(float(com_pos[0, 0] - origin[0, 0]))
         recorder.dcm_offset.append(float(dcm[0, 0] - origin[0, 0]))
 
         cop = center_of_pressure(robot, foot_ids)
-        if cop is not None:
-            recorder.cop_offset.append(float(cop[0, 0] - origin[0, 0]))
+        recorder.cop_offset.append(float(cop[0, 0] - origin[0, 0]) if cop is not None else None)
 
-        height = float(robot.data.root_pos_w[0, 2])
-        tilt = float(robot.data.projected_gravity_b[0, 2])
         recorder.base_height.append(height)
         recorder.tilt.append(tilt)
 
         torque = robot.data.applied_torque[0, ankle_ids].abs().max()
         recorder.ankle_torque.append(float(torque) / ankle_effort)
 
-        fallen = height < FALL_BASE_HEIGHT or tilt > FALL_TILT_COSINE
-        if fallen and recorder.fell_at is None:
-            recorder.fell_at = elapsed
-            print(f"    FELL at t={elapsed:.2f} s (height {height:.3f} m, tilt {tilt:+.3f})")
-        elif not fallen and recorder.fell_at is not None and recorder.recovered_at is None:
-            recorder.recovered_at = elapsed
+    else:
+        recorder.completed = True
+    if args_cli.push_velocity != 0.0 and not pushed:
+        recorder.completed = False
 
     return recorder
 
@@ -440,24 +445,26 @@ def summarise(recorder: Recorder) -> bool:
     print("  Offsets are measured from the midpoint between the two feet, in metres.")
     print(f"    CoM forward offset       : {Recorder._summarise(recorder.com_offset)}")
     print(f"    DCM forward offset       : {Recorder._summarise(recorder.dcm_offset)}")
-    if recorder.cop_offset:
-        print(f"    CoP forward offset       : {Recorder._summarise(recorder.cop_offset)}")
+    cop_samples = [value for value in recorder.cop_offset if value is not None]
+    if cop_samples:
+        print(f"    CoP estimate (quasi-static): {Recorder._summarise(cop_samples)}")
     else:
         print("    CoP forward offset       : unavailable (no loaded foot)")
 
     (x_min, x_max), _ = nk.support_polygon_double_stance()
-    peak_dcm = max(recorder.dcm_offset, key=abs) if recorder.dcm_offset else 0.0
-    margin = min(x_max - peak_dcm, peak_dcm - x_min)
+    margin = minimum_margin(recorder.dcm_offset, x_min, x_max)
 
     print(f"\n    base height              : min {min(recorder.base_height):.4f} m")
     print(f"    tilt (gravity_b z)       : max {max(recorder.tilt):+.4f} (-1 is upright)")
-    print(f"    ankle torque used        : peak {max(recorder.ankle_torque):.1%} of the limit")
-    print(f"    DCM margin to polygon    : {margin * 1e3:+.1f} mm")
+    print(f"    ankle torque estimate    : peak {max(recorder.ankle_torque):.1%} of the limit")
+    print(f"    min nominal sagittal DCM margin: {margin * 1e3:+.1f} mm")
 
-    upright = recorder.fell_at is None
+    upright = recorder.completed and recorder.fell_at is None
     print()
     if upright:
         print("    OK: the robot stayed upright for the whole run.")
+    elif not recorder.completed:
+        print("    INCOMPLETE: simulation stopped before the requested duration.")
     elif recorder.recovered_at is not None:
         print(
             f"    RECOVERED: fell at t={recorder.fell_at:.2f} s, "
@@ -467,9 +474,9 @@ def summarise(recorder: Recorder) -> bool:
         print(f"    FAILED: fell at t={recorder.fell_at:.2f} s and did not recover.")
 
     if margin < 0.0:
-        print("    NOTE: the DCM left the support polygon; this push needs a step.")
+        print("    NOTE: DCM left the nominal interval; ideal fixed-support LIPM bound exceeded.")
     if max(recorder.ankle_torque) > 0.95:
-        print("    NOTE: ankle torque saturated; the ankle strategy is exhausted.")
+        print("    NOTE: the implicit-PD torque estimate approached its limit.")
 
     print("  No learning is involved: this is a fixed linear feedback law.")
     print("=" * 78 + "\n")
@@ -486,7 +493,9 @@ def reset(robot: Articulation) -> None:
 
 
 def main() -> int:
-    sim_cfg = sim_utils.SimulationCfg(dt=PHYSICS_DT, device=args_cli.device)
+    sim_cfg = sim_utils.SimulationCfg(
+        dt=PHYSICS_DT, render_interval=CONTROL_DECIMATION, device=args_cli.device
+    )
     sim = SimulationContext(sim_cfg)
     sim.set_camera_view([1.1, -1.1, 0.7], [0.0, 0.0, 0.25])
 
@@ -497,6 +506,22 @@ def main() -> int:
     robot.update(PHYSICS_DT)
 
     recorder = run(sim, robot)
+    if args_cli.metrics_file is not None:
+        recorder.export(
+            args_cli.metrics_file,
+            {
+                "duration_s": args_cli.duration,
+                "settle_time_s": args_cli.settle_time,
+                "push_velocity_m_s": args_cli.push_velocity,
+                "requested_push_at_s": args_cli.push_at,
+                "physics_dt_s": PHYSICS_DT,
+                "control_decimation": CONTROL_DECIMATION,
+                "device": args_cli.device,
+                "lipm_omega_s_inv": NAO_STAND_LIPM_OMEGA,
+            },
+            nk.SUPPORT_POLYGON_X,
+        )
+        print(f"  Metrics written to {args_cli.metrics_file}")
     return 0 if summarise(recorder) else 1
 
 
@@ -512,5 +537,8 @@ if __name__ == "__main__":
     finally:
         sys.stdout.flush()
         sys.stderr.flush()
+        # Kit may terminate Python inside close(), before SystemExit below runs.
+        # Set its return code first so a fallen baseline cannot report success.
+        simulation_app.app.post_quit(exit_code)
         simulation_app.close(skip_cleanup=True)
     raise SystemExit(exit_code)

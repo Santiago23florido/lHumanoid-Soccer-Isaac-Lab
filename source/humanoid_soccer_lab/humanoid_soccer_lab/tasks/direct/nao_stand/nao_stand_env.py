@@ -225,7 +225,11 @@ class NaoStandEnv(DirectRLEnv):
         # Divergent component of motion, the unstable mode of the pendulum.
         self._dcm_b = self._com_offset_b + self._com_vel_b / self.cfg.lipm_omega
 
-        self._com_height = self._com_pos_w[:, 2] - feet_pos[..., 2].min(dim=1).values
+        # Height above the ground, not above the ankle body origins. The ankle
+        # frame sits 45 mm above the sole, so measuring from it would put the
+        # centre of mass 45 mm low against a target defined at the sole -- more
+        # than two kernel widths, which silently zeroes the height reward.
+        self._com_height = self._com_pos_w[:, 2] - self._terrain.env_origins[:, 2]
         self._dcm_margin = self._polygon_margin(self._dcm_b)
 
         forces = self._contact_sensor.data.net_forces_w_history

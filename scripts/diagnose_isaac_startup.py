@@ -4,6 +4,9 @@ This launches Isaac Sim, imports the Isaac Lab task extension, then exits. It is
 used to verify environment/DLL problems without opening a long-running viewer.
 """
 
+# Isaac extensions must be imported only after AppLauncher starts Kit.
+# ruff: noqa: E402, I001
+
 from __future__ import annotations
 
 import argparse

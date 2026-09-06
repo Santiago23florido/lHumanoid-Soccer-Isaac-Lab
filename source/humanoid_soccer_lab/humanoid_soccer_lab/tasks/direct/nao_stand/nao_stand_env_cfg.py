@@ -52,6 +52,16 @@ _CAPTURABLE = nk.capturable_com_velocity()
 _SUPPORT_X, _SUPPORT_Y = nk.support_polygon_double_stance()
 """Double-stance support polygon, in metres, about the midpoint of the soles."""
 
+TORSO_BODY = "base_link"
+"""Articulation body carrying the torso mass and geometry.
+
+The URDF's ``base_link`` has no inertial of its own and reaches the torso
+through a fixed joint, so the URDF-to-USD conversion merges the two. The
+articulation therefore exposes 43 bodies with **no** link named ``torso``,
+and asking for one raises at scene creation. Any name used here has to be an
+articulation body name, which is not always the URDF link name.
+"""
+
 
 @configclass
 class EventCfg:
@@ -88,9 +98,9 @@ class EventCfg:
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="torso"),
-            # +/- 300 g on a 1.05 kg torso, which is the scale of a battery, a
-            # cable loom or an unmodelled cover.
+            "asset_cfg": SceneEntityCfg("robot", body_names=TORSO_BODY),
+            # +/- 300 g on the 1.05 kg torso, which is the scale of a battery,
+            # a cable loom or an unmodelled cover.
             "mass_distribution_params": (-0.3, 0.3),
             "operation": "add",
         },
@@ -397,14 +407,20 @@ class NaoStandEnvCfg(DirectRLEnvCfg):
     """Bodies carrying the foot collision geometry, after the sole frames merge."""
 
     undesired_contact_body_names: tuple[str, ...] = (
-        "torso",
+        TORSO_BODY,
         "Head",
-        "base_link",
+        "Neck",
         ".*Bicep",
         ".*ForeArm",
         ".*_wrist",
+        ".*Tibia",
     )
-    """Bodies that should never touch the ground while balancing."""
+    """Bodies that should never touch the ground while balancing.
+
+    Names are the *articulation's*, not the URDF's. The shins are included
+    because a robot that saves itself by kneeling has not balanced, and the
+    height and tilt thresholds alone would not always catch it.
+    """
 
     actuated_joint_names: tuple[str, ...] = nk.ACTUATED_JOINTS
     """The 19 joints the policy commands, in action order."""

@@ -9,7 +9,23 @@ The previous Franka Lagrangian MBRL work is preserved on:
 archive/franka-lagrangian-mbrl-2026-07-25
 ```
 
-## Phase 1 — NAO model integrated into Isaac Sim (current)
+## Current development status (2026-09-21)
+
+The NAO has a working joint-PD standing baseline in `scripts/stand_nao.py`,
+with URDF-based kinematics, inertia-informed gains and recorded balance metrics.
+The latest checks passed 100 tests; headless trials held posture without a push
+and with a +0.30 m/s velocity increment, and detected a fall at +0.70 m/s.
+See [`docs/stand_nao.md`](docs/stand_nao.md) for the protocol and limitations.
+
+The repository also contains an experimental `nao_stand` RL environment and
+PPO configuration. They have not been trained or validated as an integrated
+learning task. `scripts/train.py` and `scripts/play.py` remain placeholders.
+See [`docs/nao_stand.md`](docs/nao_stand.md) for the outstanding integration work.
+
+The original passive asset/viewer described below remains available. Its zero
+drives are distinct from the standing configuration's active PD drives.
+
+## Phase 1 — original passive NAO asset integration
 
 The NAO is imported from its upstream URDF, converted to USD, and loads as a
 valid free-floating PhysX articulation with correct masses, inertias, joint
@@ -26,7 +42,7 @@ Verified on Isaac Sim 5.1.0 / Isaac Lab 2.3.2, Windows 11, RTX 4070:
 | Total mass | 5.3054 kg, matching the URDF exactly |
 | Fixed frames merged | 36 sensor frames (cameras, sonars, FSRs, bumpers, IMU, tactile) |
 
-**Phase 1 contains no reinforcement learning.** No rewards, observations,
+**The original Phase 1 asset contains no reinforcement learning.** No rewards, observations,
 actions, soccer, ball, locomotion, balance controller, training code, PPO,
 policy networks or multi-agent environments. The robot has no controller and
 collapses under gravity when the simulation starts — that fall is precisely
@@ -156,7 +172,8 @@ removing the NAO geometry or a separate license from SoftBank Robotics.
 
 ## Known limitations
 
-- **No controller.** The robot falls over immediately. Intended for Phase 1.
+- **Passive viewer.** `view_nao.py` intentionally lets the robot fall. Use
+  `stand_nao.py` for the active PD baseline.
 - **Meshes must be fetched** once per checkout; they cannot be redistributed.
 - **The URDF zero pose is unreachable.** `LElbowRoll` is limited to
   `[-1.545, -0.035]` and `RElbowRoll` to `[0.035, 1.545]`, because a NAO elbow
@@ -166,8 +183,9 @@ removing the NAO geometry or a separate license from SoftBank Robotics.
   joints they are imported as PhysX mimic constraints; with the drives left at
   zero the articulation is stable, but these links remain the least trustworthy
   part of the model and residual finger jitter is visible.
-- **Joint drives are zero.** No stiffness or damping is invented. Later RL work
-  must set gains through `NAO_CFG.actuators`.
+- **Two actuator configurations.** `NAO_CFG` keeps passive drives;
+  `NAO_STAND_CFG` provides posture gains. Their gains are documented in the
+  standing guide and are an approximate design, not hardware identification.
 - **Four links have no geometry.** `LElbow`, `RElbow`, `l_gripper` and
   `r_gripper` carry inertia but no visual or collision mesh upstream, producing
   harmless "unresolved reference" warnings.
@@ -179,10 +197,10 @@ removing the NAO geometry or a separate license from SoftBank Robotics.
 
 ## Next phases
 
-Not started, and intentionally out of scope here:
+Development sequence, following the standing baseline:
 
-1. Actuator model and joint gains for the NAO.
+1. Actuator model and joint gains: implemented and verified for the PD baseline.
 2. Soccer field, ball asset, contact sensors, reset logic.
-3. Single-agent direct RL task for standing and ball approach.
+3. Complete and validate the standing RL draft, then add locomotion and ball approach.
 4. Reward terms for balance, gait regularity, ball control, shooting.
 5. Multi-agent play once the single-agent task is stable.

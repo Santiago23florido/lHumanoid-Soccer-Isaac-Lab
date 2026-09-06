@@ -1,171 +1,117 @@
-# Balance Baseline — Holding The NAO Upright With A PD
+# NAO standing baseline: PD control and measurements
 
-`scripts/stand_nao.py` makes the NAO stand. It is the first thing in this
-project that keeps the robot off the floor, and it does it with a fixed linear
-feedback law: every joint is commanded to hold the nominal standing posture,
-and the derived gains do the rest.
+`scripts/stand_nao.py` commands the nominal joint posture using the implicit
+PD actuators in `NAO_STAND_CFG`. The references update at 100 Hz; PhysX solves
+the articulation and joint drives at 200 Hz. There is no vision, learned policy,
+inverse dynamics, step planner or CoM/DCM feedback in this baseline.
 
-There is no learning here. That is the point — a learned policy needs a baseline
-to be measured against, and this is it.
+## Run
 
-## One-time asset bootstrap
-
-The NAO meshes are licensed CC BY-NC-ND 4.0 and are never committed. Fetch them
-once per checkout:
+From the repository root, with the existing Isaac Lab environment and meshes:
 
 ```powershell
-python scripts\fetch_nao_meshes.py
+& C:\Users\USER\miniconda3\envs\env_isaaclab\python.exe scripts\stand_nao.py --headless --device cuda:0 --duration 6 --settle-time 0.5 --push-at 1.5 --push-velocity 0.3 --metrics-file outputs\pd_trial.json
 ```
 
-## Run it
+For this machine's GUI, remove `--headless` and add
+`--rendering_mode performance --kit_args=--/app/vulkan=false`.
+If geometry is missing, follow the existing mesh bootstrap in the main README.
+
+| Option | Meaning |
+| --- | --- |
+| `--duration` | Simulated seconds; default 10. |
+| `--settle-time` | Initial interval excluded from metrics; default 0.5 s. Falls still count. |
+| `--push-velocity` | Velocity increment along world x, in m/s; 0 disables, negative pushes backward. |
+| `--push-at` | Push time; default halfway through the interval after settling. |
+| `--metrics-file` | Optional JSON containing aligned time series, parameters and result. |
+| `--rebuild-usd` | Regenerate the derived URDF and USD. |
+
+The push directly changes root linear velocity. It is an impulse surrogate,
+not a force applied at a specified point for a measured duration. World x is
+forward only for the nominal initial heading used here.
+
+## Verified on 2026-09-21
+
+Isaac Sim 5.1.0.0, Isaac Lab checkout `b4c3210` (extension 0.54.4), Windows,
+CUDA. Physics 5 ms; reference/render interval two physics steps. Settling 0.5 s;
+push at 1.5 s. These are the current recorded trials, replacing the earlier
+protocol's figures in this guide.
+
+| Quantity | No push, 6 s | +0.30 m/s, 6 s | +0.70 m/s, 4 s |
+| --- | ---: | ---: | ---: |
+| Maximum CoM forward offset | 9.22 mm | 31.38 mm | 223.96 mm |
+| Maximum DCM forward offset | 8.72 mm | 44.56 mm | 378.93 mm |
+| Minimum nominal sagittal DCM margin | 69.25 mm | 58.74 mm | -275.63 mm |
+| Minimum base height | 0.3215 m | 0.3215 m | 0.0660 m |
+| Peak estimated ankle torque / limit | 1.5% | 74.7% | 100.0% |
+| First fall after push | -- | -- | 0.245 s |
+| Result / process exit code | Upright / 0 | Upright / 0 | Fell / 1 |
+
+The failed trial's extrema include motion after falling. These three runs do
+not establish a maximum recoverable push or a statistical success rate. No
+controller gains were retuned during this review.
+
+## What is measured
+
+- **CoM:** mass-weighted average of body centers of mass and their velocities,
+  using simulator states. These are not observations from a real sensor stack.
+- **DCM:** horizontal `xi = c + c_dot / omega`, with nominal
+  `omega = sqrt(g/h) = 6.04003 /s`. This is the divergent variable of the
+  constant-height linear inverted pendulum model (LIPM).
+- **CoP estimate:** reconstructed from incoming ankle joint wrenches, accounting
+  for the foot's weight and translating the wrench to the ground plane. Foot
+  acceleration and angular inertia are omitted: it is a quasi-static estimate,
+  unreliable during impacts, flight and falls. The assumed joint/body frame
+  alignment also needs checking if the USD or importer changes.
+- **Ankle torque estimate:** Isaac Lab's clipped implicit-PD estimate,
+  not an exact measurement of the motor effort integrated by PhysX.
+- **Fall:** base height below 0.20 m or projected gravity z above -0.7
+  (approximately 45.6 degrees from upright), checked from the first step.
+
+Offsets use the midpoint of the feet. The reported margin is the minimum over
+all recorded sagittal DCM samples relative to the nominal interval
+`[-0.0607, 0.1033]` m. It is not a live polygon reconstructed from loaded contact
+points, and it does not evaluate lateral balance.
+
+JSON uses SI units and `null` for unavailable CoP samples. State timestamps
+refer to the end of each physics step; estimated actuator torques were computed
+when preparing that step. Interrupted or unmeasurable runs cannot pass.
+
+## Model-based estimates and their scope
+
+The corrected nominal LIPM velocity bounds are approximately 0.548 m/s forward,
+0.443 m/s backward and 0.620 m/s laterally. These use CoM and polygon coordinates
+relative to the same sole midpoint. The earlier 0.554/0.437 values mixed the
+base origin with the sole origin by approximately 1 mm.
+
+These are ideal fixed-support, constant-height bounds with controllable CoP;
+they are not guarantees for this joint PD, and do not rule out other strategies
+such as changing support or centroidal angular momentum. The rough torque-only
+CoP reach is 116.2 mm with both ankle-pitch actuators and 58.1 mm with one;
+contact geometry, shear forces and load sharing also matter.
+
+`scripts/derive_gains.py` reproduces the scalar gain-sizing calculation. It
+uses whole-body axis inertia for the legs and distal subtree inertia for the
+arms. The assumed scalar gravitational stiffness and equal load sharing are
+approximations, not a constrained multibody stability proof. The small held
+hand/wrist gains include engineering floors.
+
+## Tests and remaining work
+
+The review passed 100 unit tests and the three simulation trials above. On a
+Windows installation whose global pytest temporary folder is inaccessible:
 
 ```powershell
-& "C:\Users\USER\miniconda3\shell\condabin\conda-hook.ps1"
-conda activate env_isaaclab
-cd C:\IsaacLab
-.\isaaclab.bat -p "C:\Users\USER\Documents\AppsPlayGround\lHumanoid-Soccer-Isaac-Lab\scripts\stand_nao.py" --device cuda:0 --headless
+& C:\Users\USER\miniconda3\envs\env_isaaclab\python.exe -m pytest --basetemp outputs\pytest_review
 ```
 
-For the GUI on this machine, add `--rendering_mode performance
---kit_args=--/app/vulkan=false`; the RTX/Vulkan path crashes at startup here.
+Use a directory dedicated to pytest. PhysX still reports issues with continuous
+finger mimic joints lacking finite limits; successful standing does not
+validate their mechanical fidelity.
 
-| Flag | Meaning |
-| --- | --- |
-| `--duration` | Seconds of simulated time. Default 10. |
-| `--push-velocity` | Forward CoM velocity in m/s to impose as a shove. 0 disables. |
-| `--push-at` | When to push, in seconds. Defaults to halfway. |
-| `--settle-time` | Seconds to ignore before measuring. Default 0.5. |
-| `--rebuild-usd` | Regenerate the derived URDF and USD first. |
-
-## What it measures, and why those quantities
-
-The script reports the quantities the balance theory is actually written in,
-not just "did it fall".
-
-**Centre of mass.** Assembled from the simulator's own body poses and masses,
-because Isaac Lab exposes per-body states but no whole-body centre of mass.
-
-**Divergent component of motion**, `ξ = x + ẋ/ω₀`. The linear inverted pendulum
-splits into a stable mode and an unstable one. This is the unstable one, and it
-obeys `ξ̇ = ω₀(ξ − p)` where `p` is the centre of pressure. Regulating `ξ` is
-the whole of the balance problem. Regulating the centre of mass alone is not: a
-centre of mass sitting still with the wrong velocity is already falling.
-
-**Centre of pressure.** Where the ground reaction can be replaced by a single
-force with no horizontal moment. Unilateral contact confines it to the support
-polygon — a foot can push on the ground but never pull — which is precisely
-what bounds how much the ankle can do.
-
-The simulator does not report the centre of pressure, so it is reconstructed
-from the ankle joint reaction wrench in three steps: rotate the wrench to world
-frame, recover the ground reaction by applying Newton's law to the foot alone
-(including the foot's own 0.17 kg, which is worth a millimetre or two), then
-slide the wrench down to the contact plane and solve for the point where the
-horizontal moment vanishes.
-
-**Ankle torque** as a fraction of the URDF limit. This is what saturates first.
-
-## What the robot can do
-
-Measured on Isaac Sim 5.1.0 / Isaac Lab 0.54.4, Windows 11, RTX 4070.
-
-Standing still, no perturbation:
-
-| Quantity | Value |
-| --- | --- |
-| Base height | 0.3215 m, flat |
-| Tilt (`projected_gravity_b[2]`) | −0.9997 (−1 is exactly upright) |
-| CoM forward offset | +9.0 mm |
-| DCM forward offset | +8.7 mm |
-| Ankle torque used | 3.2 % of the limit |
-
-Recovering from a 0.30 m/s forward push, which is 54 % of the zero-step
-capturable limit:
-
-| Quantity | Value |
-| --- | --- |
-| Peak CoM offset | +31.4 mm |
-| Peak DCM offset | +50.5 mm |
-| Peak CoP offset | +74.8 mm |
-| Ankle torque used | 84.3 % of the limit |
-| Outcome | stayed upright |
-
-Two things in that table are worth reading twice.
-
-The centre of pressure leads the divergent component — 74.8 mm against 50.5 mm.
-That is not a coincidence, it is the control law: to pull `ξ` back the foot must
-push the pressure centre *past* it, because `ξ̇ = ω₀(ξ − p)` only becomes
-negative when `p > ξ`. Watching those two numbers is watching the ankle
-strategy work.
-
-And 54 % of the capturable limit already costs 84 % of the ankle torque. The
-relationship is not linear, and it is why the margin runs out quickly.
-
-Pushed past the limit, at 0.70 m/s — 126 % of the predicted 0.554 m/s — it
-fails exactly the way the theory says it should:
-
-| Quantity | Value |
-| --- | --- |
-| Peak DCM offset | +378.9 mm, far outside the 103.3 mm polygon |
-| Ankle torque used | 100 % — saturated |
-| Fell at | 0.48 s after the push |
-| Outcome | fell, did not recover |
-
-So the measured boundary sits between 0.30 m/s (recovers, comfortably) and
-0.70 m/s (falls, unrecoverably), bracketing the 0.554 m/s that capturability
-predicts from geometry alone. The script prints both diagnostic notes in this
-case: the divergent component left the support polygon, and the ankle strategy
-was exhausted. Those are the two distinct ways a standing biped runs out of
-options, and the robot hit both at once.
-
-This is the baseline a learned policy has to beat. It cannot beat it by pushing
-the pressure centre further — the foot is already the binding constraint. It has
-to do something the PD cannot: swing the arms to trade angular momentum, or
-crouch to buy time. That is the interesting part.
-
-## The authority limits it prints
-
-Before stepping, the script prints where the robot's authority ends:
-
-```
-  AUTHORITY LIMITS
-    ankle pitch torque       : 3.023 N m each, 6.046 total
-    CoP reach from torque    : 116.2 mm (two feet)
-    CoP reach from geometry  : 103.3 mm (toe edge)
-    binding constraint       : foot geometry
-```
-
-In double support the foot runs out before the motors do: the toe is 103.3 mm
-ahead of the ankle, while the two ankles between them could push the pressure
-centre 116.2 mm. On one foot that reverses — a single ankle reaches only
-58.1 mm, well inside the same 103.3 mm of foot — so the binding constraint
-changes with the stance. Any controller that assumes one or the other is wrong
-half the time.
-
-```
-  ZERO-STEP CAPTURABILITY (no stepping, ankle strategy only)
-    forward                  : 0.554 m/s
-    backward                 : 0.437 m/s
-    lateral                  : 0.620 m/s
-```
-
-Past these the robot has to take a step or throw its arms; no ankle torque will
-save it. They come from `ω₀ d`, where `d` is the distance from the centre of
-mass to the polygon edge. Backward is tighter than forward because the centre of
-mass sits 11.6 mm ahead of the ankle axis and the heel is nearer than the toe.
-
-These numbers are what size the perturbation curriculum for the learning task:
-there is nothing to learn from a push that no controller could recover.
-
-## Exit code
-
-`0` if the robot stayed upright for the whole run, `1` otherwise — so it can be
-used as a regression check on the actuator gains.
-
-## Known noise
-
-PhysX prints errors at startup about the finger joints needing finite limits to
-be used by the mimic joint feature. The upstream URDF declares them
-`continuous`, which carries no limit, and they are `mimic` joints driven by
-`LHand` / `RHand`. The errors are non-fatal and the articulation simulates
-correctly; the finger drives are held at zero precisely so this cannot matter.
+The `nao_stand` RL files are an unfinished experimental scaffold. They have not
+been trained or validated; the training/play entry points remain placeholders.
+See [nao_stand.md](nao_stand.md) for the outstanding integration work.
+The local Spanish report in `docs/theory/informe_control_nao.pdf` explains the
+full model, equations, measurements and specific RL fixes needed before training.
+Its editable LaTeX, plots and raw data are in the same Git-ignored directory.

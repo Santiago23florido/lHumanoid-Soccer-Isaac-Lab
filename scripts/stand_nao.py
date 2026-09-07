@@ -95,6 +95,16 @@ parser.add_argument(
     help="Seconds to let the robot settle onto the ground before measuring. Default 0.5.",
 )
 parser.add_argument(
+    "--controller",
+    choices=("joint_pd", "dcm"),
+    default="joint_pd",
+    help=(
+        "joint_pd holds the nominal posture and nothing else. dcm closes a "
+        "capture-point loop on top of it, with ankle, hip and arm strategies. "
+        "Default joint_pd."
+    ),
+)
+parser.add_argument(
     "--rebuild-usd",
     action="store_true",
     help="Force regeneration of the derived URDF and the USD before loading.",
@@ -128,6 +138,7 @@ from isaaclab.assets import Articulation
 from isaaclab.sim import SimulationContext
 
 from humanoid_soccer_lab.assets import nao_kinematics as nk
+from humanoid_soccer_lab.controllers import DcmBalanceController
 from humanoid_soccer_lab.assets.nao import (
     NAO_STAND_COM_HEIGHT,
     NAO_STAND_LIPM_OMEGA,
@@ -220,6 +231,22 @@ def divergent_component(
     return com_pos[:, :2] + com_vel[:, :2] / omega
 
 
+def foot_normal_loads(robot: Articulation, foot_ids: list[int]) -> torch.Tensor:
+    """Return the upward load each foot carries, in newtons. Shape (N, 2).
+
+    Taken from the ankle joint reaction wrench rather than from the contact
+    sensor, so it is the same quantity the pressure-centre reconstruction uses
+    and the two cannot disagree. The reported vertical component is negative
+    while standing, because the wrench is the leg pressing down on the foot, and
+    the foot's own weight is added back to recover what the ground supplies.
+    """
+    wrench = robot.data.body_incoming_joint_wrench_b[:, foot_ids, :]
+    quats = robot.data.body_quat_w[:, foot_ids, :]
+    forces = math_utils.quat_apply(quats, wrench[..., :3])
+    foot_mass = robot.data.default_mass[:, foot_ids].to(robot.device)
+    return -forces[..., 2] + foot_mass * nk.GRAVITY
+
+
 def center_of_pressure(
     robot: Articulation, foot_ids: list[int], ground_height: float = 0.0
 ) -> torch.Tensor | None:
@@ -302,7 +329,8 @@ def report_startup(robot: Articulation, ankle_ids: list[int], foot_ids: list[int
     (x_min, x_max), (y_min, y_max) = nk.support_polygon_double_stance()
 
     print("\n" + "=" * 78)
-    print("NAO BALANCE BASELINE -- joint PD, no learning")
+    name = "joint PD" if args_cli.controller == "joint_pd" else "capture-point PD"
+    print(f"NAO BALANCE BASELINE -- {name}, no learning")
     print("=" * 78)
     print(f"  bodies / joints            : {robot.num_bodies} / {robot.num_joints}")
     print(f"  total mass                 : {float(robot.data.default_mass[0].sum()):.4f} kg")
@@ -360,6 +388,22 @@ def run(sim: SimulationContext, robot: Articulation) -> Recorder:
     model = nk.load_model()
     ankle_effort = next(j.effort for j in model.joints if j.name == "LAnklePitch")
 
+    controller = None
+    if args_cli.controller == "dcm":
+        joint_index = {name: i for i, name in enumerate(robot.joint_names)}
+        frames = nk.forward_kinematics(nk.NOMINAL_STAND_JOINT_POS)
+        sole_mid = 0.5 * (frames["l_sole"][:3, 3] + frames["r_sole"][:3, 3])
+        nominal_com = nk.center_of_mass(nk.NOMINAL_STAND_JOINT_POS) - sole_mid
+        controller = DcmBalanceController(
+            omega=NAO_STAND_LIPM_OMEGA,
+            nominal_joint_pos=targets,
+            joint_index=joint_index,
+            polygon_x=nk.SUPPORT_POLYGON_X,
+            polygon_y=nk.support_polygon_double_stance()[1],
+            foot_polygon_y=nk.SUPPORT_POLYGON_Y_SINGLE,
+            dcm_reference=(float(nominal_com[0]), float(nominal_com[1])),
+        )
+
     push_at = args_cli.push_at
 
     recorder = Recorder()
@@ -374,10 +418,27 @@ def run(sim: SimulationContext, robot: Articulation) -> Recorder:
         elapsed = step * PHYSICS_DT
 
         if step % CONTROL_DECIMATION == 0:
-            # The whole controller: hold every joint at its nominal angle. The
-            # gains do the rest. A learned policy replaces this one line with
-            # an offset on top of the same targets.
-            robot.set_joint_position_target(targets)
+            if controller is None:
+                # The whole controller: hold every joint at its nominal angle.
+                # The gains do the rest. A learned policy replaces this one line
+                # with an offset on top of the same targets.
+                robot.set_joint_position_target(targets)
+            else:
+                # Capture-point feedback. Same actuators and same nominal pose;
+                # the difference is that this one knows whether it is falling.
+                com_pos, com_vel = center_of_mass_world(robot)
+                robot.set_joint_position_target(
+                    controller.compute(
+                        com_pos_w=com_pos,
+                        com_vel_w=com_vel,
+                        foot_pos_w=robot.data.body_pos_w[:, foot_ids, :],
+                        foot_normal_force=foot_normal_loads(robot, foot_ids),
+                        joint_pos=robot.data.joint_pos,
+                        joint_vel=robot.data.joint_vel,
+                        stiffness=robot.data.joint_stiffness,
+                        damping=robot.data.joint_damping,
+                    )
+                )
 
         if args_cli.push_velocity != 0.0 and not pushed and elapsed >= push_at:
             velocity = robot.data.root_com_vel_w.clone()

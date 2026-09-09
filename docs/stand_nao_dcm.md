@@ -132,6 +132,47 @@ do it. That is a real trade, not a free improvement: holding a torque through a
 position target means there is no longer a "free" equilibrium the joint can
 rest at.
 
+## Under perturbation
+
+Same robot, same gains, same nominal posture, same measurement. The only thing
+that differs is the control law.
+
+| Push | LIPM prediction | Joint PD | Capture-point PD |
+| --- | --- | --- | --- |
+| 0.40 m/s | recoverable | recovers | recovers |
+| 0.50 m/s | recoverable | **falls** | recovers |
+| 0.55 m/s | bound is 0.548 | falls | **recovers** |
+| 0.60 m/s | not recoverable | falls | fell, then recovered |
+| 0.70 m/s | not recoverable | falls | falls |
+
+Three things worth reading carefully.
+
+**The threshold moves.** At 0.50 m/s one falls and the other does not. Nothing
+about the hardware changed — same actuators, same gains, same posture. The
+difference is that one controller knows where its pressure centre is.
+
+**It exceeds the capturable bound.** 0.55 m/s against a predicted 0.548 m/s.
+This does not contradict the theory, it *violates its assumption*: `ω₀ d` is
+derived from the linear inverted pendulum, which assumes centroidal angular
+momentum is constant, and the hip and arm strategy exists precisely to break
+that. The bound is the ceiling for an ankle-only strategy, not for the robot.
+
+**The 0.60 m/s result is ambiguous, and is reported as such.** The fall detector
+fired and then cleared. That is either a genuine recovery from a large lean or a
+transient threshold crossing, and **one repetition cannot distinguish them**.
+Calling it "recovers at 0.60" would be overstating it.
+
+Reproduce with:
+
+```powershell
+foreach ($c in "joint_pd","dcm") {
+  foreach ($v in 0.40,0.50,0.55,0.60) {
+    python scripts\stand_nao.py --headless --controller $c `
+           --duration 6 --push-velocity $v --push-at 3
+  }
+}
+```
+
 ## Running it
 
 ```powershell

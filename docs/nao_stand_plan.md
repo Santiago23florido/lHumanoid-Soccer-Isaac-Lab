@@ -27,15 +27,35 @@ leaves under perturbation.
 That headroom is not all winnable, and the plan should not pretend otherwise.
 
 Pushes are sampled uniformly in direction. The zero-step capturable bound is
-not: 0.548 m/s forward, 0.443 m/s backward, 0.620 m/s lateral. A backward push
-at full magnitude therefore exceeds what *any* controller can absorb without
-taking a step, and this task does not ask for a step. Roughly a quarter of the
-direction circle is affected at the top of the curriculum.
+not: 0.548 m/s forward, 0.443 m/s backward, 0.620 m/s lateral. Roughly a
+quarter of the direction circle is therefore near or past the bound at the top
+of the curriculum.
+
+### The capturable bound is not a hard ceiling — correction
+
+An earlier version of this plan said a full-magnitude backward push "exceeds
+what *any* controller can absorb without taking a step". That is wrong, and
+measurement showed it: the capture-point controller holds at 0.55 m/s, above
+the 0.548 m/s forward bound.
+
+The reason is in the derivation. `ẋ_max = ω₀ d` comes from the linear inverted
+pendulum, which assumes the **centroidal angular momentum does not change**.
+The hip and arm strategy is precisely the violation of that assumption: swinging
+the trunk and arms generates a horizontal ground reaction that the model does
+not account for.
+
+So the bound is the ceiling for an *ankle-only* strategy, not for the robot.
+The honest statement is:
+
+- `ω₀ d` bounds what the ankle alone can do.
+- Angular momentum buys some margin past it, and the size of that margin is an
+  empirical question this project can now answer.
+- Stepping would buy much more, and is outside this task.
 
 A realistic target is 95 %, not 100 %. A policy reporting 100 % on this protocol
-should be treated as a bug — most likely it learned to crouch, which lowers the
-centre of mass and evades the height reward's intent, or the termination
-threshold stopped firing.
+should still be treated as suspicious — most likely it learned to crouch, which
+lowers the centre of mass and evades the height reward's intent, or the
+termination threshold stopped firing.
 
 ## Why a policy can beat the PD at all
 
@@ -82,7 +102,9 @@ baseline's.
   and that is a geometric fact; in double support the foot binds before the
   ankle torque does.
 - It cannot recover a push that needs a step, because stepping is outside the
-  task.
+  task. Note this is a *weaker* limit than it first appears: angular momentum
+  extends the recoverable range past the ankle-only bound, as the capture-point
+  baseline demonstrates, so "needs a step" is further out than `ω₀ d` suggests.
 - It will not be smoother than the PD for free. The action-rate and torque
   penalties exist precisely because a 100 Hz policy can chatter at frequencies
   no real actuator would follow.

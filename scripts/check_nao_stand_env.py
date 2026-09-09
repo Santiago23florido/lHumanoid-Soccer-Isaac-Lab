@@ -45,6 +45,16 @@ parser = argparse.ArgumentParser(description="Smoke-test the NAO standing enviro
 parser.add_argument("--num-envs", type=int, default=16, help="Environments to create. Default 16.")
 parser.add_argument("--steps", type=int, default=300, help="Control steps per trial. Default 300.")
 parser.add_argument(
+    "--baseline",
+    choices=("joint_pd", "dcm"),
+    default="joint_pd",
+    help=(
+        "Which model-based controller to measure. joint_pd is a zero action, "
+        "which is the nominal-posture hold. dcm drives the same action space "
+        "with capture-point feedback. Default joint_pd."
+    ),
+)
+parser.add_argument(
     "--pushes",
     action="store_true",
     help=(
@@ -76,8 +86,11 @@ simulation_app = app_launcher.app
 import gymnasium as gym
 import torch
 
+import isaaclab.utils.math as math_utils
+
 import humanoid_soccer_lab.tasks  # noqa: F401  (registers the task ids)
 from humanoid_soccer_lab.assets import nao_kinematics as nk
+from humanoid_soccer_lab.controllers import DcmBalanceController
 from humanoid_soccer_lab.tasks.direct.nao_stand import TASK_ID
 from humanoid_soccer_lab.tasks.direct.nao_stand.nao_stand_env_cfg import NaoStandEnvCfg
 
@@ -142,6 +155,67 @@ def run_trial(env, actions_fn, steps: int) -> dict[str, float]:
     }
 
 
+def make_baseline_policy(inner, cfg):
+    """Return an action function implementing the requested model-based controller.
+
+    The environment's action is a displacement on the nominal posture,
+    ``q_des = q_nominal + action_scale * a``, so any controller that produces
+    joint targets can be expressed as an action by inverting that:
+
+        a = (q_des - q_nominal) / action_scale
+
+    restricted to the joints the policy owns. That is what lets the joint PD,
+    the capture-point controller and a learned policy all be scored on exactly
+    the same protocol, which is the only way the comparison means anything.
+    """
+    if args_cli.baseline == "joint_pd":
+        # A zero action already is the nominal-posture hold.
+        return lambda n, d: torch.zeros(n, cfg.action_space, device=d)
+
+    frames = nk.forward_kinematics(nk.NOMINAL_STAND_JOINT_POS)
+    sole_mid = 0.5 * (frames["l_sole"][:3, 3] + frames["r_sole"][:3, 3])
+    nominal_com = nk.center_of_mass(nk.NOMINAL_STAND_JOINT_POS) - sole_mid
+
+    controller = DcmBalanceController(
+        omega=cfg.lipm_omega,
+        nominal_joint_pos=inner._robot.data.default_joint_pos.clone(),
+        joint_index={name: i for i, name in enumerate(inner._robot.joint_names)},
+        polygon_x=cfg.support_polygon_x,
+        polygon_y=cfg.support_polygon_y,
+        foot_polygon_y=nk.SUPPORT_POLYGON_Y_SINGLE,
+        dcm_reference=(float(nominal_com[0]), float(nominal_com[1])),
+    )
+    actuated = inner._actuated_ids
+    nominal = inner._nominal_joint_pos
+
+    def policy(num_envs: int, device: str) -> torch.Tensor:
+        robot = inner._robot
+        masses = robot.data.default_mass.to(device)
+        weights = (masses / masses.sum(dim=1, keepdim=True)).unsqueeze(-1)
+        com_pos = (robot.data.body_com_pos_w * weights).sum(dim=1)
+        com_vel = (robot.data.body_com_lin_vel_w * weights).sum(dim=1)
+
+        wrench = robot.data.body_incoming_joint_wrench_b[:, inner._foot_ids, :]
+        quats = robot.data.body_quat_w[:, inner._foot_ids, :]
+        forces = math_utils.quat_apply(quats, wrench[..., :3])
+        foot_mass = robot.data.default_mass[:, inner._foot_ids].to(device)
+        load = -forces[..., 2] + foot_mass * nk.GRAVITY
+
+        targets = controller.compute(
+            com_pos_w=com_pos,
+            com_vel_w=com_vel,
+            foot_pos_w=robot.data.body_pos_w[:, inner._foot_ids, :],
+            foot_normal_force=load,
+            joint_pos=robot.data.joint_pos,
+            joint_vel=robot.data.joint_vel,
+            stiffness=robot.data.joint_stiffness,
+            damping=robot.data.joint_damping,
+        )
+        return (targets[:, actuated] - nominal) / cfg.action_scale
+
+    return policy
+
+
 def main() -> int:
     checks = Checks()
     cfg = NaoStandEnvCfg()
@@ -173,6 +247,7 @@ def main() -> int:
     print(f"  device                 : {inner.device}")
     randomised = not args_cli.no_reset_randomization
     print(f"  reset randomisation    : {'on' if randomised else 'off'}")
+    print(f"  baseline controller    : {args_cli.baseline}")
     print(
         f"  pushes                 : "
         f"{f'{cfg.push_velocity_final:.3f} m/s' if args_cli.pushes else 'off'}"
@@ -221,8 +296,8 @@ def main() -> int:
         "observations are finite at reset",
     )
 
-    print("\n  ZERO ACTION -- the nominal posture must hold on its own")
-    zero = run_trial(env, lambda n, d: torch.zeros(n, cfg.action_space, device=d), args_cli.steps)
+    print(f"\n  BASELINE ({args_cli.baseline}) -- model-based, no learning")
+    zero = run_trial(env, make_baseline_policy(inner, cfg), args_cli.steps)
     print(f"      fall-free rate     : {zero['fall_free_rate']:.1%}")
     print(f"      falls / timeouts   : {zero['falls']:.0f} / {zero['timeouts']:.0f}")
     print(f"      mean steps to fall : {zero['mean_steps_to_fall']:.1f}")
@@ -234,14 +309,14 @@ def main() -> int:
         # gap is exactly what the policy has to close.
         checks.record(
             zero["fall_free_rate"] > 0.5,
-            "the PD baseline survives most of the reset distribution",
+            f"the {args_cli.baseline} baseline survives most perturbations",
             f"{zero['fall_free_rate']:.1%} never fell -- headroom for learning: "
             f"{1.0 - zero['fall_free_rate']:.1%}",
         )
     else:
         checks.record(
             zero["fall_free_rate"] > 0.98,
-            "the nominal posture is stable on its own",
+            f"the {args_cli.baseline} baseline holds a quiet stance",
             f"{zero['fall_free_rate']:.1%} never fell",
         )
 

@@ -387,6 +387,30 @@ class NaoStandEnv(DirectRLEnv):
             env_ids = self._robot._ALL_INDICES
 
         self._robot.reset(env_ids)
+
+        # Place the robot at its nominal state *before* the reset events run.
+        #
+        # Order matters and used to be wrong here. The events own the randomised
+        # reset -- mdp.reset_root_state_uniform and mdp.reset_joints_by_offset
+        # both build on the defaults and then perturb them -- so writing the
+        # defaults afterwards silently threw their work away. It was invisible
+        # from the outside: the environment ran, the policy trained, and the
+        # domain randomisation simply did not exist. What exposed it was that
+        # enabling and disabling randomisation produced identical fall-free
+        # rates, which should have been impossible.
+        #
+        # Writing the nominal state first keeps a defined starting pose when no
+        # events are configured, and lets the events perturb it when they are.
+        joint_pos = self._robot.data.default_joint_pos[env_ids]
+        joint_vel = self._robot.data.default_joint_vel[env_ids]
+        root_state = self._robot.data.default_root_state[env_ids].clone()
+        # default_root_state is expressed in the local environment frame.
+        root_state[:, :3] += self._terrain.env_origins[env_ids]
+
+        self._robot.write_root_pose_to_sim(root_state[:, :7], env_ids)
+        self._robot.write_root_velocity_to_sim(root_state[:, 7:], env_ids)
+        self._robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
+
         super()._reset_idx(env_ids)
 
         if len(env_ids) == self.num_envs:
@@ -400,16 +424,6 @@ class NaoStandEnv(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
         self._last_push[env_ids] = 0.0
         self._push_countdown[env_ids] = self._sample_push_interval(len(env_ids))
-
-        joint_pos = self._robot.data.default_joint_pos[env_ids]
-        joint_vel = self._robot.data.default_joint_vel[env_ids]
-        root_state = self._robot.data.default_root_state[env_ids].clone()
-        # default_root_state is expressed in the local environment frame.
-        root_state[:, :3] += self._terrain.env_origins[env_ids]
-
-        self._robot.write_root_pose_to_sim(root_state[:, :7], env_ids)
-        self._robot.write_root_velocity_to_sim(root_state[:, 7:], env_ids)
-        self._robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
         extras = {}
         for key in self._episode_sums:

@@ -307,9 +307,23 @@ class DcmBalanceController:
                                  roll_col, -lever_y * force[:, slot])
 
         # -- hip and arm strategy -----------------------------------------
-        # Only non-zero once the ankle has run out of polygon.
-        hip = (cfg.hip_gain * saturation[:, 0]).clamp(-cfg.hip_limit, cfg.hip_limit)
-        arm = (cfg.arm_gain * saturation[:, 0]).clamp(-cfg.arm_limit, cfg.arm_limit)
+        # Only non-zero once the ankle has run out of polygon, and only for a
+        # *forward* overrun.
+        #
+        # The sign of this strategy was verified against forward pushes and
+        # nothing else, and measurement showed that mattered: with it active in
+        # both directions the controller fell to a 0.30 m/s backward push that
+        # the plain joint PD survives. Falling backwards is also the more
+        # dangerous failure, since the heel is only 60.7 mm from the ankle
+        # against 103.3 mm of toe.
+        #
+        # Gating to the validated direction leaves backward recovery to the
+        # ankle alone, which is worse than a correct two-sided strategy would be
+        # but better than an actively wrong one. Deriving and checking the
+        # backward and lateral signs is left as real work, not a sign flip.
+        forward_saturation = saturation[:, 0].clamp(min=0.0)
+        hip = (cfg.hip_gain * forward_saturation).clamp(-cfg.hip_limit, cfg.hip_limit)
+        arm = (cfg.arm_gain * forward_saturation).clamp(-cfg.arm_limit, cfg.arm_limit)
         for column in self._hip_pitch:
             targets[:, column] = self.nominal[:, column] + hip
         for column in self._shoulder_pitch:

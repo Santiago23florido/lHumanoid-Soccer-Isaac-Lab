@@ -256,6 +256,15 @@ class NaoStandEnv(DirectRLEnv):
     ##
 
     def _get_observations(self) -> dict:
+        # Refresh before reading. The base class runs _get_dones, then the
+        # reward, then _reset_idx, then this. The values computed in _get_dones
+        # describe the state the reward was for, which is correct there and
+        # stale here: for any environment that just reset, they still describe
+        # the episode that ended. That would hand the policy a large, wrong
+        # first observation on every single episode -- a systematic error, not
+        # noise, and one that no test would flag.
+        self._compute_intermediate_values()
+
         data = self._robot.data
         joint_offset = data.joint_pos[:, self._actuated_ids] - self._nominal_joint_pos
         joint_vel = data.joint_vel[:, self._actuated_ids]

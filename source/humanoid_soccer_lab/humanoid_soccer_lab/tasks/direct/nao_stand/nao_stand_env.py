@@ -33,6 +33,8 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor
 
+from humanoid_soccer_lab.assets import nao_kinematics as nk
+
 from .nao_stand_env_cfg import NaoStandEnvCfg
 
 
@@ -75,6 +77,22 @@ class NaoStandEnv(DirectRLEnv):
         self._mass_weights = (masses / masses.sum(dim=1, keepdim=True)).unsqueeze(-1)
 
         self._nominal_joint_pos = self._robot.data.default_joint_pos[:, self._actuated_ids].clone()
+
+        # Joints the policy does not command still need a target, or their
+        # drives chase whatever the target buffer happened to hold. That is
+        # zero today, which is also their nominal, so nothing misbehaves -- but
+        # it is unowned state that stops being harmless the moment a nominal
+        # changes, and it would fail silently when it does.
+        self._held_ids, _ = self._robot.find_joints(list(nk.HELD_JOINTS), preserve_order=True)
+        self._held_targets = self._robot.data.default_joint_pos[:, self._held_ids].clone()
+        self._robot.set_joint_position_target(self._held_targets, joint_ids=self._held_ids)
+
+        # Soft limits sit at 90% of each range. Commanding past them wastes
+        # policy output on a region the simulator clamps away, where the
+        # gradient is zero.
+        limits = self._robot.data.soft_joint_pos_limits[:, self._actuated_ids, :]
+        self._target_lower = limits[..., 0]
+        self._target_upper = limits[..., 1]
 
         # Steps until the next push, per environment. Staggered at reset so the
         # whole batch does not get shoved on the same frame.
@@ -130,9 +148,16 @@ class NaoStandEnv(DirectRLEnv):
     ##
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        self._actions = actions.clone()
-        self._processed_actions = (
-            self.cfg.action_scale * self._actions + self._nominal_joint_pos
+        # The policy is Gaussian, so its output is unbounded however small the
+        # initial standard deviation is. A tail sample would otherwise command a
+        # joint far past its stop, where the simulator clamps and the gradient
+        # vanishes, and the policy would keep paying exploration noise for
+        # output that can never take effect.
+        self._actions = actions.clamp(-self.cfg.action_clip, self.cfg.action_clip)
+        self._processed_actions = torch.clamp(
+            self.cfg.action_scale * self._actions + self._nominal_joint_pos,
+            self._target_lower,
+            self._target_upper,
         )
         self._apply_pushes()
 
@@ -140,6 +165,7 @@ class NaoStandEnv(DirectRLEnv):
         self._robot.set_joint_position_target(
             self._processed_actions, joint_ids=self._actuated_ids
         )
+        self._robot.set_joint_position_target(self._held_targets, joint_ids=self._held_ids)
 
     def _push_magnitude(self) -> float:
         """Current push magnitude in m/s, ramped over the curriculum.

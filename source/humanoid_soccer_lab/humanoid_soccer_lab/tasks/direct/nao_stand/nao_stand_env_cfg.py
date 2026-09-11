@@ -197,6 +197,15 @@ class NaoStandEnvCfg(DirectRLEnvCfg):
     biasing the policy, because none of this reaches the actor.
     """
 
+    action_clip = 3.0
+    """Bound applied to the raw policy output before scaling.
+
+    A Gaussian policy is unbounded, so a tail sample can ask for a joint angle
+    far outside the range. Three standard deviations at the initial noise level
+    covers the useful output and discards only the tail that the joint limits
+    would clamp away anyway.
+    """
+
     action_scale = 0.25
     """Radians of joint offset per unit action.
 

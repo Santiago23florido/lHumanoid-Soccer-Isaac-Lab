@@ -59,6 +59,11 @@ def main() -> None:
     # by string and imported only when a task is actually instantiated.
     import humanoid_soccer_lab.tasks  # noqa: F401
 
+    # Isaac Lab's scripts import cli_args as a sibling module, so their
+    # own directory has to be importable before runpy executes them.
+    if str(trainer.parent) not in sys.path:
+        sys.path.insert(0, str(trainer.parent))
+
     sys.argv[0] = str(trainer)
     runpy.run_path(str(trainer), run_name="__main__")
 

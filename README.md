@@ -9,18 +9,40 @@ The previous Franka Lagrangian MBRL work is preserved on:
 archive/franka-lagrangian-mbrl-2026-07-25
 ```
 
-## Current development status (2026-09-21)
+## Current development status
 
-The NAO has a working joint-PD standing baseline in `scripts/stand_nao.py`,
-with URDF-based kinematics, inertia-informed gains and recorded balance metrics.
-The latest checks passed 100 tests; headless trials held posture without a push
-and with a +0.30 m/s velocity increment, and detected a fall at +0.70 m/s.
-See [`docs/stand_nao.md`](docs/stand_nao.md) for the protocol and limitations.
+Three controllers now stand the NAO up, and all three are scored on one shared
+protocol — 128 environments, the same reset distribution, omnidirectional
+pushes to 0.548 m/s — so the numbers mean the same thing.
 
-The repository also contains an experimental `nao_stand` RL environment and
-PPO configuration. They have not been trained or validated as an integrated
-learning task. `scripts/train.py` and `scripts/play.py` remain placeholders.
-See [`docs/nao_stand.md`](docs/nao_stand.md) for the outstanding integration work.
+| Controller | What it is | Fall-free |
+| --- | --- | --- |
+| Joint PD | Holds the nominal posture. One line of control. | **80.5 %** |
+| Capture-point PD | Feedback on the divergent component, with ankle, hip and arm strategies. | 45.3 % |
+| PPO policy | 19 joint offsets, asymmetric actor-critic. | *training* |
+
+The capture-point controller is the cautionary result. On a single *forward*
+push it clearly beats the joint PD, recovering 0.55 m/s where the joint PD
+falls at 0.50. On the full protocol, where pushes come from every direction, it
+scores far worse — its hip and arm gains were only ever validated in the
+sagittal plane. Validating in one direction and generalising to all of them is
+the mistake, and it is documented rather than quietly fixed.
+
+Reproduce any row with:
+
+```powershell
+python scripts\check_nao_stand_env.py --headless --num-envs 128 --steps 600 `
+       --pushes --baseline joint_pd      # or --baseline dcm, or --policy <path>
+```
+
+See [`docs/stand_nao.md`](docs/stand_nao.md) for the joint PD,
+[`docs/stand_nao_dcm.md`](docs/stand_nao_dcm.md) for the capture-point
+controller, [`docs/nao_stand.md`](docs/nao_stand.md) for the learning task and
+[`docs/nao_stand_plan.md`](docs/nao_stand_plan.md) for what beating these
+baselines is allowed to mean.
+
+`scripts/train.py` and `scripts/play.py` are real entry points now, delegating
+to Isaac Lab's RSL-RL scripts after registering this extension's task ids.
 
 The original passive asset/viewer described below remains available. Its zero
 drives are distinct from the standing configuration's active PD drives.

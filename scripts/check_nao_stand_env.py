@@ -55,6 +55,17 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--policy",
+    type=Path,
+    default=None,
+    help=(
+        "TorchScript policy exported by rsl-rl, usually "
+        "logs/rsl_rl/nao_stand/<run>/exported/policy.pt. Scores a trained "
+        "policy on the same protocol as the model-based baselines; overrides "
+        "--baseline."
+    ),
+)
+parser.add_argument(
     "--pushes",
     action="store_true",
     help=(
@@ -168,6 +179,21 @@ def make_baseline_policy(inner, cfg):
     the capture-point controller and a learned policy all be scored on exactly
     the same protocol, which is the only way the comparison means anything.
     """
+    if args_cli.policy is not None:
+        # A TorchScript policy exported by rsl-rl. The export carries the
+        # observation normaliser inside it, so it consumes the raw 65-value
+        # actor observation and returns the 19 actions directly -- the same
+        # tensor a zero-action or capture-point baseline would produce, which
+        # is what makes the three comparable at all.
+        module = torch.jit.load(str(args_cli.policy), map_location=inner.device)
+        module.eval()
+
+        def learned(num_envs: int, device: str) -> torch.Tensor:
+            with torch.inference_mode():
+                return module(inner._get_observations()["policy"]).clone()
+
+        return learned
+
     if args_cli.baseline == "joint_pd":
         # A zero action already is the nominal-posture hold.
         return lambda n, d: torch.zeros(n, cfg.action_space, device=d)
@@ -247,7 +273,10 @@ def main() -> int:
     print(f"  device                 : {inner.device}")
     randomised = not args_cli.no_reset_randomization
     print(f"  reset randomisation    : {'on' if randomised else 'off'}")
-    print(f"  baseline controller    : {args_cli.baseline}")
+    label = "policy" if args_cli.policy is not None else args_cli.baseline
+    print(f"  controller             : {label}")
+    if args_cli.policy is not None:
+        print(f"  checkpoint             : {args_cli.policy}")
     print(
         f"  pushes                 : "
         f"{f'{cfg.push_velocity_final:.3f} m/s' if args_cli.pushes else 'off'}"
@@ -309,14 +338,14 @@ def main() -> int:
         # gap is exactly what the policy has to close.
         checks.record(
             zero["fall_free_rate"] > 0.5,
-            f"the {args_cli.baseline} baseline survives most perturbations",
+            f"the {label} controller survives most perturbations",
             f"{zero['fall_free_rate']:.1%} never fell -- headroom for learning: "
             f"{1.0 - zero['fall_free_rate']:.1%}",
         )
     else:
         checks.record(
             zero["fall_free_rate"] > 0.98,
-            f"the {args_cli.baseline} baseline holds a quiet stance",
+            f"the {label} controller holds a quiet stance",
             f"{zero['fall_free_rate']:.1%} never fell",
         )
 

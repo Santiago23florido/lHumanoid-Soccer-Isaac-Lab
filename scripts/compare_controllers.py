@@ -85,13 +85,17 @@ from humanoid_soccer_lab.tasks.direct.nao_stand.nao_stand_env_cfg import NaoStan
 def run_trial(env, actions_fn, steps: int) -> dict[str, float]:
     """Step the environment under one controller and summarise the outcome.
 
+    ``actions_fn`` receives the observation the environment just returned, so
+    a learned policy reads exactly what it would read in deployment and the
+    environment is stepped once per control step, not queried twice.
+
     Falls and timeouts are counted separately. The episode length buffer is
     randomised at reset so the batch does not terminate in lockstep, which means
     a fixed number of steps always contains truncations; charging those to the
     controller would understate every one of them equally but by an amount that
     depends on the run.
     """
-    env.reset()
+    obs, _ = env.reset()
     device = env.unwrapped.device
     num_envs = env.unwrapped.num_envs
 
@@ -106,8 +110,8 @@ def run_trial(env, actions_fn, steps: int) -> dict[str, float]:
     effort = next(j.effort for j in nk.load_model().joints if j.name == "LAnklePitch")
 
     for _ in range(steps):
-        actions = actions_fn(num_envs, device)
-        _, reward, terminated, truncated, _ = env.step(actions)
+        actions = actions_fn(obs, num_envs, device)
+        obs, reward, terminated, truncated, _ = env.step(actions)
         reward_total += reward
         ever_fell |= terminated
         falls += terminated.float()
@@ -126,7 +130,7 @@ def run_trial(env, actions_fn, steps: int) -> dict[str, float]:
 
 def joint_pd_policy(cfg):
     """A zero action already is the nominal-posture hold."""
-    return lambda n, d: torch.zeros(n, cfg.action_space, device=d)
+    return lambda obs, n, d: torch.zeros(n, cfg.action_space, device=d)
 
 
 def dcm_policy(inner, cfg):
@@ -145,7 +149,7 @@ def dcm_policy(inner, cfg):
         dcm_reference=(float(nominal_com[0]), float(nominal_com[1])),
     )
 
-    def policy(num_envs: int, device: str) -> torch.Tensor:
+    def policy(obs, num_envs: int, device: str) -> torch.Tensor:
         robot = inner._robot
         masses = robot.data.default_mass.to(device)
         weights = (masses / masses.sum(dim=1, keepdim=True)).unsqueeze(-1)
@@ -179,9 +183,14 @@ def learned_policy(inner, path: Path):
     module = torch.jit.load(str(path), map_location=inner.device)
     module.eval()
 
-    def policy(num_envs: int, device: str) -> torch.Tensor:
+    def policy(obs, num_envs: int, device: str) -> torch.Tensor:
+        # The observation the environment just returned, not a fresh one.
+        # Re-deriving it would call _get_observations a second time per step,
+        # which recomputes the balance quantities and touches the previous-
+        # action buffer the action-rate penalty reads. It happens to come out
+        # the same today; relying on that is not worth the fragility.
         with torch.inference_mode():
-            return module(inner._get_observations()["policy"]).clone()
+            return module(obs["policy"]).clone()
 
     return policy
 

@@ -39,29 +39,40 @@ Closed by runtime testing:
   more than two kernel widths, which drove the height reward to 0.00015. It now
   measures from the ground plane and reads 0.149.
 
-Still open from static review:
+Fixed, each with a test that fails if it comes back:
+
+3. **The reset discarded its own randomization.** `_reset_idx` applied the reset
+   events and then wrote the defaults over them. The nominal state is now
+   written first, so the events perturb it instead of being erased. This was the
+   one that mattered: the domain randomization did not exist, and the only
+   symptom was that toggling it changed nothing.
+4. **The post-reset observation described the previous episode.** The derived
+   values were computed in `_get_dones`, which runs before `_reset_idx`.
+   `_get_observations` now refreshes them, so a reset environment reports the
+   pose it restarted from rather than the one it fell into.
+5. **The six held joints had no owner.** They now get their nominal targets
+   explicitly, at reset and every control step.
+8. **Actions were unbounded.** Clipped at three standard deviations, with the
+   resulting targets clamped into the soft joint limits.
+10. **`train.py` and `play.py` were placeholders.** They now delegate to Isaac
+    Lab's RSL-RL scripts after registering this extension's task ids. The
+    extension also installs, which it never did: `pyproject.toml` pointed
+    `readme` outside the package directory and setuptools refused it.
+
+Still open:
 
 2. CoM mass weights use `default_mass` even after the startup event changes
-   the actual torso mass in PhysX.
-3. `_reset_idx` calls the base reset events and subsequently overwrites their
-   randomized states with nominal joint and root states. **Confirmed by
-   measurement**: enabling and disabling reset randomization produced identical
-   fall-free rates, because the randomization never survived to the first step.
-4. Derived CoM/DCM/contact values can describe the previous episode when
-   observations are assembled immediately after a reset.
-5. The six held-joint targets need explicit initialization and a check that
-   zero policy action reproduces the complete PD baseline.
+   the actual torso mass in PhysX. Every CoM and DCM value is therefore slightly
+   wrong, per environment and invisibly.
 6. The quantity named foot normal force is a historical maximum of force
-   magnitude, rather than the current vertical force.
-7. `_get_observations` changes the previous-action buffer; its indexing and
-   repeated-read behavior need verification.
-8. Actions and position targets have no explicit clipping in the environment.
-   A Gaussian action distribution is not bounded by the 0.25 scaling factor.
-9. The nominal double-support rectangle does not track actual loaded contacts.
-   The forward capturability bound is also used for all push directions.
-10. `scripts/train.py` and `scripts/play.py` remain placeholders. Extension
-    installation, asset resolution, rollout, saving and loading need end-to-end
-    validation. The play configuration still has sources of randomness.
+   magnitude rather than the current vertical component. It feeds the critic and
+   reads as a normal load.
+7. Resolved in the evaluation harness, which now threads the environment's own
+   observation through, but `_get_observations` still writes the previous-action
+   buffer as a side effect.
+9. The nominal double-support rectangle does not track which feet are actually
+   loaded, and the forward capturability bound is used for every push direction
+   even though the backward bound is 0.443 m/s.
 
 The curriculum consumes 24 million aggregate environment steps. With 4096
 environments and 24 steps per iteration, that is approximately 244 iterations,
@@ -69,23 +80,44 @@ not the 2000 mentioned in a configuration comment.
 
 ## What the PD baseline leaves for the policy
 
-Measured with `scripts/check_nao_stand_env.py --pushes`, 128 environments,
-600 control steps, pushes sampled uniformly in direction at up to 0.548 m/s:
+128 environments, 600 control steps, pushes sampled uniformly in direction at
+up to 0.548 m/s:
 
-| Controller | Fall-free | Falls | Mean return |
-| --- | --- | --- | --- |
-| Zero action (pure PD) | 85.2 % | 21 | +35.7 |
-| Random action | 32.8 % | 117 | +26.9 |
+| Controller | Fall-free | Falls |
+| --- | --- | --- |
+| Joint PD (zero action) | **80.5 %** | 27 |
+| Capture-point PD | 45.3 % | 75 |
+| Random action | 32.8 % | 117 |
 
-Without pushes the PD never falls, so **14.8 % is the headroom a policy has to
-win**, and it is the number any training run should be judged against. Part of
-that headroom is not winnable by an ankle strategy at all: pushes are uniform in
-direction while the capturable bound is not (0.548 m/s forward, 0.443 m/s
-backward, 0.620 m/s lateral), so a backward push at full magnitude is beyond
-what any non-stepping controller can absorb. Closing the rest requires the arm
-and hip strategies the PD structurally cannot express.
+**80.5 % is the number to beat.** Without pushes the joint PD never falls, so
+the 19.5 % is entirely the perturbation protocol.
 
-Before a training campaign, resolve the open issues above, then perform a short
-PPO update/save/load check. Evaluate learned behavior on the same perturbation
-protocol as the PD. Existing unit tests and PD simulations do not certify this
-RL environment.
+### This number replaced a wrong one
+
+An earlier measurement put the joint PD at 85.2 %. That run predated the reset
+fix, so the domain randomization was being discarded and the controller was
+being scored on an easier problem than the one it is supposed to solve.
+Publishing 85.2 % would have set the bar below the real baseline.
+
+The capture-point controller scoring *worse* is the other result worth
+carrying. On a single forward push it beats the joint PD outright, recovering
+0.55 m/s where the joint PD falls at 0.50. Its hip and arm gains were only ever
+validated in the sagittal plane, and on omnidirectional pushes that costs it
+more than the capture-point feedback wins. See
+[stand_nao_dcm.md](stand_nao_dcm.md).
+
+Not all 19.5 % is winnable without stepping. Pushes are uniform in direction
+while the capturable bound is not — 0.548 m/s forward, 0.443 m/s backward,
+0.620 m/s lateral — so the hardest backward pushes need a step. But the bound
+itself is not a hard ceiling either: it assumes constant centroidal angular
+momentum, and a hip or arm strategy breaks that assumption deliberately.
+
+Score a trained policy on exactly this protocol with:
+
+```powershell
+python scripts\compare_controllers.py --headless --num-envs 128 --steps 600 `
+       --policy logs\rsl_rl\nao_stand\<run>\exported\policy.pt
+```
+
+which runs all three controllers against one environment instance, so the only
+difference between them is the control law.

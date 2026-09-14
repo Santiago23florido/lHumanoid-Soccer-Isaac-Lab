@@ -33,6 +33,8 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor
 
+from humanoid_soccer_lab.assets import nao_kinematics as nk
+
 from .nao_stand_env_cfg import NaoStandEnvCfg
 
 
@@ -75,6 +77,22 @@ class NaoStandEnv(DirectRLEnv):
         self._mass_weights = (masses / masses.sum(dim=1, keepdim=True)).unsqueeze(-1)
 
         self._nominal_joint_pos = self._robot.data.default_joint_pos[:, self._actuated_ids].clone()
+
+        # Joints the policy does not command still need a target, or their
+        # drives chase whatever the target buffer happened to hold. That is
+        # zero today, which is also their nominal, so nothing misbehaves -- but
+        # it is unowned state that stops being harmless the moment a nominal
+        # changes, and it would fail silently when it does.
+        self._held_ids, _ = self._robot.find_joints(list(nk.HELD_JOINTS), preserve_order=True)
+        self._held_targets = self._robot.data.default_joint_pos[:, self._held_ids].clone()
+        self._robot.set_joint_position_target(self._held_targets, joint_ids=self._held_ids)
+
+        # Soft limits sit at 90% of each range. Commanding past them wastes
+        # policy output on a region the simulator clamps away, where the
+        # gradient is zero.
+        limits = self._robot.data.soft_joint_pos_limits[:, self._actuated_ids, :]
+        self._target_lower = limits[..., 0]
+        self._target_upper = limits[..., 1]
 
         # Steps until the next push, per environment. Staggered at reset so the
         # whole batch does not get shoved on the same frame.
@@ -130,9 +148,16 @@ class NaoStandEnv(DirectRLEnv):
     ##
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        self._actions = actions.clone()
-        self._processed_actions = (
-            self.cfg.action_scale * self._actions + self._nominal_joint_pos
+        # The policy is Gaussian, so its output is unbounded however small the
+        # initial standard deviation is. A tail sample would otherwise command a
+        # joint far past its stop, where the simulator clamps and the gradient
+        # vanishes, and the policy would keep paying exploration noise for
+        # output that can never take effect.
+        self._actions = actions.clamp(-self.cfg.action_clip, self.cfg.action_clip)
+        self._processed_actions = torch.clamp(
+            self.cfg.action_scale * self._actions + self._nominal_joint_pos,
+            self._target_lower,
+            self._target_upper,
         )
         self._apply_pushes()
 
@@ -140,6 +165,7 @@ class NaoStandEnv(DirectRLEnv):
         self._robot.set_joint_position_target(
             self._processed_actions, joint_ids=self._actuated_ids
         )
+        self._robot.set_joint_position_target(self._held_targets, joint_ids=self._held_ids)
 
     def _push_magnitude(self) -> float:
         """Current push magnitude in m/s, ramped over the curriculum.
@@ -256,6 +282,15 @@ class NaoStandEnv(DirectRLEnv):
     ##
 
     def _get_observations(self) -> dict:
+        # Refresh before reading. The base class runs _get_dones, then the
+        # reward, then _reset_idx, then this. The values computed in _get_dones
+        # describe the state the reward was for, which is correct there and
+        # stale here: for any environment that just reset, they still describe
+        # the episode that ended. That would hand the policy a large, wrong
+        # first observation on every single episode -- a systematic error, not
+        # noise, and one that no test would flag.
+        self._compute_intermediate_values()
+
         data = self._robot.data
         joint_offset = data.joint_pos[:, self._actuated_ids] - self._nominal_joint_pos
         joint_vel = data.joint_vel[:, self._actuated_ids]
@@ -387,6 +422,30 @@ class NaoStandEnv(DirectRLEnv):
             env_ids = self._robot._ALL_INDICES
 
         self._robot.reset(env_ids)
+
+        # Place the robot at its nominal state *before* the reset events run.
+        #
+        # Order matters and used to be wrong here. The events own the randomised
+        # reset -- mdp.reset_root_state_uniform and mdp.reset_joints_by_offset
+        # both build on the defaults and then perturb them -- so writing the
+        # defaults afterwards silently threw their work away. It was invisible
+        # from the outside: the environment ran, the policy trained, and the
+        # domain randomisation simply did not exist. What exposed it was that
+        # enabling and disabling randomisation produced identical fall-free
+        # rates, which should have been impossible.
+        #
+        # Writing the nominal state first keeps a defined starting pose when no
+        # events are configured, and lets the events perturb it when they are.
+        joint_pos = self._robot.data.default_joint_pos[env_ids]
+        joint_vel = self._robot.data.default_joint_vel[env_ids]
+        root_state = self._robot.data.default_root_state[env_ids].clone()
+        # default_root_state is expressed in the local environment frame.
+        root_state[:, :3] += self._terrain.env_origins[env_ids]
+
+        self._robot.write_root_pose_to_sim(root_state[:, :7], env_ids)
+        self._robot.write_root_velocity_to_sim(root_state[:, 7:], env_ids)
+        self._robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
+
         super()._reset_idx(env_ids)
 
         if len(env_ids) == self.num_envs:
@@ -400,16 +459,6 @@ class NaoStandEnv(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
         self._last_push[env_ids] = 0.0
         self._push_countdown[env_ids] = self._sample_push_interval(len(env_ids))
-
-        joint_pos = self._robot.data.default_joint_pos[env_ids]
-        joint_vel = self._robot.data.default_joint_vel[env_ids]
-        root_state = self._robot.data.default_root_state[env_ids].clone()
-        # default_root_state is expressed in the local environment frame.
-        root_state[:, :3] += self._terrain.env_origins[env_ids]
-
-        self._robot.write_root_pose_to_sim(root_state[:, :7], env_ids)
-        self._robot.write_root_velocity_to_sim(root_state[:, 7:], env_ids)
-        self._robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
         extras = {}
         for key in self._episode_sums:

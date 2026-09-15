@@ -218,6 +218,7 @@ class DcmBalanceController:
         joint_vel: torch.Tensor,
         stiffness: torch.Tensor,
         damping: torch.Tensor,
+        base_quat_w: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return full joint position targets.
 
@@ -237,9 +238,22 @@ class DcmBalanceController:
         cfg = self.cfg
         support_center = foot_pos_w.mean(dim=1)
 
+        # -- everything horizontal goes into the robot's heading frame
+        #
+        # The ankle pitch and roll axes live in the body, not the world. A robot
+        # facing +x and the same robot yawed 90 degrees need identical ankle
+        # commands for an identical lean, and a world-frame command would send
+        # the pitch correction to the roll joint. With yaw randomised over the
+        # full circle at reset, that is not an edge case: it is most episodes,
+        # and it took the controller from 45% fall-free to 5%.
+        #
+        # Yaw is extracted here rather than with isaaclab's math helpers so that
+        # this module stays importable without Isaac Sim, which the tests need.
+        cos_yaw, sin_yaw = self._heading(base_quat_w, com_pos_w)
+
         # -- divergent component, relative to the middle of the support polygon
-        offset = com_pos_w[:, :2] - support_center[:, :2]
-        velocity = com_vel_w[:, :2]
+        offset = self._to_heading(com_pos_w[:, :2] - support_center[:, :2], cos_yaw, sin_yaw)
+        velocity = self._to_heading(com_vel_w[:, :2], cos_yaw, sin_yaw)
         dcm = offset + velocity / self.omega
         self.last_dcm = dcm
 
@@ -282,7 +296,9 @@ class DcmBalanceController:
         for slot, (pitch_col, roll_col) in enumerate(
             zip(self._ankle_pitch, self._ankle_roll, strict=True)
         ):
-            foot_offset = foot_pos_w[:, slot, :2] - support_center[:, :2]
+            foot_offset = self._to_heading(
+                foot_pos_w[:, slot, :2] - support_center[:, :2], cos_yaw, sin_yaw
+            )
 
             # A foot can only carry pressure inside its own sole. Asking both
             # ankles to put their pressure centre on the midline would be asking
@@ -330,6 +346,37 @@ class DcmBalanceController:
             targets[:, column] = self.nominal[:, column] - arm
 
         return targets
+
+    @staticmethod
+    def _heading(
+        base_quat_w: torch.Tensor | None, reference: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return ``(cos yaw, sin yaw)`` of the base, or the identity without one.
+
+        Accepting ``None`` keeps the controller usable in a fixed-heading setting
+        such as the single-robot baseline script, where the robot always faces
+        +x, without making every caller pass a quaternion it does not have.
+        """
+        if base_quat_w is None:
+            ones = torch.ones(reference.shape[0], device=reference.device, dtype=reference.dtype)
+            return ones, torch.zeros_like(ones)
+
+        w, x, y, z = base_quat_w.unbind(dim=-1)
+        yaw = torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+        return torch.cos(yaw), torch.sin(yaw)
+
+    @staticmethod
+    def _to_heading(
+        vector: torch.Tensor, cos_yaw: torch.Tensor, sin_yaw: torch.Tensor
+    ) -> torch.Tensor:
+        """Rotate a horizontal world vector into the heading frame, i.e. by -yaw."""
+        return torch.stack(
+            [
+                vector[:, 0] * cos_yaw + vector[:, 1] * sin_yaw,
+                -vector[:, 0] * sin_yaw + vector[:, 1] * cos_yaw,
+            ],
+            dim=-1,
+        )
 
     def _request_torque(
         self,

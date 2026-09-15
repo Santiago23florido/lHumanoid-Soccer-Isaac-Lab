@@ -171,6 +171,7 @@ def dcm_policy(inner, cfg):
             joint_vel=robot.data.joint_vel,
             stiffness=robot.data.joint_stiffness,
             damping=robot.data.joint_damping,
+            base_quat_w=robot.data.root_quat_w,
         )
         offset = targets[:, inner._actuated_ids] - inner._nominal_joint_pos
         return offset / cfg.action_scale

@@ -222,6 +222,42 @@ def test_a_forward_lean_plantarflexes_both_ankles() -> None:
     assert float(targets[0, INDEX["RAnklePitch"]]) > 0.0
 
 
+def test_the_response_is_invariant_to_the_robot_s_heading() -> None:
+    """A yawed robot leaning the same way needs the same ankle command.
+
+    The ankle pitch and roll axes live in the body, not the world. Computing the
+    pressure-centre command in world frame sends a pitch correction to the roll
+    joint as soon as the robot is not facing +x. With yaw randomised over the
+    full circle at reset that is most episodes, and it took the controller from
+    45% fall-free to 5% once the randomisation actually reached the simulation.
+    """
+    import math
+
+    controller = _controller()
+    count = len(JOINTS)
+    facing_x = _run(controller, vel_xy=(0.25, 0.0))
+
+    # The same robot, yawed 90 degrees, leaning the same way relative to itself:
+    # its forward direction is now +y, so the world-frame velocity rotates too.
+    half = math.pi / 4.0  # half of 90 degrees, as a quaternion needs
+    quat = torch.tensor([[math.cos(half), 0.0, 0.0, math.sin(half)]])
+    yawed = controller.compute(
+        com_pos_w=torch.tensor([[0.0, 0.0, 0.27]]),
+        com_vel_w=torch.tensor([[0.0, 0.25, 0.0]]),
+        foot_pos_w=torch.tensor([[[-STANCE, 0.0, FOOT_HEIGHT], [STANCE, 0.0, FOOT_HEIGHT]]]),
+        foot_normal_force=torch.full((1, 2), 26.0),
+        joint_pos=torch.zeros(1, count),
+        joint_vel=torch.zeros(1, count),
+        stiffness=torch.full((1, count), 34.0),
+        damping=torch.full((1, count), 4.7),
+        base_quat_w=quat,
+    )
+
+    assert float(yawed[0, INDEX["LAnklePitch"]]) == pytest.approx(
+        float(facing_x[0, INDEX["LAnklePitch"]]), abs=1e-5
+    ), "the ankle pitch command changed with heading alone"
+
+
 def test_the_response_is_symmetric_between_left_and_right() -> None:
     """A purely sagittal disturbance must not favour one leg."""
     controller = _controller()

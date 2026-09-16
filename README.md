@@ -15,11 +15,19 @@ Three controllers now stand the NAO up, and all three are scored on one shared
 protocol — 128 environments, the same reset distribution, omnidirectional
 pushes to 0.548 m/s — so the numbers mean the same thing.
 
-| Controller | What it is | Fall-free |
-| --- | --- | --- |
-| Joint PD | Holds the nominal posture. One line of control. | **80.5 %** |
-| Capture-point PD | Feedback on the divergent component, with ankle, hip and arm strategies. | 45.3 % |
-| PPO policy | 19 joint offsets, asymmetric actor-critic. | *training* |
+| Controller | What it is | Fall-free | Ankle torque |
+| --- | --- | --- | --- |
+| **PPO policy** | 19 joint offsets, asymmetric actor-critic. | **99.2 %** | 30.5 % |
+| Joint PD | Holds the nominal posture. One line of control. | 82.0 % | 35.3 % |
+| Capture-point PD | Feedback on the divergent component, with ankle, hip and arm strategies. | 39.1 % | 26.6 % |
+
+The policy falls 25 times less often than the joint PD while using **less**
+mean ankle torque, so it is not winning by forcing the actuators -- it acts
+earlier, while the error is still small. Its action changes by about 0.005 rad
+per control step, so it is not chattering either.
+
+One seed. A 17-point margin is hard to attribute to chance, but the honest
+claim needs several.
 
 The capture-point controller is the cautionary result. On a single *forward*
 push it clearly beats the joint PD, recovering 0.55 m/s where the joint PD

@@ -437,6 +437,7 @@ def run(sim: SimulationContext, robot: Articulation) -> Recorder:
                         joint_vel=robot.data.joint_vel,
                         stiffness=robot.data.joint_stiffness,
                         damping=robot.data.joint_damping,
+                        base_quat_w=robot.data.root_quat_w,
                     )
                 )
 

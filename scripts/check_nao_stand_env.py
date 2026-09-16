@@ -236,6 +236,7 @@ def make_baseline_policy(inner, cfg):
             joint_vel=robot.data.joint_vel,
             stiffness=robot.data.joint_stiffness,
             damping=robot.data.joint_damping,
+            base_quat_w=robot.data.root_quat_w,
         )
         return (targets[:, actuated] - nominal) / cfg.action_scale
 

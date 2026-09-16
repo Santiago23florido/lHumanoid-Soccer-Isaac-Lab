@@ -103,7 +103,10 @@ def run_trial(env, actions_fn, steps: int) -> dict[str, float]:
     falls = torch.zeros(num_envs, device=device)
     timeouts = torch.zeros(num_envs, device=device)
     reward_total = torch.zeros(num_envs, device=device)
-    torque_peak = torch.zeros(num_envs, device=device)
+    torque_sum = torch.zeros(num_envs, device=device)
+    saturated_steps = torch.zeros(num_envs, device=device)
+    action_rate_sum = torch.zeros(num_envs, device=device)
+    previous = torch.zeros(num_envs, env.unwrapped.cfg.action_space, device=device)
 
     robot = env.unwrapped._robot
     ankles, _ = robot.find_joints(["LAnklePitch", "RAnklePitch"], preserve_order=True)
@@ -117,14 +120,19 @@ def run_trial(env, actions_fn, steps: int) -> dict[str, float]:
         falls += terminated.float()
         timeouts += truncated.float()
         used = robot.data.applied_torque[:, ankles].abs().max(dim=1).values / effort
-        torque_peak = torch.maximum(torque_peak, used)
+        torque_sum += used
+        saturated_steps += (used > 0.99).float()
+        action_rate_sum += (actions - previous).abs().mean(dim=1)
+        previous = actions
 
     return {
         "fall_free_rate": float((~ever_fell).float().mean()),
         "falls": int(falls.sum()),
         "timeouts": int(timeouts.sum()),
         "mean_return": float(reward_total.mean()),
-        "peak_ankle_torque": float(torque_peak.mean()),
+        "mean_ankle_torque": float((torque_sum / steps).mean()),
+        "saturated_fraction": float((saturated_steps / steps).mean()),
+        "mean_action_rate": float((action_rate_sum / steps).mean()),
     }
 
 
@@ -233,16 +241,22 @@ def main() -> int:
         results[name] = run_trial(env, policy, args_cli.steps)
 
     print("\n" + "=" * 78)
-    print(f"{'controller':20s} {'fall-free':>10s} {'falls':>7s} {'return':>9s} {'ankle':>8s}")
+    print(
+        f"{'controller':20s} {'fall-free':>10s} {'falls':>7s} {'return':>8s} "
+        f"{'ankle':>7s} {'sat':>6s} {'d(a)':>7s}"
+    )
     print("-" * 78)
     for name, row in results.items():
         print(
             f"{name:20s} {row['fall_free_rate']:9.1%} {row['falls']:7d} "
-            f"{row['mean_return']:9.2f} {row['peak_ankle_torque']:7.1%}"
+            f"{row['mean_return']:8.2f} {row['mean_ankle_torque']:6.1%} "
+            f"{row['saturated_fraction']:5.1%} {row['mean_action_rate']:7.4f}"
         )
 
     best = max(results, key=lambda k: results[k]["fall_free_rate"])
     print("-" * 78)
+    print("  ankle = mean torque used, sat = fraction of steps saturated,")
+    print("  d(a) = mean action change per step, which is what chattering shows up as.")
     print(f"  best: {best} at {results[best]['fall_free_rate']:.1%} fall-free")
     if "PPO policy" in results:
         margin = results["PPO policy"]["fall_free_rate"] - results["joint PD"]["fall_free_rate"]

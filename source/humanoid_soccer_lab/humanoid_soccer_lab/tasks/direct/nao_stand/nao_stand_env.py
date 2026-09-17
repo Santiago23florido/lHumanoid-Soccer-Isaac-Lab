@@ -195,12 +195,32 @@ class NaoStandEnv(DirectRLEnv):
 
         env_ids = due.nonzero(as_tuple=False).squeeze(-1)
         magnitude = self._push_magnitude()
+        count = len(env_ids)
 
-        # Uniform direction in the horizontal plane, so no direction is
-        # systematically easier than another.
-        angle = math_utils.sample_uniform(-torch.pi, torch.pi, (len(env_ids),), self.device)
-        speed = math_utils.sample_uniform(0.0, magnitude, (len(env_ids),), self.device)
-        push = torch.zeros(len(env_ids), 3, device=self.device)
+        # Direction. Uniform over the circle while training, so no direction is
+        # systematically easier than another; fixed when measuring, because the
+        # capturable bound is direction dependent -- 0.548 m/s forward against
+        # 0.443 m/s backward -- and a uniform push cannot say which bound a
+        # controller actually ran into.
+        if self.cfg.push_direction_rad is None:
+            angle = math_utils.sample_uniform(-torch.pi, torch.pi, (count,), self.device)
+        else:
+            angle = torch.full((count,), self.cfg.push_direction_rad, device=self.device)
+            # Relative to where the robot faces, not to the world. Yaw is
+            # randomised at reset, so a world-frame "forward" would be a
+            # different direction for every robot in the batch.
+            quat = self._robot.data.root_quat_w[env_ids]
+            w, x, y, z = quat.unbind(dim=-1)
+            angle = angle + torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+        # Magnitude. Uniform up to the curriculum value while training, so the
+        # policy sees the whole range; exact when measuring a threshold.
+        if self.cfg.push_exact_magnitude:
+            speed = torch.full((count,), magnitude, device=self.device)
+        else:
+            speed = math_utils.sample_uniform(0.0, magnitude, (count,), self.device)
+
+        push = torch.zeros(count, 3, device=self.device)
         push[:, 0] = speed * torch.cos(angle)
         push[:, 1] = speed * torch.sin(angle)
 
@@ -212,7 +232,20 @@ class NaoStandEnv(DirectRLEnv):
         self._push_countdown[env_ids] = self._sample_push_interval(len(env_ids))
 
     def _sample_push_interval(self, count: int) -> torch.Tensor:
-        """Randomised gap before the next push, so the timing is unpredictable."""
+        """Steps until the next push.
+
+        Randomised while training, so the policy cannot learn to brace on a
+        schedule. Deterministic when measuring a threshold, alongside the exact
+        magnitude: a trial that is only long enough for one or two pushes has to
+        actually deliver them, and a randomised interval can miss the window
+        entirely. That is not hypothetical -- it silently turned a threshold
+        sweep into a measurement of quiet standing, with both controllers
+        surviving 1.0 m/s because neither was ever pushed.
+        """
+        if self.cfg.push_exact_magnitude:
+            return torch.full(
+                (count,), self._push_interval_steps, dtype=torch.long, device=self.device
+            )
         return torch.randint(
             low=self._push_interval_steps // 2,
             high=max(self._push_interval_steps // 2 + 1, 2 * self._push_interval_steps),

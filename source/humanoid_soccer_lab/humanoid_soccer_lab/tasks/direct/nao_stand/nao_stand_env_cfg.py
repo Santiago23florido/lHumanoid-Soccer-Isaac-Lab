@@ -297,6 +297,26 @@ class NaoStandEnvCfg(DirectRLEnvCfg):
     does not ask of it, so a larger push would only teach it to fall.
     """
 
+    push_direction_rad: float | None = None
+    """Fixed push heading relative to the robot's facing, or None for uniform.
+
+    None while training: every direction should be equally likely, or the policy
+    learns a lopsided recovery. A fixed angle when measuring a threshold, since
+    the capturable bound depends on direction -- 0.548 m/s forward against
+    0.443 m/s backward -- and a uniformly sampled push cannot tell you which
+    bound a controller actually hit.
+
+    0 is forward, pi is backward, pi/2 is to the robot's left.
+    """
+
+    push_exact_magnitude = False
+    """Push at exactly the curriculum magnitude instead of uniformly below it.
+
+    False while training, so the policy sees the whole range of severities.
+    True when measuring, because a threshold is only meaningful if every
+    environment received the same push.
+    """
+
     push_curriculum_steps = 24_000_000
     """Environment steps over which the push grows to its final magnitude.
 

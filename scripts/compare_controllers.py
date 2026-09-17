@@ -48,6 +48,15 @@ parser.add_argument(
     help="TorchScript policy from rsl-rl, e.g. logs/.../exported/policy.pt. Optional.",
 )
 parser.add_argument(
+    "--ablate-arms",
+    action="store_true",
+    help=(
+        "Also score the policy with its eight arm joints frozen at nominal. "
+        "The drop is how much of the policy's advantage comes from changing "
+        "centroidal angular momentum rather than from the ankles and hips."
+    ),
+)
+parser.add_argument(
     "--no-pushes",
     action="store_true",
     help="Measure a quiet stance instead of the perturbation protocol.",
@@ -187,10 +196,27 @@ def dcm_policy(inner, cfg):
     return policy
 
 
-def learned_policy(inner, path: Path):
-    """The TorchScript actor rsl-rl exports, normaliser included."""
+def learned_policy(inner, path: Path, freeze_arms: bool = False):
+    """The TorchScript actor rsl-rl exports, normaliser included.
+
+    With ``freeze_arms`` the eight shoulder and elbow components of the action
+    are zeroed, which holds those joints at the nominal posture while the legs
+    still follow the policy. That is the ablation: the arms are the only way
+    to change centroidal angular momentum once the pressure centre saturates
+    at the edge of the foot, so whatever the policy loses here is what it was
+    winning from that strategy.
+
+    Note this scores the *unmodified* policy in a crippled body rather than a
+    policy trained without arms. It measures how much the learned behaviour
+    depends on the arms, not how well the task could be solved without them.
+    """
     module = torch.jit.load(str(path), map_location=inner.device)
     module.eval()
+
+    mask = torch.ones(len(nk.ACTUATED_JOINTS), device=inner.device)
+    if freeze_arms:
+        for name in nk.ARM_ACTUATED_JOINTS:
+            mask[nk.ACTUATED_JOINTS.index(name)] = 0.0
 
     def policy(obs, num_envs: int, device: str) -> torch.Tensor:
         # The observation the environment just returned, not a fresh one.
@@ -199,7 +225,7 @@ def learned_policy(inner, path: Path):
         # action buffer the action-rate penalty reads. It happens to come out
         # the same today; relying on that is not worth the fragility.
         with torch.inference_mode():
-            return module(obs["policy"]).clone()
+            return module(obs["policy"]).clone() * mask
 
     return policy
 
@@ -224,6 +250,10 @@ def main() -> int:
     }
     if args_cli.policy is not None:
         controllers["PPO policy"] = learned_policy(inner, args_cli.policy)
+        if args_cli.ablate_arms:
+            controllers["PPO, arms frozen"] = learned_policy(
+                inner, args_cli.policy, freeze_arms=True
+            )
 
     print("\n" + "=" * 78)
     print("BALANCE CONTROLLER COMPARISON")
@@ -258,6 +288,12 @@ def main() -> int:
     print("  ankle = mean torque used, sat = fraction of steps saturated,")
     print("  d(a) = mean action change per step, which is what chattering shows up as.")
     print(f"  best: {best} at {results[best]['fall_free_rate']:.1%} fall-free")
+    if "PPO, arms frozen" in results:
+        cost = (
+            results["PPO policy"]["fall_free_rate"]
+            - results["PPO, arms frozen"]["fall_free_rate"]
+        )
+        print(f"  freezing the arms costs the policy {cost:+.1%} fall-free")
     if "PPO policy" in results:
         margin = results["PPO policy"]["fall_free_rate"] - results["joint PD"]["fall_free_rate"]
         verdict = "beats" if margin > 0 else "does NOT beat"

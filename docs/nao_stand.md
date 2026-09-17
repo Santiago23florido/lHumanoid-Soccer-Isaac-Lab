@@ -112,6 +112,40 @@ while the capturable bound is not — 0.548 m/s forward, 0.443 m/s backward,
 itself is not a hard ceiling either: it assumes constant centroidal angular
 momentum, and a hip or arm strategy breaks that assumption deliberately.
 
+### Where each controller fails, per direction
+
+Fixed push heading relative to the robot's facing, exact magnitude, 64
+environments, 250 steps. The largest push each controller survives in more than
+half the environments:
+
+| Direction | LIPM bound | Joint PD | PPO policy | Ratio |
+| --- | --- | --- | --- | --- |
+| Forward | 0.548 m/s | 0.40 | **0.70** | **1.28x** |
+| Backward | 0.443 m/s | 0.30 | **0.80** | **1.81x** |
+| Lateral | 0.620 m/s | 0.50 | 0.60 | 0.97x |
+
+The joint PD falls short of the bound in every direction, which is what a
+controller with no representation of its own pressure centre should do: it
+never tries to reach the edge of the foot.
+
+The policy exceeds the bound forward and backward, and sits exactly *at* it
+laterally. That contrast is the result. The hip and shoulder joints it commands
+are pitch joints, so angular momentum is available in the sagittal plane and
+not in the frontal one — and lateral pressure-centre motion comes from load
+sharing between the two feet rather than from either ankle, which is the same
+physical constraint the capture-point controller ran into.
+
+The bound assumes constant centroidal angular momentum. The policy beats it
+exactly where it can break that assumption.
+
+Reproduce with:
+
+```powershell
+python scripts\sweep_thresholds.py --headless --num-envs 64 --ablate-arms `
+       --policy logssl_rl
+ao_stand\<run>\exported\policy.pt
+```
+
 Score a trained policy on exactly this protocol with:
 
 ```powershell

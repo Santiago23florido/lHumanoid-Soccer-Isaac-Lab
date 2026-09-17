@@ -55,6 +55,16 @@ parser.add_argument(
     help="Push magnitudes in m/s to test.",
 )
 parser.add_argument(
+    "--ablate-arms",
+    action="store_true",
+    help=(
+        "Also sweep the policy with its arms frozen at nominal. If the arms are "
+        "how it passes the capturability bound, the drop should appear in the "
+        "sagittal directions and not laterally, where the commanded arm joints "
+        "have no leverage."
+    ),
+)
+parser.add_argument(
     "--results-file", type=Path, default=None, help="Write the sweep as JSON."
 )
 AppLauncher.add_app_launcher_args(parser)
@@ -122,11 +132,21 @@ def main() -> int:
         module = torch.jit.load(str(args_cli.policy), map_location=inner.device)
         module.eval()
 
-        def learned(obs, n, d):
-            with torch.inference_mode():
-                return module(obs["policy"]).clone()
+        def make(freeze_arms: bool):
+            mask = torch.ones(len(nk.ACTUATED_JOINTS), device=inner.device)
+            if freeze_arms:
+                for joint in nk.ARM_ACTUATED_JOINTS:
+                    mask[nk.ACTUATED_JOINTS.index(joint)] = 0.0
 
-        controllers["PPO policy"] = learned
+            def policy(obs, n, d):
+                with torch.inference_mode():
+                    return module(obs["policy"]).clone() * mask
+
+            return policy
+
+        controllers["PPO policy"] = make(False)
+        if args_cli.ablate_arms:
+            controllers["PPO, arms frozen"] = make(True)
 
     print("\n" + "=" * 78)
     print("PUSH THRESHOLD SWEEP -- measured against the capturability bound")
@@ -157,8 +177,9 @@ def main() -> int:
     print("\n" + "=" * 78)
     print("WHERE EACH CONTROLLER CROSSES 50% FALL-FREE")
     print("=" * 78)
-    print(f"  {'direction':10s} {'bound':>8s} {'joint PD':>10s} {'policy':>10s} {'ratio':>8s}")
-    print("-" * 60)
+    names = list(results)
+    print(f"  {'direction':10s} {'bound':>8s}" + "".join(f"{n:>18s}" for n in names))
+    print("-" * (20 + 18 * len(names)))
     summary: dict[str, dict[str, float]] = {}
     for name, (_, key) in DIRECTIONS.items():
         bound = bounds[key]
@@ -176,13 +197,12 @@ def main() -> int:
                 crossing = args_cli.magnitudes[-1]
             row[controller] = crossing
         summary[name] = row
-        pd_value = row.get("joint PD", float("nan"))
-        policy_value = row.get("PPO policy", float("nan"))
-        ratio = policy_value / bound if bound else float("nan")
-        print(
-            f"  {name:10s} {bound:8.3f} {pd_value:10.2f} {policy_value:10.2f} {ratio:7.2f}x"
-        )
-    print("-" * 60)
+        line = f"  {name:10s} {bound:8.3f}"
+        for controller in names:
+            value = row[controller]
+            line += f"{value:12.2f} ({value / bound:.2f}x)"[:18].rjust(18)
+        print(line)
+    print("-" * (20 + 18 * len(names)))
     print("  ratio = last magnitude the policy survives, over the LIPM bound.")
     print("  Above 1.0 means it beat a limit derived assuming constant angular")
     print("  momentum, which is only possible by not keeping it constant.")

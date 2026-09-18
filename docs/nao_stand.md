@@ -138,11 +138,45 @@ physical constraint the capture-point controller ran into.
 The bound assumes constant centroidal angular momentum. The policy beats it
 exactly where it can break that assumption.
 
+### Which mechanism, measured
+
+Freezing the eight shoulder and elbow joints at nominal and re-running the
+sweep isolates what the arms contribute. Hip pitch stays active, so this
+ablates the arms rather than all angular momentum.
+
+| Backward push | Policy | Arms frozen |
+| --- | --- | --- |
+| 0.70 m/s | 98.4 % | **68.8 %** |
+| 0.80 m/s | 76.6 % | **9.4 %** |
+| 0.90 m/s | 34.4 % | **0.0 %** |
+
+Forward at 0.80 m/s the drop is 9.4 % to 3.1 %; laterally at 0.70 m/s it is
+32.8 % to 21.9 %. Both small.
+
+**The arms are the backward recovery mechanism**, and close to irrelevant
+forward and laterally. That matches the geometry: backward is the tightest
+direction, with the heel 60.7 mm from the ankle against 103.3 mm of toe, so it
+is where the ankle runs out first and where momentum is worth most. The arms
+are pitch joints, so they have leverage in the sagittal plane and none in the
+frontal one.
+
+Forward the policy reaches 1.28x the bound with or without arms, so whatever
+takes it past the limit there is the hip strategy or better use of the ankle,
+not the arms.
+
+**Read the per-magnitude curves, not the threshold.** On a 0.1 m/s grid the
+50 % crossing resolves to one step and it understates this badly: freezing the
+arms moves the backward crossing by a single step while taking the rate at
+0.80 m/s from 77 % to 9 %. The joint PD's backward crossing also moved between
+two runs, 0.30 and 0.40, which is the scale of the measurement noise at 64
+environments.
+
 Reproduce with:
 
 ```powershell
 python scripts\sweep_thresholds.py --headless --num-envs 64 --ablate-arms `
-       --policy logssl_rl
+       --policy logs
+sl_rl
 ao_stand\<run>\exported\policy.pt
 ```
 

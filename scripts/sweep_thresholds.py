@@ -200,12 +200,18 @@ def main() -> int:
         line = f"  {name:10s} {bound:8.3f}"
         for controller in names:
             value = row[controller]
-            line += f"{value:12.2f} ({value / bound:.2f}x)"[:18].rjust(18)
+            line += f"{value:8.2f} ({value / bound:4.2f}x)".rjust(18)
         print(line)
     print("-" * (20 + 18 * len(names)))
-    print("  ratio = last magnitude the policy survives, over the LIPM bound.")
-    print("  Above 1.0 means it beat a limit derived assuming constant angular")
-    print("  momentum, which is only possible by not keeping it constant.")
+    print("  Largest magnitude survived by over half the environments, and its")
+    print("  ratio to the LIPM bound. Above 1.0 means the controller beat a limit")
+    print("  derived assuming constant angular momentum, which is only possible by")
+    print("  not keeping it constant.")
+    print()
+    print("  Read the per-magnitude tables above rather than this summary. On a")
+    print("  0.1 m/s grid the crossing has a resolution of one step, and it hides")
+    print("  large differences: freezing the arms moves the backward crossing by a")
+    print("  single step while taking the rate at 0.80 m/s from 77% to 9%.")
     print("=" * 78 + "\n")
 
     if args_cli.results_file is not None:

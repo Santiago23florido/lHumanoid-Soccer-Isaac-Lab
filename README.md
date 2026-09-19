@@ -26,8 +26,21 @@ mean ankle torque, so it is not winning by forcing the actuators -- it acts
 earlier, while the error is still small. Its action changes by about 0.005 rad
 per control step, so it is not chattering either.
 
-One seed. A 17-point margin is hard to attribute to chance, but the honest
-claim needs several.
+Two seeds trained to the same place. A 17-point margin is hard to attribute to
+chance.
+
+**But the policy achieves it by stepping.** Diagnostics on the survivors of a
+backward push: 20 of 20 moved a foot, up to 762 mm, against 4.2 mm for the
+joint PD. There is no stepping term in the reward, and `foot_slip` penalises
+horizontal foot velocity only while the foot is *loaded*, so lifting a foot is
+free. The policy found that.
+
+An earlier version of this README claimed the policy exceeded the zero-step
+capturability bound by exploiting angular momentum. That claim is withdrawn:
+exceeding a zero-step bound by not performing zero-step recovery is a
+tautology, not a result. See [nao_stand.md](docs/nao_stand.md).
+
+A standing task that does not penalise stepping is not a standing task.
 
 The capture-point controller is the cautionary result. On a single *forward*
 push it clearly beats the joint PD, recovering 0.55 m/s where the joint PD

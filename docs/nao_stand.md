@@ -135,8 +135,56 @@ not in the frontal one — and lateral pressure-centre motion comes from load
 sharing between the two feet rather than from either ankle, which is the same
 physical constraint the capture-point controller ran into.
 
-The bound assumes constant centroidal angular momentum. The policy beats it
-exactly where it can break that assumption.
+### Correction: the policy steps, so this bound does not apply to it
+
+The paragraph above used to claim the policy beat the bound by breaking the
+constant-angular-momentum assumption. That was wrong, and checking it is what
+showed why.
+
+Diagnostics on the survivors of a 0.70 m/s backward push:
+
+| | Joint PD (0.20 m/s) | PPO policy (0.70 m/s) |
+| --- | --- | --- |
+| Max foot displacement | **4.2 mm** | **762 mm** |
+| Survivors that stepped | 1 of 31 | **20 of 20** |
+| Stance width | 98 mm (unchanged) | 175 mm |
+| Peak DCM | 47 mm, inside the 103 mm polygon | 153 mm, outside it |
+| CoM jump / commanded push | 0.69 | 0.86 |
+
+**The joint PD does genuine zero-step recovery**: its feet do not move and its
+divergent component stays inside the support polygon. The bound applies to it,
+and it falls short of it, which is the expected result for a controller with no
+representation of its own pressure centre.
+
+**The policy does not.** It steps, every time, in every survivor. Exceeding a
+*zero-step* bound by not performing zero-step recovery is not a finding. The
+two controllers are solving different problems and the ratio column compared
+them against a limit that applies to only one of them.
+
+Two further reasons that column was unsound:
+
+- The push is a velocity written onto the articulation root, which carries
+  about 20 % of the mass. The whole-body CoM jump is smaller, and by a
+  controller-dependent factor -- 0.69 for the PD against 0.86 for the policy --
+  so the x-axis was not comparable across controllers either.
+- Crouching would also raise the bound, since `omega_0 = sqrt(g/z_c)`. This one
+  is clean: both controllers drop under 4 mm, worth under 1 % of the bound.
+
+### What this actually shows
+
+The policy **discovered stepping**, in a task that never asked for it. There is
+no stepping term in the reward, and `foot_slip` penalises horizontal foot
+velocity only *while the foot is loaded*, so lifting a foot is free. The policy
+found that.
+
+That is a reward-design finding worth stating plainly: **a standing task that
+does not penalise stepping is not a standing task.** If zero-step balance is
+what is wanted, stepping has to cost something.
+
+What survives unchanged is the headline comparison, because it measures the
+task as defined rather than a theoretical bound: 99.2 % fall-free against
+82.0 %, on the same environment instance. The policy is more robust. It is just
+not more robust *in the way that was claimed*.
 
 ### Which mechanism, measured
 

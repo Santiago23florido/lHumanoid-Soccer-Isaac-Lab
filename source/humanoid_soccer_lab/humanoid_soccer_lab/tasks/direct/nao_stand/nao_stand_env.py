@@ -463,8 +463,17 @@ class NaoStandEnv(DirectRLEnv):
         fallen = height < self.cfg.termination_height
         toppled = self._robot.data.projected_gravity_b[:, 2] > self.cfg.termination_tilt
 
+        # Stepping ends the episode. This is what makes the task zero-step
+        # balance rather than "balance, and stepping is a bit expensive", and it
+        # is the contact assumption the capturability bound needs before a
+        # controller can be compared against it.
+        displacement = (
+            self._robot.data.body_pos_w[:, self._foot_ids, :2] - self._foot_reference_xy
+        ).norm(dim=-1)
+        stepped = displacement.max(dim=1).values > self.cfg.termination_foot_displacement
+
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-        return fallen | toppled, time_out
+        return fallen | toppled | stepped, time_out
 
     ##
     # Reset

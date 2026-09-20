@@ -271,6 +271,23 @@ class NaoStandEnvCfg(DirectRLEnvCfg):
     """
 
     termination_tilt = -0.7
+    termination_foot_displacement = 0.05
+    """Metres a foot may travel before the episode counts as failed.
+
+    This makes zero-step balance a *constraint* rather than a price. Soft
+    penalties on lifting and moving the feet were tried first and did not work:
+    the policy kept stepping in 51 of 51 survivors, because per second of
+    episode the penalty cost about -1.6 against the +4.5 of staying alive,
+    while falling costs all of it. Paying was rational.
+
+    A penalty prices a behaviour. A termination defines the task. What was
+    wanted here was the second.
+
+    50 mm against a 164 mm foot, and against the 4.2 mm the joint PD drifts
+    under a push it survives, so there is an order of magnitude between drift
+    and a step.
+    """
+
     """``projected_gravity_b[2]`` above which the episode ends.
 
     Gravity in the base frame reads (0, 0, -1) when upright, so this is a tilt

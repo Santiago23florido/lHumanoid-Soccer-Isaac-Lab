@@ -404,6 +404,29 @@ class NaoStandEnvCfg(DirectRLEnvCfg):
     """
 
     undesired_contact_reward_scale = -2.0
+    foot_lift_reward_scale = -1.0
+    """Penalty per foot that is not carrying load.
+
+    Zero-step balance means the contact configuration does not change. Without
+    this the task is not a standing task at all: the first trained policy solved
+    it by stepping, every survivor of a backward push moving a foot by up to
+    762 mm, because nothing made that cost anything. ``foot_slip`` penalises
+    horizontal velocity only while a foot is *loaded*, so lifting it was free.
+
+    At -1.0 one raised foot costs half the alive bonus per step, which makes a
+    step expensive without making it impossible -- the policy can still pay for
+    one if the alternative is falling.
+    """
+
+    foot_displacement_reward_scale = -4.0
+    """Penalty on how far each foot has moved from where the episode started.
+
+    Catches what the lift penalty alone would miss: a foot that slides or that
+    lifts and lands somewhere new. Together they define "the feet stayed put",
+    which is the contact assumption the capturability bound rests on and the
+    thing that has to hold before that bound can be compared against.
+    """
+
     """Penalty for any body other than the feet touching the ground."""
 
     joint_limit_reward_scale = -1.0

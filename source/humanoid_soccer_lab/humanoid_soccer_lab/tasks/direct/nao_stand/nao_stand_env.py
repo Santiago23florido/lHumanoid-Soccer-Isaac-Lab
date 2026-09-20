@@ -99,6 +99,11 @@ class NaoStandEnv(DirectRLEnv):
         self._push_countdown = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._last_push = torch.zeros(self.num_envs, 3, device=self.device)
 
+        # Where each foot started the episode. The stepping penalties are
+        # measured against this, so a foot that lifts and lands somewhere new
+        # is charged for it even though it is back in contact.
+        self._foot_reference_xy = torch.zeros(self.num_envs, 2, 2, device=self.device)
+
         self._push_interval_steps = max(1, int(self.cfg.push_interval_s / self.step_dt))
 
         self._episode_sums = {
@@ -114,6 +119,8 @@ class NaoStandEnv(DirectRLEnv):
                 "joint_vel",
                 "action_rate",
                 "foot_slip",
+                "foot_lift",
+                "foot_displacement",
                 "undesired_contact",
                 "joint_limit",
             )
@@ -392,6 +399,15 @@ class NaoStandEnv(DirectRLEnv):
         foot_vel = data.body_com_lin_vel_w[:, self._foot_ids, :2].norm(dim=-1)
         foot_slip = torch.sum(foot_vel * self._foot_contact.float(), dim=1)
 
+        # Zero-step balance means the contact configuration does not change.
+        # A foot off the ground and a foot that has moved are both departures
+        # from it, and both were free before these terms existed.
+        foot_lift = torch.sum((~self._foot_contact).float(), dim=1)
+        displacement = (
+            self._robot.data.body_pos_w[:, self._foot_ids, :2] - self._foot_reference_xy
+        ).norm(dim=-1)
+        foot_displacement = torch.sum(displacement, dim=1)
+
         forces = self._contact_sensor.data.net_forces_w_history
         undesired = forces[:, :, self._undesired_contact_ids, :].norm(dim=-1).max(dim=1).values
         undesired_contact = torch.sum(
@@ -420,6 +436,10 @@ class NaoStandEnv(DirectRLEnv):
             "joint_vel": joint_vel * self.cfg.joint_vel_reward_scale * self.step_dt,
             "action_rate": action_rate * self.cfg.action_rate_reward_scale * self.step_dt,
             "foot_slip": foot_slip * self.cfg.foot_slip_reward_scale * self.step_dt,
+            "foot_lift": foot_lift * self.cfg.foot_lift_reward_scale * self.step_dt,
+            "foot_displacement": (
+                foot_displacement * self.cfg.foot_displacement_reward_scale * self.step_dt
+            ),
             "undesired_contact": (
                 undesired_contact * self.cfg.undesired_contact_reward_scale * self.step_dt
             ),
@@ -492,6 +512,9 @@ class NaoStandEnv(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
         self._last_push[env_ids] = 0.0
         self._push_countdown[env_ids] = self._sample_push_interval(len(env_ids))
+        self._foot_reference_xy[env_ids] = self._robot.data.body_pos_w[env_ids][
+            :, self._foot_ids, :2
+        ]
 
         extras = {}
         for key in self._episode_sums:

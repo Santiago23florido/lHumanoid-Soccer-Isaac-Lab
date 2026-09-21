@@ -135,7 +135,54 @@ not in the frontal one — and lateral pressure-centre motion comes from load
 sharing between the two feet rather than from either ankle, which is the same
 physical constraint the capture-point controller ran into.
 
+## The task, corrected
+
+Stepping now terminates the episode: a foot more than 50 mm from where it
+started ends the run. That is a constraint, not a price, and the difference
+matters. Soft penalties on lifting and moving the feet were tried first and the
+policy kept stepping in 51 of 51 survivors, because per second of episode they
+cost about -1.6 against +4.5 for staying alive while falling forfeits all of
+it. Paying was rational. A penalty prices a behaviour; only a constraint
+removes it from the task.
+
+Diagnostics confirm the constraint binds: at 0.20 m/s backward the policy's
+feet move 6.6 mm and **0 of 54 survivors step**, against 762 mm and 20 of 20
+before. The divergent component peaks at 19.8 mm, well inside the 103 mm
+polygon, and the centre of mass drops 1.3 mm, worth 0.2 % of the bound. All
+four assumptions the capturability comparison needs now hold.
+
+### What zero-step balance actually costs
+
+| Controller | Fall-free | Ankle torque | Saturated | d(action) |
+| --- | --- | --- | --- | --- |
+| **PPO, arms frozen** | **88.3 %** | 55.9 % | 5.4 % | 0.0297 |
+| PPO policy | 84.4 % | 56.8 % | 7.1 % | 0.0560 |
+| Joint PD | 80.5 % | 33.5 % | 2.2 % | 0.0000 |
+| Capture-point PD | 28.9 % | 27.3 % | 3.2 % | 0.0108 |
+
+**The policy's advantage falls from +17.2 points to +3.9.** That difference is
+the measurement of what stepping was worth: almost all of the earlier 99.2 %
+was bought with it.
+
+Two claims made earlier do not survive this.
+
+**"It wins while using less ankle torque" described the stepping policy.** The
+zero-step policy uses 56.8 % against the joint PD's 33.5 %, and saturates 7.1 %
+of the time against 2.2 %. It works considerably harder for a much smaller
+margin.
+
+**Freezing the arms now makes it better, not worse** — 88.3 % against 84.4 %,
+and smoother with it. On the stepping task the arms were the backward recovery
+mechanism; here they are a liability. That reversal is unexplained. One
+testable hypothesis is that arm motion shifts the centre of mass enough to slip
+a foot and trip the 50 mm constraint, but that is a hypothesis and has not been
+measured.
+
 ### Correction: the policy steps, so this bound does not apply to it
+
+*(Everything below concerns the earlier task, where stepping was allowed. It is
+kept because the reasoning is what produced the corrected task above.)*
+
 
 The paragraph above used to claim the policy beat the bound by breaking the
 constant-angular-momentum assumption. That was wrong, and checking it is what

@@ -15,45 +15,36 @@ Three controllers now stand the NAO up, and all three are scored on one shared
 protocol — 128 environments, the same reset distribution, omnidirectional
 pushes to 0.548 m/s — so the numbers mean the same thing.
 
+Stepping ends the episode: a foot more than 50 mm from where it started fails
+the run. That makes this zero-step balance, and it is what lets a controller be
+compared against the capturability bound at all.
+
 | Controller | What it is | Fall-free | Ankle torque |
 | --- | --- | --- | --- |
-| **PPO policy** | 19 joint offsets, asymmetric actor-critic. | **99.2 %** | 30.5 % |
-| Joint PD | Holds the nominal posture. One line of control. | 82.0 % | 35.3 % |
-| Capture-point PD | Feedback on the divergent component, with ankle, hip and arm strategies. | 39.1 % | 26.6 % |
+| **PPO, arms frozen** | The policy with its 8 arm joints held at nominal. | **88.3 %** | 55.9 % |
+| PPO policy | 19 joint offsets, asymmetric actor-critic. | 84.4 % | 56.8 % |
+| Joint PD | Holds the nominal posture. One line of control. | 80.5 % | 33.5 % |
+| Capture-point PD | Feedback on the divergent component, ankle/hip/arm strategies. | 28.9 % | 27.3 % |
 
-The policy falls 25 times less often than the joint PD while using **less**
-mean ankle torque, so it is not winning by forcing the actuators -- it acts
-earlier, while the error is still small. Its action changes by about 0.005 rad
-per control step, so it is not chattering either.
+An earlier version of this table read 99.2 % for the policy, against a task
+that did not forbid stepping. It was stepping: 20 of 20 survivors of a backward
+push moved a foot, up to 762 mm. With that removed the margin over the joint PD
+falls from +17.2 points to **+3.9**, and the drop is the measurement of what
+stepping was worth.
 
-Two seeds trained to the same place. A 17-point margin is hard to attribute to
-chance.
+Two things that follow, both recorded rather than smoothed over:
 
-**But the policy achieves it by stepping.** Diagnostics on the survivors of a
-backward push: 20 of 20 moved a foot, up to 762 mm, against 4.2 mm for the
-joint PD. There is no stepping term in the reward, and `foot_slip` penalises
-horizontal foot velocity only while the foot is *loaded*, so lifting a foot is
-free. The policy found that.
-
-An earlier version of this README claimed the policy exceeded the zero-step
-capturability bound by exploiting angular momentum. That claim is withdrawn:
-exceeding a zero-step bound by not performing zero-step recovery is a
-tautology, not a result. See [nao_stand.md](docs/nao_stand.md).
-
-A standing task that does not penalise stepping is not a standing task.
-
-The capture-point controller is the cautionary result. On a single *forward*
-push it clearly beats the joint PD, recovering 0.55 m/s where the joint PD
-falls at 0.50. On the full protocol, where pushes come from every direction, it
-scores far worse — its hip and arm gains were only ever validated in the
-sagittal plane. Validating in one direction and generalising to all of them is
-the mistake, and it is documented rather than quietly fixed.
+- The policy does **not** win by using less effort. It uses 56.8 % of the ankle
+  torque budget against the PD's 33.5 %, and saturates three times as often.
+- **Freezing its arms improves it.** On the stepping task the arms were the
+  backward recovery mechanism; here they are a liability. Unexplained.
 
 Reproduce any row with:
 
 ```powershell
-python scripts\check_nao_stand_env.py --headless --num-envs 128 --steps 600 `
-       --pushes --baseline joint_pd      # or --baseline dcm, or --policy <path>
+python scripts\compare_controllers.py --headless --num-envs 128 --steps 600 `
+       --ablate-arms --policy logssl_rl
+ao_stand\<run>\exported\policy.pt
 ```
 
 See [`docs/stand_nao.md`](docs/stand_nao.md) for the joint PD,

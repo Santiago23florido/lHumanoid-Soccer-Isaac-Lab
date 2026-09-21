@@ -103,6 +103,8 @@ class NaoStandEnv(DirectRLEnv):
         # measured against this, so a foot that lifts and lands somewhere new
         # is charged for it even though it is back in contact.
         self._foot_reference_xy = torch.zeros(self.num_envs, 2, 2, device=self.device)
+        self._ended_by_step = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._ended_by_fall = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         self._push_interval_steps = max(1, int(self.cfg.push_interval_s / self.step_dt))
 
@@ -472,6 +474,13 @@ class NaoStandEnv(DirectRLEnv):
         ).norm(dim=-1)
         stepped = displacement.max(dim=1).values > self.cfg.termination_foot_displacement
 
+        # Kept apart for logging. Lumping them together hides the one number
+        # that says whether the zero-step constraint is binding: a run where
+        # most terminations are steps is a different failure from one where
+        # most are falls, and they call for opposite fixes.
+        self._ended_by_step = stepped & ~(fallen | toppled)
+        self._ended_by_fall = fallen | toppled
+
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         return fallen | toppled | stepped, time_out
 
@@ -533,7 +542,10 @@ class NaoStandEnv(DirectRLEnv):
             self._episode_sums[key][env_ids] = 0.0
         extras["Curriculum/push_velocity"] = self._push_magnitude()
         extras["Episode_Termination/fall"] = torch.count_nonzero(
-            self.reset_terminated[env_ids]
+            self._ended_by_fall[env_ids]
+        ).item()
+        extras["Episode_Termination/step"] = torch.count_nonzero(
+            self._ended_by_step[env_ids]
         ).item()
         extras["Episode_Termination/time_out"] = torch.count_nonzero(
             self.reset_time_outs[env_ids]

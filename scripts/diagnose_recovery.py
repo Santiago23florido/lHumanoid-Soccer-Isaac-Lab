@@ -223,8 +223,14 @@ def main() -> int:
     print(f"     maximum during recovery: {among_survivors(stance_max):.4f} m")
 
     print("\n  4. DOES IT STEP? (a zero-step bound would then be the wrong one)")
-    print(f"     max foot displacement : {among_survivors(foot_shift_max) * 1e3:.1f} mm")
     stepped = (foot_shift_max > FOOT_MOVED_M) & survived
+    worst = float(foot_shift_max[survived].max()) if n else float("nan")
+    # Mean and worst, because they answer different questions and the mean on
+    # its own misleads: one environment travelling 300 mm among thirty that
+    # moved 4 mm averages to 14 mm and reads as "nobody stepped". This label
+    # said "max" while reporting the mean, which is how that went unnoticed.
+    print(f"     foot travel, mean     : {among_survivors(foot_shift_max) * 1e3:.1f} mm")
+    print(f"     foot travel, worst    : {worst * 1e3:.1f} mm")
     print(f"     survivors that stepped: {int(stepped.sum())} of {n}")
     print(f"     threshold used        : {FOOT_MOVED_M * 1e3:.0f} mm")
 
@@ -247,7 +253,8 @@ def main() -> int:
                     "com_velocity_jump": among_survivors(jump),
                     "com_height_min": among_survivors(com_height_min),
                     "stance_max": among_survivors(stance_max),
-                    "foot_displacement_max": among_survivors(foot_shift_max),
+                    "foot_displacement_mean": among_survivors(foot_shift_max),
+                    "foot_displacement_worst": worst,
                     "stepped": int(stepped.sum()),
                     "dcm_peak": among_survivors(dcm_max),
                 },

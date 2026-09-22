@@ -62,6 +62,23 @@ parser.add_argument(
     help="Measure a quiet stance instead of the perturbation protocol.",
 )
 parser.add_argument(
+    "--protocol",
+    choices=("directional", "absolute"),
+    default="directional",
+    help=(
+        "directional pushes at a fraction of what is recoverable along each "
+        "heading, which is the distribution the policy trains on. absolute "
+        "pushes at a fixed speed in every direction, which includes headings "
+        "no zero-step controller can survive. Default directional."
+    ),
+)
+parser.add_argument(
+    "--push-speed",
+    type=float,
+    default=None,
+    help="Speed for --protocol absolute, in m/s. Defaults to the forward bound.",
+)
+parser.add_argument(
     "--results-file",
     type=Path,
     default=None,
@@ -233,13 +250,30 @@ def learned_policy(inner, path: Path, freeze_arms: bool = False):
 def main() -> int:
     cfg = NaoStandEnvCfg()
     cfg.scene.num_envs = args_cli.num_envs
+    # Skip the ramp either way: the question is what each controller can
+    # already do, not how it got there.
+    cfg.push_curriculum_steps = 1
     if args_cli.no_pushes:
-        cfg.push_velocity_initial = 0.0
-        cfg.push_velocity_final = 0.0
+        cfg.push_fraction_initial = 0.0
+        cfg.push_fraction_final = 0.0
+        cfg.push_exact_magnitude = False
+        protocol = "off"
+    elif args_cli.protocol == "absolute":
+        # One speed in every direction. Backward that is 124% of the bound, so
+        # part of this protocol is unwinnable for everyone -- fair between
+        # controllers, but it compresses the difference between them.
+        cfg.push_exact_magnitude = True
+        speed = args_cli.push_speed or nk.capturable_com_velocity()["forward"]
+        cfg.push_velocity_initial = speed
+        cfg.push_velocity_final = speed
+        protocol = f"absolute, {speed:.3f} m/s in every direction"
     else:
-        # Skip the ramp: the question is what each controller can already do.
-        cfg.push_velocity_initial = cfg.push_velocity_final
-        cfg.push_curriculum_steps = 1
+        # A fraction of what is recoverable along each heading. This is the
+        # distribution the policy is trained on, and every push in it is
+        # survivable by something.
+        cfg.push_exact_magnitude = False
+        cfg.push_fraction_initial = cfg.push_fraction_final
+        protocol = f"directional, {cfg.push_fraction_final:.2f} of the bound per heading"
 
     env = gym.make(TASK_ID, cfg=cfg)
     inner = env.unwrapped
@@ -261,8 +295,7 @@ def main() -> int:
     print(f"  environments           : {inner.num_envs}")
     print(f"  control steps          : {args_cli.steps}")
     print(f"  control rate           : {1.0 / inner.step_dt:.0f} Hz")
-    pushes = "off" if args_cli.no_pushes else f"{cfg.push_velocity_final:.3f} m/s, all directions"
-    print(f"  pushes                 : {pushes}")
+    print(f"  pushes                 : {protocol}")
     print("  Every controller is scored on this same environment instance.")
 
     results: dict[str, dict[str, float]] = {}
@@ -304,7 +337,7 @@ def main() -> int:
         payload = {
             "num_envs": inner.num_envs,
             "steps": args_cli.steps,
-            "push_velocity": 0.0 if args_cli.no_pushes else cfg.push_velocity_final,
+            "protocol": protocol,
             "results": results,
         }
         args_cli.results_file.parent.mkdir(parents=True, exist_ok=True)

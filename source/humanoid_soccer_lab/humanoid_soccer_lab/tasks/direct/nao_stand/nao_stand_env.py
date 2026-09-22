@@ -177,17 +177,43 @@ class NaoStandEnv(DirectRLEnv):
         self._robot.set_joint_position_target(self._held_targets, joint_ids=self._held_ids)
 
     def _push_magnitude(self) -> float:
-        """Current push magnitude in m/s, ramped over the curriculum.
+        """Current push size as a fraction of the directional capturable bound.
 
-        Starting at full magnitude would have the robot fall almost every
-        episode, so the policy would see hardly any upright states and get no
-        gradient telling it what balancing looks like. Growing the push keeps
-        the task at the edge of what the current policy can already do.
+        A fraction, not a speed. The bound depends on direction -- 0.548 m/s
+        forward against 0.443 m/s backward -- so a single speed is too hard in
+        one direction and too easy in another, and the policy spends its
+        experience on episodes it could not have won.
+
+        Growing it keeps the task at the edge of what the policy can already
+        do; starting at the top would have it fall almost every episode and see
+        hardly any upright states.
         """
         consumed = self.common_step_counter * self.num_envs
         progress = min(1.0, consumed / max(1, self.cfg.push_curriculum_steps))
-        span = self.cfg.push_velocity_final - self.cfg.push_velocity_initial
-        return self.cfg.push_velocity_initial + span * progress
+        span = self.cfg.push_fraction_final - self.cfg.push_fraction_initial
+        return self.cfg.push_fraction_initial + span * progress
+
+    def _capturable_speed(self, angle: torch.Tensor) -> torch.Tensor:
+        """Zero-step capturable speed along ``angle``, in m/s.
+
+        Distance from the centre of mass to the edge of the support polygon
+        along the push direction, times omega_0. The polygon is the rectangle
+        the two flat feet span, so this is an exact ray-box distance.
+        """
+        x_min, x_max = self.cfg.support_polygon_x
+        y_min, y_max = self.cfg.support_polygon_y
+        com_x, com_y = self.cfg.nominal_com_offset
+
+        cos, sin = torch.cos(angle), torch.sin(angle)
+        infinity = torch.full_like(cos, float("inf"))
+        # A zero component never reaches its pair of edges.
+        to_x = torch.where(
+            cos > 0, (x_max - com_x) / cos, torch.where(cos < 0, (x_min - com_x) / cos, infinity)
+        )
+        to_y = torch.where(
+            sin > 0, (y_max - com_y) / sin, torch.where(sin < 0, (y_min - com_y) / sin, infinity)
+        )
+        return self.cfg.lipm_omega * torch.minimum(to_x, to_y)
 
     def _apply_pushes(self) -> None:
         """Shove the environments whose timer has expired.
@@ -203,7 +229,11 @@ class NaoStandEnv(DirectRLEnv):
             return
 
         env_ids = due.nonzero(as_tuple=False).squeeze(-1)
-        magnitude = self._push_magnitude()
+        magnitude = (
+            self.cfg.push_velocity_final
+            if self.cfg.push_exact_magnitude
+            else self._push_magnitude()
+        )
         count = len(env_ids)
 
         # Direction. Uniform over the circle while training, so no direction is
@@ -212,9 +242,15 @@ class NaoStandEnv(DirectRLEnv):
         # 0.443 m/s backward -- and a uniform push cannot say which bound a
         # controller actually ran into.
         if self.cfg.push_direction_rad is None:
-            angle = math_utils.sample_uniform(-torch.pi, torch.pi, (count,), self.device)
+            relative_angle = math_utils.sample_uniform(
+                -torch.pi, torch.pi, (count,), self.device
+            )
+            angle = relative_angle
         else:
-            angle = torch.full((count,), self.cfg.push_direction_rad, device=self.device)
+            relative_angle = torch.full(
+                (count,), self.cfg.push_direction_rad, device=self.device
+            )
+            angle = relative_angle.clone()
             # Relative to where the robot faces, not to the world. Yaw is
             # randomised at reset, so a world-frame "forward" would be a
             # different direction for every robot in the batch.
@@ -222,12 +258,17 @@ class NaoStandEnv(DirectRLEnv):
             w, x, y, z = quat.unbind(dim=-1)
             angle = angle + torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
-        # Magnitude. Uniform up to the curriculum value while training, so the
-        # policy sees the whole range; exact when measuring a threshold.
+        # Magnitude. While training this is a fraction of what is recoverable
+        # along the sampled direction, so every direction is equally hard
+        # relative to its own limit. When measuring, the configured speed is
+        # used verbatim, since a threshold has to be an absolute number.
         if self.cfg.push_exact_magnitude:
             speed = torch.full((count,), magnitude, device=self.device)
         else:
-            speed = math_utils.sample_uniform(0.0, magnitude, (count,), self.device)
+            # The heading sampled above is in world frame; the bound is defined
+            # about the robot, so the body-relative angle is what it needs.
+            ceiling = magnitude * self._capturable_speed(relative_angle)
+            speed = math_utils.sample_uniform(0.0, 1.0, (count,), self.device) * ceiling
 
         push = torch.zeros(count, 3, device=self.device)
         push[:, 0] = speed * torch.cos(angle)

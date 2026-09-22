@@ -683,3 +683,63 @@ def foot_collision_extent(
     sole_joint = next(j for j in model.joints if j.child == "r_sole")
     vertices = vertices - sole_joint.origin_xyz
     return vertices.min(axis=0), vertices.max(axis=0)
+
+
+def capturable_velocity_in_direction(
+    angle: float | np.ndarray,
+    joint_pos: dict[str, float] | None = None,
+    urdf_path: Path | None = None,
+) -> float | np.ndarray:
+    r"""Zero-step capturable speed for a push along ``angle``, in m/s.
+
+    The bound :math:`\dot{x}_{max} = \omega_0 d` needs ``d``, the distance from
+    the centre of mass to the edge of the support polygon **in the direction the
+    push is driving it**. That distance is strongly direction dependent for a
+    biped: the NAO's centre of mass sits 12.6 mm ahead of the sole midpoint, and
+    the heel is 60.7 mm behind the ankle against 103.3 mm of toe, so backward is
+    the tightest direction by a wide margin.
+
+    Using a single number for every direction is what makes a curriculum
+    unlearnable. Set to the forward bound of 0.548 m/s, roughly half the pushes
+    land in the backward hemisphere where much of that magnitude cannot be
+    recovered by any zero-step controller, and the policy spends most of its
+    experience on episodes it could not have won.
+
+    The polygon is treated as the axis-aligned rectangle the two flat feet span,
+    so ``d`` is an exact ray-box distance rather than an interpolation between
+    three measured directions.
+
+    Args:
+        angle: Push heading in radians, 0 forward and pi/2 to the robot's left.
+            Accepts an array.
+        joint_pos: Posture to evaluate at. Defaults to the nominal stand.
+        urdf_path: Override for the URDF location.
+
+    Returns:
+        Capturable speed in m/s, matching the shape of ``angle``.
+    """
+    pose = NOMINAL_STAND_JOINT_POS if joint_pos is None else joint_pos
+    omega = lipm_omega(com_height_above_soles(pose, urdf_path))
+
+    poses = forward_kinematics(pose, urdf_path)
+    sole_midpoint = 0.5 * (poses["l_sole"][:3, 3] + poses["r_sole"][:3, 3])
+    com = (center_of_mass(pose, urdf_path) - sole_midpoint)[:2]
+
+    (x_min, x_max), (y_min, y_max) = support_polygon_double_stance()
+
+    direction = np.stack([np.cos(angle), np.sin(angle)], axis=-1)
+    # Distance along the ray to each of the four edges, keeping the nearest
+    # positive one. A component of zero never reaches its pair of edges, so it
+    # is pushed to infinity rather than dividing by zero.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        to_x = np.where(
+            direction[..., 0] > 0,
+            (x_max - com[0]) / direction[..., 0],
+            np.where(direction[..., 0] < 0, (x_min - com[0]) / direction[..., 0], np.inf),
+        )
+        to_y = np.where(
+            direction[..., 1] > 0,
+            (y_max - com[1]) / direction[..., 1],
+            np.where(direction[..., 1] < 0, (y_min - com[1]) / direction[..., 1], np.inf),
+        )
+    return omega * np.minimum(to_x, to_y)

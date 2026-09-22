@@ -303,6 +303,46 @@ class NaoStandEnvCfg(DirectRLEnvCfg):
     recovery takes, so the policy sees each disturbance settle.
     """
 
+    push_fraction_initial = 0.15
+    """Opening push, as a fraction of what is recoverable in that direction."""
+
+    push_fraction_final = 0.90
+    """Final push, as a fraction of the directional capturable bound.
+
+    A fraction rather than a speed, because the bound is not the same in every
+    direction: 0.548 m/s forward, 0.443 m/s backward, up to 0.77 m/s diagonally.
+    The first curriculum ramped to a fixed 0.548 m/s in every direction, which
+    is 124% of what is recoverable backward, so roughly half the pushes landed
+    where no zero-step controller could have survived.
+
+    The cost was visible in the learning curve. Episode length peaked at 1629
+    steps around iteration 101, at 0.25 m/s, then fell monotonically to 602 as
+    the curriculum ramped -- and kept falling for 450 iterations *after* the
+    magnitude stopped changing. A policy whose experience is mostly unwinnable
+    episodes has no signal separating a good action from a bad one.
+
+    0.90 keeps every push inside the physically recoverable region while
+    staying above what the joint PD reaches, which the threshold sweep put at
+    0.73 of the bound forward and 0.90 backward.
+    """
+
+    nominal_com_offset: tuple[float, float] = (
+        float(
+            nk.center_of_mass(nk.NOMINAL_STAND_JOINT_POS)[0]
+            - 0.5
+            * (
+                nk.forward_kinematics(nk.NOMINAL_STAND_JOINT_POS)["l_sole"][0, 3]
+                + nk.forward_kinematics(nk.NOMINAL_STAND_JOINT_POS)["r_sole"][0, 3]
+            )
+        ),
+        0.0,
+    )
+    """Nominal centre of mass relative to the sole midpoint, in metres.
+
+    Needed to find the distance to the polygon edge along a push direction. The
+    lateral component is zero by symmetry.
+    """
+
     push_velocity_initial = 0.05
     """Push magnitude at the start of training, in m/s."""
 

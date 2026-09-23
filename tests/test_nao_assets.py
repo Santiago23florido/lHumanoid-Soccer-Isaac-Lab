@@ -21,7 +21,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "source" / "humanoid_soccer_lab"))
 
-from humanoid_soccer_lab.assets import nao_paths  # noqa: E402
+from humanoid_soccer_lab.nao.assets import nao_paths  # noqa: E402
 
 # Digest of nao_robot @67476469a1371b00b17538eb6ea336367ece7d44,
 # nao_description/urdf/naoV50_generated_urdf/nao.urdf, copied verbatim.
@@ -87,9 +87,9 @@ def _tracked_files() -> list[str]:
         "third_party/nao/LICENSE.nao_meshes.txt",
         "scripts/view_nao.py",
         "scripts/fetch_nao_meshes.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao_usd.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao_paths.py",
+        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao.py",
+        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao_usd.py",
+        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao_paths.py",
     ],
 )
 def test_expected_asset_files_exist(relative: str) -> None:
@@ -204,7 +204,7 @@ def test_foot_mesh_is_real_world_sized_once_the_scale_is_applied() -> None:
 
 @requires_meshes
 def test_derived_urdf_resolves_meshes_without_ros_and_drops_gazebo() -> None:
-    from humanoid_soccer_lab.assets import nao_usd
+    from humanoid_soccer_lab.nao.assets import nao_usd
 
     path = nao_usd.build_derived_urdf(force=True)
     root = ET.parse(path).getroot()
@@ -338,9 +338,9 @@ RL_MARKERS = (
     "relative",
     [
         "scripts/view_nao.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao_usd.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao_paths.py",
+        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao.py",
+        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao_usd.py",
+        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao_paths.py",
     ],
 )
 def test_no_reinforcement_learning_was_implemented_for_the_nao(relative: str) -> None:

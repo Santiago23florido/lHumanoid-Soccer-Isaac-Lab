@@ -121,7 +121,7 @@ except ValueError as exc:
     parser.error(str(exc))
 
 # Fail fast, before paying for an Isaac Sim launch, if the geometry is absent.
-from humanoid_soccer_lab.assets.nao_paths import describe_missing_meshes, meshes_are_available
+from humanoid_soccer_lab.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
 
 if not meshes_are_available():
     print("\n" + describe_missing_meshes() + "\n", file=sys.stderr)
@@ -137,9 +137,9 @@ import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation
 from isaaclab.sim import SimulationContext
 
-from humanoid_soccer_lab.assets import nao_kinematics as nk
-from humanoid_soccer_lab.controllers import DcmBalanceController
-from humanoid_soccer_lab.assets.nao import (
+from humanoid_soccer_lab.nao.assets import nao_kinematics as nk
+from humanoid_soccer_lab.nao.controllers import DcmBalanceController
+from humanoid_soccer_lab.nao.assets.nao import (
     NAO_STAND_COM_HEIGHT,
     NAO_STAND_LIPM_OMEGA,
     get_nao_stand_cfg,

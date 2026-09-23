@@ -87,7 +87,7 @@ parser.add_argument(
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
-from humanoid_soccer_lab.assets.nao_paths import describe_missing_meshes, meshes_are_available
+from humanoid_soccer_lab.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
 
 if not meshes_are_available():
     print("\n" + describe_missing_meshes() + "\n", file=sys.stderr)
@@ -102,10 +102,10 @@ import torch
 import isaaclab.utils.math as math_utils
 
 import humanoid_soccer_lab.tasks  # noqa: F401  (registers the task ids)
-from humanoid_soccer_lab.assets import nao_kinematics as nk
-from humanoid_soccer_lab.controllers import DcmBalanceController
-from humanoid_soccer_lab.tasks.direct.nao_stand import TASK_ID
-from humanoid_soccer_lab.tasks.direct.nao_stand.nao_stand_env_cfg import NaoStandEnvCfg
+from humanoid_soccer_lab.nao.assets import nao_kinematics as nk
+from humanoid_soccer_lab.nao.controllers import DcmBalanceController
+from humanoid_soccer_lab.nao.tasks.nao_stand import TASK_ID
+from humanoid_soccer_lab.nao.tasks.nao_stand.nao_stand_env_cfg import NaoStandEnvCfg
 
 
 def run_trial(env, actions_fn, steps: int) -> dict[str, float]:

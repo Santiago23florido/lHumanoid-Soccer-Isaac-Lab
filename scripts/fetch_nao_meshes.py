@@ -38,7 +38,7 @@ _EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_soccer_lab"
 if str(_EXTENSION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXTENSION_ROOT))
 
-from humanoid_soccer_lab.assets.nao_paths import (  # noqa: E402
+from humanoid_soccer_lab.nao.assets.nao_paths import (  # noqa: E402
     ASSET_CACHE_DIR,
     NAO_ASSET_DIR,
     NAO_MESH_DIR,

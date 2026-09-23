@@ -1,6 +1,6 @@
 """Recompute the NAO joint PD gains from the URDF and print the derivation.
 
-The gains in :data:`humanoid_soccer_lab.assets.nao.NAO_STIFFNESS` are not tuned
+The gains in :data:`humanoid_soccer_lab.nao.assets.nao.NAO_STIFFNESS` are not tuned
 values; they are the output of this script. Running it reproduces the whole
 table, so a reviewer can check the numbers rather than trust them, and the
 report can quote a derivation instead of a magic constant.
@@ -43,7 +43,7 @@ _EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_soccer_lab"
 if str(_EXTENSION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXTENSION_ROOT))
 
-from humanoid_soccer_lab.assets import nao_kinematics as nk  # noqa: E402
+from humanoid_soccer_lab.nao.assets import nao_kinematics as nk  # noqa: E402
 
 LEG_NATURAL_FREQUENCY = 12.0
 """Target closed-loop frequency for the leg joints, in rad/s.

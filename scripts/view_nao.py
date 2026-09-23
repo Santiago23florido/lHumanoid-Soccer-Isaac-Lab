@@ -73,7 +73,7 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 # Fail fast, before paying for an Isaac Sim launch, if the geometry is absent.
-from humanoid_soccer_lab.assets.nao_paths import describe_missing_meshes, meshes_are_available
+from humanoid_soccer_lab.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
 
 if not meshes_are_available():
     print("\n" + describe_missing_meshes() + "\n", file=sys.stderr)
@@ -86,12 +86,12 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.sim import SimulationContext
 
-from humanoid_soccer_lab.assets.nao import (
+from humanoid_soccer_lab.nao.assets.nao import (
     NAO_DEFAULT_JOINT_POS,
     NAO_EXPECTED_JOINTS,
     get_nao_cfg,
 )
-from humanoid_soccer_lab.assets.nao_paths import (
+from humanoid_soccer_lab.nao.assets.nao_paths import (
     DERIVED_URDF_PATH,
     NAO_URDF_PATH,
     urdf_robot_name,

@@ -195,4 +195,4 @@ straw man. The joint PD establishes what a fixed posture loop can do; the
 capture-point controller establishes what a controller that knows the theory
 can do. Anything a policy adds has to be visible on top of the second one, and
 the reasons it might are set out in
-[nao_stand_plan.md](nao_stand_plan.md).
+[task_nao_stand.md](task_nao_stand.md).

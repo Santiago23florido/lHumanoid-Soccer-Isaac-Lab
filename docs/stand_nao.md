@@ -30,7 +30,7 @@ The push directly changes root linear velocity. It is an impulse surrogate,
 not a force applied at a specified point for a measured duration. World x is
 forward only for the nominal initial heading used here.
 
-## Verified on 2026-09-21
+## Measurement conditions
 
 Isaac Sim 5.1.0.0, Isaac Lab checkout `b4c3210` (extension 0.54.4), Windows,
 CUDA. Physics 5 ms; reference/render interval two physics steps. Settling 0.5 s;
@@ -98,8 +98,8 @@ hand/wrist gains include engineering floors.
 
 ## Tests and remaining work
 
-The review passed 100 unit tests and the three simulation trials above. On a
-Windows installation whose global pytest temporary folder is inaccessible:
+The suite runs without Isaac Sim. On a Windows installation whose global
+pytest temporary folder is inaccessible:
 
 ```powershell
 & C:\Users\USER\miniconda3\envs\env_isaaclab\python.exe -m pytest --basetemp outputs\pytest_review
@@ -109,9 +109,7 @@ Use a directory dedicated to pytest. PhysX still reports issues with continuous
 finger mimic joints lacking finite limits; successful standing does not
 validate their mechanical fidelity.
 
-The `nao_stand` RL files are an unfinished experimental scaffold. They have not
-been trained or validated; the training/play entry points remain placeholders.
-See [nao_stand.md](nao_stand.md) for the outstanding integration work.
-The local Spanish report in `docs/theory/informe_control_nao.pdf` explains the
-full model, equations, measurements and specific RL fixes needed before training.
-Its editable LaTeX, plots and raw data are in the same Git-ignored directory.
+This controller is the reference a learned policy has to beat. The task it is
+measured on, the training procedure and the current comparison are in
+[task_nao_stand.md](task_nao_stand.md); the headline numbers are in the
+repository README.

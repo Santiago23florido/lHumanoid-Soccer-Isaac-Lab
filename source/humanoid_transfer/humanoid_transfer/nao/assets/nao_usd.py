@@ -18,7 +18,7 @@ Two build steps, both producing untracked artifacts under ``assets/generated/nao
    that PhysX can instantiate as an articulation.
 
 Importing this module does not require Isaac Lab; only calling the conversion
-does. See ``third_party/nao/README.md`` for provenance and licensing.
+does. See ``nao/assets/licenses/README.md`` for provenance and licensing.
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ _ATTRIBUTION = """
 <!-- Copyright (c) 2009-2013, A. Hornung, University of Freiburg          -->
 <!-- All rights reserved.                                                 -->
 <!-- Licensed under the BSD 3-Clause License; the full text is at         -->
-<!--   third_party/nao/LICENSE.nao_robot.txt                              -->
+<!--   nao/assets/licenses/LICENSE.nao_robot.txt                              -->
 <!--                                                                      -->
 <!-- Changes applied to the upstream file, and nothing else:              -->
 <!--   1. package://nao_meshes/... mesh references rewritten to paths     -->
@@ -92,7 +92,7 @@ _ATTRIBUTION = """
 <!--                                                                      -->
 <!-- The referenced .dae/.stl geometry is NOT covered by the BSD license  -->
 <!-- above: it is Aldebaran / SoftBank Robotics material under            -->
-<!-- CC BY-NC-ND 4.0. See third_party/nao/README.md.                      -->
+<!-- CC BY-NC-ND 4.0. See nao/assets/licenses/README.md.                      -->
 <!-- ===================================================================== -->
 """
 

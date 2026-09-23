@@ -14,8 +14,8 @@ import one of these configurations and adjust ``prim_path`` and ``init_state``
 rather than redefining the robot.
 
 The USD both point at is a build artifact generated from the vendored upstream
-URDF; see :mod:`humanoid_soccer_lab.nao.assets.nao_usd` and
-``third_party/nao/README.md``.
+URDF; see :mod:`humanoid_transfer.nao.assets.nao_usd` and
+``nao/assets/licenses/README.md``.
 """
 
 from __future__ import annotations

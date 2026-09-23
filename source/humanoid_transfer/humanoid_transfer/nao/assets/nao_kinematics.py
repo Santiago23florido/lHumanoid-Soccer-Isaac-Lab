@@ -12,7 +12,7 @@ machine with no Isaac Sim installed. The functions are written for clarity on a
 single pose, not for batched use inside an RL loop: the environment computes the
 centre of mass on the GPU from the simulator's own body poses instead.
 
-See ``third_party/nao/README.md`` for the model's provenance and licensing.
+See ``nao/assets/licenses/README.md`` for the model's provenance and licensing.
 """
 
 from __future__ import annotations
@@ -546,7 +546,7 @@ sagittal plane collapses. Bending the knee by 0.70 rad moves the configuration
 well away from that singularity at a cost of only 12 mm of standing height.
 
 Joints not listed keep the URDF zero, except the elbow rolls above whose limits
-exclude zero (see :func:`~humanoid_soccer_lab.nao.assets.nao_paths.default_joint_positions`).
+exclude zero (see :func:`~humanoid_transfer.nao.assets.nao_paths.default_joint_positions`).
 """
 
 

@@ -17,17 +17,17 @@ def register_task() -> bool:
     gym.register(
         id=TASK_ID,
         entry_point=(
-            "humanoid_soccer_lab.soccer.tasks.humanoid_soccer.humanoid_soccer_env:"
+            "humanoid_transfer.soccer.tasks.humanoid_soccer.humanoid_soccer_env:"
             "HumanoidSoccerEnv"
         ),
         disable_env_checker=True,
         kwargs={
             "env_cfg_entry_point": (
-                "humanoid_soccer_lab.soccer.tasks.humanoid_soccer.humanoid_soccer_env_cfg:"
+                "humanoid_transfer.soccer.tasks.humanoid_soccer.humanoid_soccer_env_cfg:"
                 "HumanoidSoccerEnvCfg"
             ),
             "rsl_rl_cfg_entry_point": (
-                "humanoid_soccer_lab.soccer.tasks.humanoid_soccer.agents.rsl_rl_ppo_cfg:"
+                "humanoid_transfer.soccer.tasks.humanoid_soccer.agents.rsl_rl_ppo_cfg:"
                 "HumanoidSoccerPPORunnerCfg"
             ),
         },

@@ -4,7 +4,7 @@ Pure standard library on purpose: this module is imported by the mesh
 bootstrap script and by the tests, both of which must work on a machine that
 has neither Isaac Sim nor Isaac Lab installed.
 
-See ``third_party/nao/README.md`` for provenance and licensing of the files
+See ``nao/assets/licenses/README.md`` for provenance and licensing of the files
 these paths point at.
 """
 
@@ -54,17 +54,17 @@ def _resolve_repo_root() -> Path:
     # surfaced as a missing URDF rather than as a path bug.
     here = Path(__file__).resolve()
     for candidate in here.parents:
-        if (candidate / "assets" / "robots" / "nao").is_dir():
+        if (candidate / "nao" / "assets" / "urdf").is_dir():
             return candidate
     raise RuntimeError(
         f"could not locate the repository root above {here}: no ancestor "
-        "contains assets/robots/nao. Set NAO_ASSET_ROOT to point at it."
+        "contains nao/assets/urdf. Set NAO_ASSET_ROOT to point at it."
     )
 
 
 REPO_ROOT = _resolve_repo_root()
 
-NAO_ASSET_DIR = REPO_ROOT / "assets" / "robots" / "nao"
+NAO_ASSET_DIR = REPO_ROOT / "nao" / "assets"
 """Root of the NAO asset tree."""
 
 NAO_URDF_PATH = NAO_ASSET_DIR / "urdf" / "nao.urdf"
@@ -72,7 +72,7 @@ NAO_URDF_PATH = NAO_ASSET_DIR / "urdf" / "nao.urdf"
 
 NAO_MESH_DIR = NAO_ASSET_DIR / "meshes"
 NAO_MESH_V40_DIR = NAO_MESH_DIR / "V40"
-"""Geometry directory. Untracked; populated by ``scripts/fetch_nao_meshes.py``."""
+"""Geometry directory. Untracked; populated by ``nao/scripts/fetch_meshes.py``."""
 
 NAO_TEXTURE_DIR = NAO_ASSET_DIR / "texture"
 NAO_TEXTURE_PATH = NAO_TEXTURE_DIR / "textureNAO.png"
@@ -82,7 +82,7 @@ Must sit beside ``meshes/`` because the upstream COLLADA files reference the
 texture as ``../../texture/textureNAO.png``.
 """
 
-GENERATED_NAO_DIR = REPO_ROOT / "assets" / "generated" / "nao"
+GENERATED_NAO_DIR = NAO_ASSET_DIR / "generated" / "nao"
 """Build artifacts derived from the sources above. Untracked."""
 
 DERIVED_URDF_PATH = GENERATED_NAO_DIR / "nao_isaac.urdf"
@@ -202,6 +202,6 @@ def describe_missing_meshes(urdf_path: Path | None = None) -> str:
         "",
         "  python scripts/fetch_nao_meshes.py",
         "",
-        "See third_party/nao/README.md for the licensing details.",
+        "See nao/assets/licenses/README.md for the licensing details.",
     ]
     return "\n".join(lines)

@@ -19,7 +19,7 @@ from __future__ import annotations
 TASK_ID = "G1Walk-Teacher-v0"
 PLAY_TASK_ID = "G1Walk-Teacher-Play-v0"
 
-_MODULE = "humanoid_soccer_lab.g1.tasks.g1_walk"
+_MODULE = "humanoid_transfer.g1.tasks.g1_walk"
 _ISAACLAB_AGENTS = (
     "isaaclab_tasks.manager_based.locomotion.velocity.config.g1.agents.rsl_rl_ppo_cfg"
 )

@@ -3,7 +3,7 @@
 A thin wrapper over Isaac Lab's own ``rsl_rl/play.py``. It exists for one
 reason: Isaac Lab discovers tasks by importing ``isaaclab_tasks``, which knows
 nothing about this external extension, so the task ids have to be registered
-before ``gym.make`` is reached. Importing ``humanoid_soccer_lab.tasks`` does
+before ``gym.make`` is reached. Importing ``humanoid_transfer.tasks`` does
 that.
 
 Everything else is delegated, so the flags are Isaac Lab's and stay correct
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_soccer_lab"
+_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_transfer"
 if str(_EXTENSION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXTENSION_ROOT))
 
@@ -57,7 +57,7 @@ def main() -> None:
     # Registration must happen before Isaac Lab resolves the task id, and it
     # pulls in no Isaac Lab code of its own: the environment classes are named
     # by string and imported only when a task is actually instantiated.
-    import humanoid_soccer_lab.tasks  # noqa: F401
+    import humanoid_transfer.tasks  # noqa: F401
 
     # Isaac Lab's scripts import cli_args as a sibling module, so their
     # own directory has to be importable before runpy executes them.

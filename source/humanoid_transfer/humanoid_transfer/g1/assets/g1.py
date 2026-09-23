@@ -19,34 +19,42 @@ from __future__ import annotations
 
 from typing import Any
 
-SOURCE_ROBOT = "g1_29dof"
+SOURCE_ROBOT = "g1"
 """Which shipped humanoid backs the source embodiment.
 
-============  ====  ======  =============================================
-value         DOF   mass    notes
-============  ====  ======  =============================================
-``g1_29dof``  29    ~35 kg  Default. Most joints, most capable, the widest
-                            gap to the NAO and therefore the most
-                            demanding transfer.
-``g1``        23    ~35 kg  Same platform, reduced joint set.
-``h1``        19    ~52 kg  Larger, simpler, matches the NAO's 19
-                            commanded joints exactly -- useful as a
-                            control condition where the joint counts agree
-                            and only the scale differs.
-============  ====  ======  =============================================
+===========  =========  =====  ======  ==================================
+value        body DOF   hands  total   notes
+===========  =========  =====  ======  ==================================
+``g1``       23         14     37      Default. 12 leg, 1 waist, 10 arm.
+``h1``       19         0      19      Larger, simpler. Matches the NAO's
+                                       19 commanded joints exactly, so it
+                                       is the control condition where the
+                                       counts agree and only scale differs.
+===========  =========  =====  ======  ==================================
 
 Changing this value changes which teacher is trained. It does not change the
 student, which is always the NAO.
+
+.. note::
+
+   Isaac Lab exposes a ``G1_29DOF_CFG`` whose name implies 29 actuated joints.
+   It is not a different robot: it loads the same ``Robots/Unitree/G1/g1.usd``
+   as ``G1_CFG``, and the loaded articulation reports **37** joints -- a 23-DOF
+   body plus seven joints per hand. The 29-DOF G1 that Unitree sells has three
+   waist joints and seven-DOF arms; this asset has one waist joint and five-DOF
+   arms.
+
+   This project selected that configuration and repeated the "29" in its own
+   documentation, which is where the figure came from. The counts above are
+   measured from the loaded articulation instead.
 """
 
 _CFG_NAMES = {
-    "g1_29dof": "G1_29DOF_CFG",
     "g1": "G1_CFG",
     "h1": "H1_CFG",
 }
 
 NOMINAL_BASE_HEIGHT = {
-    "g1_29dof": 0.74,
     "g1": 0.74,
     "h1": 1.05,
 }
@@ -87,17 +95,23 @@ def describe_source_robot(robot: str | None = None) -> dict[str, Any]:
     """Static facts about the selected source robot, without loading Isaac Lab.
 
     Enough to reason about the embodiment gap in tests and documentation.
+
+    ``body_dof`` and ``hand_dof`` are reported separately because only the first
+    is relevant to a gait, and conflating them is how this project ended up
+    quoting a joint count that did not match the loaded articulation.
     """
     name = robot or SOURCE_ROBOT
     if name not in _CFG_NAMES:
         raise ValueError(
             f"unknown source robot {name!r}; choose one of {sorted(_CFG_NAMES)}"
         )
-    dof = {"g1_29dof": 29, "g1": 23, "h1": 19}[name]
+    body_dof, hand_dof = {"g1": (23, 14), "h1": (19, 0)}[name]
     return {
         "name": name,
         "config": _CFG_NAMES[name],
-        "actuated_dof": dof,
+        "body_dof": body_dof,
+        "hand_dof": hand_dof,
+        "total_dof": body_dof + hand_dof,
         "nominal_base_height": NOMINAL_BASE_HEIGHT[name],
     }
 

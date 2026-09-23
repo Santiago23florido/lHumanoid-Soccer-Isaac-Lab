@@ -21,14 +21,12 @@ deliver the required torques.
 
 from __future__ import annotations
 
-import math
-
 from isaaclab.utils import configclass
 from isaaclab_tasks.manager_based.locomotion.velocity.config.g1.flat_env_cfg import (
     G1FlatEnvCfg,
 )
 
-GRAVITY = 9.81
+from ....common.scaling import froude_matched_speed
 
 STUDENT_LEG_LENGTH = 0.2689
 """NAO centre-of-mass height above the soles in the nominal posture, in metres.
@@ -43,22 +41,6 @@ TEACHER_LEG_LENGTH = 0.74
 """Source-robot standing base height, in metres. See ``g1.assets.g1``."""
 
 
-def froude_matched_speed(student_speed: float) -> float:
-    """Teacher speed dynamically similar to ``student_speed`` on the student.
-
-    Two legged systems are dynamically similar when their Froude numbers match::
-
-        Fr = v^2 / (g * l)
-
-    so equal Froude gives ``v_teacher = v_student * sqrt(l_teacher / l_student)``.
-
-    The scaling is why a small robot looks hurried at speeds a large one strolls
-    through, and why copying a joint trajectory across a scale change produces a
-    gait that is wrong in a way no amount of retargeting fixes.
-    """
-    return student_speed * math.sqrt(TEACHER_LEG_LENGTH / STUDENT_LEG_LENGTH)
-
-
 STUDENT_TARGET_SPEED = 0.15
 """Forward speed the student is eventually meant to reach, in m/s.
 
@@ -68,7 +50,9 @@ so the target speed has to leave margin against that bound rather than approach
 it.
 """
 
-FROUDE_MATCHED_SPEED = froude_matched_speed(STUDENT_TARGET_SPEED)
+FROUDE_MATCHED_SPEED = froude_matched_speed(
+    STUDENT_TARGET_SPEED, STUDENT_LEG_LENGTH, TEACHER_LEG_LENGTH
+)
 """Teacher speed corresponding to :data:`STUDENT_TARGET_SPEED`, about 0.25 m/s."""
 
 

@@ -1,6 +1,6 @@
 # `g1/` — the source embodiment
 
-**Unitree G1, 29 actuated joints.** The robot a skill is learned on first,
+**Unitree G1, 23 actuated body joints** (plus fourteen hand joints). The robot a skill is learned on first,
 because it can actually perform it: roughly 35 kg, 1.3 m tall, and actuators
 with the torque density to walk dynamically.
 
@@ -17,8 +17,7 @@ shipped humanoid plays teacher:
 
 | Value | DOF | Notes |
 | --- | --- | --- |
-| `g1_29dof` | 29 | Default. Widest gap to the NAO, hardest transfer. |
-| `g1` | 23 | Same platform, reduced joint set. |
+| `g1` | 23 | Default. 12 leg, 1 waist, 10 arm, plus 14 hand joints. |
 | `h1` | 19 | Larger, simpler. Matches the NAO's 19 commanded joints exactly — a control condition where joint counts agree and only scale differs. |
 
 Changing it changes the size of the embodiment gap, which is the variable the

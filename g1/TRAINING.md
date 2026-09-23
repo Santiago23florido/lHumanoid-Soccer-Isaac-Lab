@@ -26,7 +26,7 @@ produced here by running it.
 | Component | Source | Modified? |
 | --- | --- | --- |
 | Robot model (USD) | Isaac Lab Nucleus, `Robots/Unitree/G1/g1.usd` | No |
-| Actuator groups and gains | `isaaclab_assets.robots.unitree:G1_29DOF_CFG` | No |
+| Actuator groups and gains | `isaaclab_assets.robots.unitree:G1_CFG` | No |
 | Environment: rewards, observations, terminations, randomisation | `isaaclab_tasks…config.g1.flat_env_cfg:G1FlatEnvCfg` | Inherited; **one field changed** |
 | PPO hyperparameters | `…config.g1.agents.rsl_rl_ppo_cfg:G1FlatPPORunnerCfg` | No |
 | Command velocity range | — | **Ours. See §2.** |
@@ -109,8 +109,8 @@ and is not addressed anywhere in this repository yet.
 
 `SOURCE_ROBOT` in
 [`g1/assets/g1.py`](../source/humanoid_transfer/humanoid_transfer/g1/assets/g1.py)
-selects which shipped humanoid plays teacher: `g1_29dof` (default), `g1`
-(23 DOF) or `h1` (19 DOF, matching the NAO's commanded joint count exactly).
+selects which shipped humanoid plays teacher: `g1` (default, 23 body DOF)
+or `h1` (19 DOF, matching the NAO's commanded joint count exactly).
 Changing it changes the size of the embodiment gap, which is the variable the
 transfer study most wants to vary.
 
@@ -238,14 +238,80 @@ Two design decisions:
 Archives are untracked (`g1/rollouts/` is gitignored): regenerable from a
 checkpoint, and derived from trained weights rather than authored here.
 
-### An open discrepancy
+### The joint count, reconciled
 
-The loaded articulation reports **37 joints**, while `G1_29DOF_CFG` and this
-project's own `describe_source_robot()` say 29. The extra joints are most likely
-hands or wrists present in the USD but outside the 29-DOF control set. This has
-not been reconciled, and until it is, the joint-level correspondence map should
-be treated as covering a subset of what the capture contains rather than all of
-it. The centroidal and contact signals are unaffected.
+An earlier version of this document recorded an unexplained discrepancy: the
+loaded articulation reports **37 joints** while the configuration was named
+`G1_29DOF_CFG` and this project's `describe_source_robot()` repeated the 29. It
+is resolved, and the resolution is that both were wrong.
+
+`G1_29DOF_CFG` loads `Robots/Unitree/G1/g1.usd` — **the same USD as `G1_CFG`**.
+The name promises a robot the asset is not. The 29-DOF G1 that Unitree sells has
+three waist joints and seven-DOF arms; this asset has one waist joint and
+five-DOF arms.
+
+Measured composition:
+
+| Group | Joints |
+| --- | --- |
+| Legs (hip yaw/roll/pitch, knee, ankle pitch/roll, ×2) | 12 |
+| Waist (`torso_joint`) | 1 |
+| Arms (shoulder pitch/roll/yaw, elbow pitch/roll, ×2) | 10 |
+| **Body total** | **23** |
+| Hands (seven per side) | 14 |
+| **Articulation total** | **37** |
+
+`SOURCE_ROBOT` now selects `"g1"` and `describe_source_robot()` reports
+`body_dof`, `hand_dof` and `total_dof` separately, because only the first is
+relevant to a gait and conflating them is how the wrong number propagated.
+
+### A correspondence bug this exposed
+
+Running `check_env.py` reported two joints the map named and the robot does not
+have: `left_elbow_joint` and `right_elbow_joint`. Those channels would have been
+dropped silently — no error, just a teacher signal quietly going nowhere.
+
+The cause was matching on the word rather than on the motion:
+
+```
+NAO   ShoulderPitch → ShoulderRoll → ElbowYaw     → ElbowRoll
+G1    shoulder_pitch → shoulder_roll → shoulder_yaw → elbow_pitch → elbow_roll
+```
+
+NAO's `ElbowYaw` rotates the upper arm about its own axis, which is the G1's
+`shoulder_yaw`. NAO's `ElbowRoll` is elbow **flexion** — its limits,
+`[-1.545, -0.035]`, are why a NAO elbow cannot straighten — and that is the G1's
+`elbow_pitch`, not its `elbow_roll`. The G1's `elbow_roll` is forearm pronation,
+whose NAO counterpart is `WristYaw`, which this project does not command.
+
+The roles are now named after the motion (`elbow_flexion`, `upper_arm_yaw`)
+rather than after either robot's nomenclature, so the mismatch cannot recur.
+
+### Current state
+
+`check_env.py` reports **PASS**:
+
+```
+joints reported       : 37
+expected: body        : 23
+expected: hands       : 14  (measured 14)
+expected: total       : 37
+
+shared kinematic roles: 10
+asymmetric roles      : hip_yaw
+every mapped joint exists on the robot
+unmapped, understood (3):
+  torso_joint
+  left_elbow_roll_joint
+  right_elbow_roll_joint
+unexpected gaps       : none
+```
+
+The three understood gaps are recorded in `EXPECTED_UNMAPPED` with the reason
+for each: the NAO has no waist, and it does not command its wrist. Hand joints
+are excluded by construction — fourteen of them would obscure the three that
+matter for a gait. An **unexpected** gap is now a distinct, failing condition,
+because it means the map is wrong rather than that the robots differ.
 
 ---
 

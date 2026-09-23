@@ -19,7 +19,7 @@ top-level folder with its own README, assets, documentation and scripts.
 | Track | Robot | Role |
 | --- | --- | --- |
 | **[`nao/`](nao/)** | NAO H25 V5.0 — 5.3 kg, 0.58 m | **The target.** Limited for physical rather than algorithmic reasons, which is what makes the question a question. |
-| **[`g1/`](g1/)** | Unitree G1 — 29 DOF, ~35 kg | **The source.** Capable enough to learn the skill in the first place. Its model already exists in Isaac Lab. |
+| **[`g1/`](g1/)** | Unitree G1 — 23 body DOF, ~35 kg | **The source.** Capable enough to learn the skill in the first place. Its model already exists in Isaac Lab. |
 | **[`transfer/`](transfer/)** | — | **The research.** What has to change for a skill to cross the gap between them. |
 
 ```text

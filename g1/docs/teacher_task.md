@@ -50,7 +50,7 @@ and is not addressed anywhere in this repository yet.
 | --- | --- | --- |
 | Environment | `G1FlatEnvCfg` | Isaac Lab |
 | PPO config | `G1FlatPPORunnerCfg` | Isaac Lab, unmodified |
-| Robot | `G1_29DOF_CFG` | Isaac Lab, selected by `SOURCE_ROBOT` |
+| Robot | `G1_CFG` (23 body DOF + 14 hand) | Isaac Lab, selected by `SOURCE_ROBOT` |
 | `lin_vel_x` | `(0.0, 0.25)` | this task |
 | `lin_vel_y`, `ang_vel_z`, `heading` | zeroed | this task |
 

@@ -18,7 +18,7 @@ Usage::
     python scripts/fetch_nao_meshes.py --accept-license   # non-interactive
     python scripts/fetch_nao_meshes.py --force            # re-extract
 
-See ``third_party/nao/README.md`` for provenance and the licensing decisions.
+See ``nao/assets/licenses/README.md`` for provenance and the licensing decisions.
 """
 
 from __future__ import annotations
@@ -33,12 +33,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_soccer_lab"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_transfer"
 if str(_EXTENSION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXTENSION_ROOT))
 
-from humanoid_soccer_lab.nao.assets.nao_paths import (  # noqa: E402
+from humanoid_transfer.nao.assets.nao_paths import (  # noqa: E402
     ASSET_CACHE_DIR,
     NAO_ASSET_DIR,
     NAO_MESH_DIR,
@@ -60,7 +60,7 @@ DEB_SHA256 = "8149c70bd13a7cc89938f3c57c23d0da9f7ea9683aefabbfad7f6860f49a0b63"
 # Marker that separates the ROS install prefix from the payload we want.
 PAYLOAD_MARKER = "share/nao_meshes/"
 
-LICENSE_RELPATH = Path("third_party") / "nao" / "LICENSE.nao_meshes.txt"
+LICENSE_RELPATH = Path("nao") / "assets" / "licenses" / "LICENSE.nao_meshes.txt"
 
 ACCEPT_PHRASE = "I ACCEPT"
 
@@ -87,7 +87,7 @@ LICENSE_NOTICE = f"""
     * NoDerivatives. You may produce adapted material (for example the USD
       that Isaac Sim generates from these meshes) for your own non-commercial
       use, but you may not share it.
-    * Attribution. You must keep the attribution in third_party/nao/README.md.
+    * Attribution. You must keep the attribution in nao/assets/licenses/README.md.
     * These files are downloaded onto this machine only. Do not commit them to
       this or any other repository.
 

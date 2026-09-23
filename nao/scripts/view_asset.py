@@ -17,7 +17,7 @@ Usage (Windows PowerShell)::
     cd C:\\IsaacLab
     .\\isaaclab.bat -p "C:\\...\\lagrangian-mbrl-franka\\scripts\\view_nao.py" --device cuda:0
 
-See ``third_party/nao/README.md`` for the model's provenance and licensing.
+See ``nao/assets/licenses/README.md`` for the model's provenance and licensing.
 """
 
 # ruff: noqa: E402, I001
@@ -38,8 +38,8 @@ try:
 except (AttributeError, ValueError):  # pragma: no cover - non-standard streams
     pass
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_soccer_lab"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_transfer"
 if str(_EXTENSION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXTENSION_ROOT))
 
@@ -73,7 +73,7 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 # Fail fast, before paying for an Isaac Sim launch, if the geometry is absent.
-from humanoid_soccer_lab.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
+from humanoid_transfer.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
 
 if not meshes_are_available():
     print("\n" + describe_missing_meshes() + "\n", file=sys.stderr)
@@ -86,12 +86,12 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.sim import SimulationContext
 
-from humanoid_soccer_lab.nao.assets.nao import (
+from humanoid_transfer.nao.assets.nao import (
     NAO_DEFAULT_JOINT_POS,
     NAO_EXPECTED_JOINTS,
     get_nao_cfg,
 )
-from humanoid_soccer_lab.nao.assets.nao_paths import (
+from humanoid_transfer.nao.assets.nao_paths import (
     DERIVED_URDF_PATH,
     NAO_URDF_PATH,
     urdf_robot_name,

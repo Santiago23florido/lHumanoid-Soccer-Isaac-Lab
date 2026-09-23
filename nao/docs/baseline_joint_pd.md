@@ -111,5 +111,5 @@ validate their mechanical fidelity.
 
 This controller is the reference a learned policy has to beat. The task it is
 measured on, the training procedure and the current comparison are in
-[task_nao_stand.md](task_nao_stand.md); the headline numbers are in the
+[task_nao_stand.md](task_balance.md); the headline numbers are in the
 repository README.

@@ -4,7 +4,7 @@ Phase 1 scene: a single SoftBank / Aldebaran NAO H25 V5.0 standing above a
 ground plane, as a free-floating PhysX articulation. No soccer, no ball, no
 rewards, no observations, no actions, no training.
 
-See [`third_party/nao/README.md`](../third_party/nao/README.md) for the model's
+See [`assets/licenses/README.md`](../assets/licenses/README.md) for the model's
 provenance and licensing.
 
 ## One-time asset bootstrap

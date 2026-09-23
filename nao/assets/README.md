@@ -1,13 +1,13 @@
 # NAO H25 V5.0 asset
 
-Third-party robot description. See [`third_party/nao/README.md`](../../../third_party/nao/README.md)
+Third-party robot description. See [`licenses/README.md`](licenses/README.md)
 for full attribution, upstream commit SHAs and the licensing decisions that
 govern this directory.
 
 ## Layout
 
 ```text
-assets/robots/nao/
+nao/assets/
 |-- urdf/nao.urdf        # tracked   - verbatim upstream URDF, BSD 3-Clause
 |-- meshes/V40/          # UNTRACKED - fetched geometry, CC BY-NC-ND 4.0
 |-- texture/             # UNTRACKED - fetched texture, CC BY-NC-ND 4.0

@@ -36,8 +36,8 @@ try:
 except (AttributeError, ValueError):  # pragma: no cover - non-standard streams
     pass
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_soccer_lab"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_transfer"
 if str(_EXTENSION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXTENSION_ROOT))
 
@@ -70,7 +70,7 @@ parser.add_argument(
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
-from humanoid_soccer_lab.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
+from humanoid_transfer.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
 
 if not meshes_are_available():
     print("\n" + describe_missing_meshes() + "\n", file=sys.stderr)
@@ -82,10 +82,10 @@ simulation_app = app_launcher.app
 import gymnasium as gym
 import torch
 
-import humanoid_soccer_lab.tasks  # noqa: F401  (registers the task ids)
-from humanoid_soccer_lab.nao.assets import nao_kinematics as nk
-from humanoid_soccer_lab.nao.tasks.nao_stand import TASK_ID
-from humanoid_soccer_lab.nao.tasks.nao_stand.nao_stand_env_cfg import NaoStandEnvCfg
+import humanoid_transfer.tasks  # noqa: F401  (registers the task ids)
+from humanoid_transfer.nao.assets import nao_kinematics as nk
+from humanoid_transfer.nao.tasks.nao_stand import TASK_ID
+from humanoid_transfer.nao.tasks.nao_stand.nao_stand_env_cfg import NaoStandEnvCfg
 
 DIRECTIONS = {
     "forward": (0.0, "forward"),

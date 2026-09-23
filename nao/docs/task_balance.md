@@ -9,9 +9,9 @@ problem by stepping, which is a different problem with different theory behind
 it, and the zero-step capturability bound that the reward is built on no longer
 applies.
 
-- Task package: [`source/humanoid_soccer_lab/humanoid_soccer_lab/tasks/direct/nao_stand/`](../source/humanoid_soccer_lab/humanoid_soccer_lab/nao/tasks/nao_stand/)
+- Task package: [`source/humanoid_transfer/humanoid_transfer/tasks/direct/nao_stand/`](../../source/humanoid_transfer/humanoid_transfer/nao/tasks/nao_stand/)
 - Registered ids: `NaoStand-Direct-v0`, `NaoStand-Direct-Play-v0`
-- Robot configuration: `NAO_STAND_CFG` in [`assets/nao.py`](../source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao.py)
+- Robot configuration: `NAO_STAND_CFG` in [`assets/nao.py`](../../source/humanoid_transfer/humanoid_transfer/nao/assets/nao.py)
 
 ## Specification
 
@@ -109,7 +109,7 @@ All terms are scaled by the control timestep.
 
 The `dcm` term is derived rather than tuned: keeping the divergent component of
 motion near the support-polygon centroid is exactly the zero-step recoverability
-condition (see [`docs/stand_nao_dcm.md`](stand_nao_dcm.md)).
+condition (see [`docs/stand_nao_dcm.md`](baseline_capture_point.md)).
 
 `foot_lift` and `foot_displacement` price the zero-step constraint; the hard
 termination above is what actually enforces it. A penalty alone was measured to
@@ -204,7 +204,7 @@ Use `--num-envs 2048`. The metric is binomial; at n = 128 the standard error on
 a proportion near 0.85 is 3.2 percentage points, which is larger than every
 effect this task produces.
 
-Current results are in [`docs/results/comparison_directional.json`](results/comparison_directional.json)
+Current results are in [`docs/results/comparison_directional.json`](../results/comparison_directional.json)
 and summarised in the repository README.
 
 ## Known limitations

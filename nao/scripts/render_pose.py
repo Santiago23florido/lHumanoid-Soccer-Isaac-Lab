@@ -28,8 +28,8 @@ try:
 except (AttributeError, ValueError):  # pragma: no cover - non-standard streams
     pass
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_soccer_lab"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_transfer"
 if str(_EXTENSION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXTENSION_ROOT))
 
@@ -62,7 +62,7 @@ args_cli = parser.parse_args()
 # Vulkan is not, and would produce a blank image.
 args_cli.enable_cameras = True
 
-from humanoid_soccer_lab.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
+from humanoid_transfer.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
 
 if not meshes_are_available():
     print("\n" + describe_missing_meshes() + "\n", file=sys.stderr)
@@ -78,7 +78,7 @@ from isaaclab.assets import Articulation
 from isaaclab.sensors import Camera, CameraCfg
 from isaaclab.sim import SimulationContext
 
-from humanoid_soccer_lab.nao.assets.nao import NAO_STAND_CFG
+from humanoid_transfer.nao.assets.nao import NAO_STAND_CFG
 
 
 def design_scene() -> Articulation:

@@ -53,8 +53,8 @@ try:
 except (AttributeError, ValueError):  # pragma: no cover - non-standard streams
     pass
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_soccer_lab"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXTENSION_ROOT = _REPO_ROOT / "source" / "humanoid_transfer"
 if str(_EXTENSION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXTENSION_ROOT))
 
@@ -121,7 +121,7 @@ except ValueError as exc:
     parser.error(str(exc))
 
 # Fail fast, before paying for an Isaac Sim launch, if the geometry is absent.
-from humanoid_soccer_lab.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
+from humanoid_transfer.nao.assets.nao_paths import describe_missing_meshes, meshes_are_available
 
 if not meshes_are_available():
     print("\n" + describe_missing_meshes() + "\n", file=sys.stderr)
@@ -137,9 +137,9 @@ import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation
 from isaaclab.sim import SimulationContext
 
-from humanoid_soccer_lab.nao.assets import nao_kinematics as nk
-from humanoid_soccer_lab.nao.controllers import DcmBalanceController
-from humanoid_soccer_lab.nao.assets.nao import (
+from humanoid_transfer.nao.assets import nao_kinematics as nk
+from humanoid_transfer.nao.controllers import DcmBalanceController
+from humanoid_transfer.nao.assets.nao import (
     NAO_STAND_COM_HEIGHT,
     NAO_STAND_LIPM_OMEGA,
     get_nao_stand_cfg,

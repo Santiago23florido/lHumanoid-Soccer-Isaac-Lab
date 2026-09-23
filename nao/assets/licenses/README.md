@@ -29,7 +29,7 @@ Exactly **one** file was copied, **verbatim and unmodified**:
 
 | Upstream path | Path in this repository |
 | --- | --- |
-| `nao_description/urdf/naoV50_generated_urdf/nao.urdf` | [`assets/robots/nao/urdf/nao.urdf`](../../assets/robots/nao/urdf/nao.urdf) |
+| `nao_description/urdf/naoV50_generated_urdf/nao.urdf` | [`nao/assets/urdf/nao.urdf`](../urdf/nao.urdf) |
 
 * SHA-256 of the copied file: `50da7a565da17664...` (full digest verified by
   `tests/test_nao_assets.py`).
@@ -45,9 +45,9 @@ Exactly **one** file was copied, **verbatim and unmodified**:
 The vendored `nao.urdf` is **not modified**.
 
 For Isaac Sim a *derived* URDF is generated at build time into
-`assets/generated/nao/nao_isaac.urdf` (an untracked build artifact — see
+`nao/assets/generated/nao/nao_isaac.urdf` (an untracked build artifact — see
 section 4). The derivation is performed by
-[`source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao_usd.py`](../../source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao_usd.py)
+[`source/humanoid_transfer/humanoid_transfer/assets/nao_usd.py`](../../../source/humanoid_transfer/humanoid_transfer/nao/assets/nao_usd.py)
 and does exactly two things:
 
 1. Rewrites `package://nao_meshes/meshes/...` mesh references to
@@ -122,11 +122,11 @@ Three consequences were evaluated and acted upon:
 Committing `.dae` / `.stl` / texture files would redistribute the geometry
 outside of an installer that obtains the user's explicit assent, which upstream
 explicitly does not permit. Therefore the meshes are **fetched by the user, on
-their own machine**, by [`scripts/fetch_nao_meshes.py`](../../scripts/fetch_nao_meshes.py),
+their own machine**, by [`nao/scripts/fetch_meshes.py`](../../scripts/fetch_meshes.py),
 which reproduces the license and requires the user to type an explicit
 acceptance before anything is downloaded.
 
-`assets/robots/nao/meshes/` and `assets/robots/nao/texture/` are therefore
+`nao/assets/meshes/` and `nao/assets/texture/` are therefore
 listed in `.gitignore`.
 
 ### Decision 3.2 — the generated USD is **not** committed to this repository
@@ -140,7 +140,7 @@ not Share, Adapted Material for NonCommercial purposes only"*. Generating the
 USD locally for non-commercial simulation is therefore permitted; publishing it
 in a public git repository would be "Sharing" and is not.
 
-The conversion output therefore goes to `assets/generated/nao/`, which is
+The conversion output therefore goes to `nao/assets/generated/nao/`, which is
 **untracked** (`.gitignore`) and regenerated on demand from the user's own
 locally fetched meshes. This is the reason the project uses a generated
 directory at all, rather than checking in a ready-made USD.
@@ -149,7 +149,7 @@ directory at all, rather than checking in a ready-made USD.
 
 The derived URDF contains only BSD-licensed content, so committing it would be
 permissible. It is nevertheless generated into the same untracked
-`assets/generated/nao/` directory because it embeds absolute paths to the
+`nao/assets/generated/nao/` directory because it embeds absolute paths to the
 user's locally fetched mesh tree and would otherwise go stale. Keeping it
 generated avoids duplicating the upstream URDF in two tracked copies.
 
@@ -171,10 +171,10 @@ advice.
 
 | Path | Origin | License |
 | --- | --- | --- |
-| `assets/robots/nao/urdf/nao.urdf` | `nao_robot` @ `6747646`, verbatim | BSD 3-Clause (`LICENSE.nao_robot.txt`) |
-| `assets/robots/nao/meshes/**`, `assets/robots/nao/texture/**` | `nao_meshes` @ 0.1.13, fetched locally, **untracked** | CC BY-NC-ND 4.0 (`LICENSE.nao_meshes.txt`) |
-| `assets/generated/nao/nao_isaac.urdf` | derived from the BSD URDF, **untracked** | BSD 3-Clause |
-| `assets/generated/nao/**/*.usd*` | derived from BSD URDF + CC BY-NC-ND meshes, **untracked** | CC BY-NC-ND 4.0 (Adapted Material, do not redistribute) |
+| `nao/assets/urdf/nao.urdf` | `nao_robot` @ `6747646`, verbatim | BSD 3-Clause (`LICENSE.nao_robot.txt`) |
+| `nao/assets/meshes/**`, `nao/assets/texture/**` | `nao_meshes` @ 0.1.13, fetched locally, **untracked** | CC BY-NC-ND 4.0 (`LICENSE.nao_meshes.txt`) |
+| `nao/assets/generated/nao/nao_isaac.urdf` | derived from the BSD URDF, **untracked** | BSD 3-Clause |
+| `nao/assets/generated/nao/**/*.usd*` | derived from BSD URDF + CC BY-NC-ND meshes, **untracked** | CC BY-NC-ND 4.0 (Adapted Material, do not redistribute) |
 | everything else in this repository | this project | see top-level `LICENSE` |
 
 The top-level project `LICENSE` applies **only** to this project's own code. It
@@ -184,7 +184,7 @@ does **not** apply to, and does not relicense, any upstream NAO asset.
 
 ## 5. How the meshes are obtained
 
-`scripts/fetch_nao_meshes.py` downloads the official ROS Noetic binary package
+`nao/scripts/fetch_meshes.py` downloads the official ROS Noetic binary package
 of `nao_meshes` and extracts only the mesh and texture payload:
 
 | Field | Value |
@@ -208,9 +208,9 @@ refuses to download anything until the user types `I ACCEPT`.
 Files extracted (78 geometry files + 1 texture):
 
 ```text
-assets/robots/nao/meshes/V40/*.dae      # 39 visual meshes
-assets/robots/nao/meshes/V40/*_0.10.stl # 39 collision meshes
-assets/robots/nao/texture/textureNAO.png
+nao/assets/meshes/V40/*.dae      # 39 visual meshes
+nao/assets/meshes/V40/*_0.10.stl # 39 collision meshes
+nao/assets/texture/textureNAO.png
 ```
 
 The `texture/` directory sits beside `meshes/` because the upstream `.dae`

@@ -42,6 +42,23 @@ python scripts\train.py --task G1Walk-Teacher-v0 --headless --num_envs 4096
 See [`docs/teacher_task.md`](docs/teacher_task.md) for the derivation and the
 assumption it rests on.
 
+## The trained teacher
+
+![Six frames across one gait cycle](img/g1_gait.png)
+
+| Quantity | Value |
+| --- | --- |
+| Training | 1500 iterations, 147.5 M steps, 1 h 58 m |
+| Final reward | 33.9, plateaued from ~iteration 900 |
+| Commanded / achieved forward velocity | 0.249 / **0.206** m/s |
+| Foot clearance | 51-60 mm mean, up to 79 mm |
+
+**-> [`TRAINING.md`](TRAINING.md)** - where every component came from, the one
+variable that was chosen, the learning curve, and how the gait was verified.
+
+Note that Isaac Lab ships **no pretrained weights** for this robot. It ships a
+recipe; the weights were produced by running it.
+
 ## What is here
 
 | Path | Contents |

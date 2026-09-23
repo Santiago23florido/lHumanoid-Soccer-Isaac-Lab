@@ -80,11 +80,29 @@ Established along the way, and reusable:
 5. **Sample size gates every claim.** At n = 128 the standard error near p = 0.85
    is 3.2 points, larger than any effect this task produces.
 
-### Track 2 — the source robot: **teacher task ready**
+### Track 2 — the source robot: **trained and verified walking**
 
 `G1Walk-Teacher-v0`, built on Isaac Lab's `G1FlatEnvCfg`, with commands capped at
-the Froude-matched speed (≈ 0.25 m/s, corresponding to 0.15 m/s on the NAO).
-Not yet trained.
+the Froude-matched speed (0.249 m/s, corresponding to 0.15 m/s on the NAO).
+
+<p align="center">
+  <img src="g1/img/g1_gait.png" alt="Six frames across one gait cycle of the trained G1 teacher" width="760">
+</p>
+
+| Quantity | Value |
+| --- | --- |
+| Training | 1500 iterations, 147.5 M steps, 1 h 58 m |
+| Commanded / achieved forward velocity | 0.249 / **0.206** m/s (83 %) |
+| Foot clearance | 51–60 mm mean, up to 79 mm |
+| Rollouts captured | 400 steps × 32 envs, all three candidate signals |
+
+Isaac Lab ships **no pretrained weights** for the G1 — it ships the model, the
+environment and the PPO hyperparameters. Exactly one field was changed, the
+command velocity range, and these weights were produced here.
+
+**→ [`g1/TRAINING.md`](g1/TRAINING.md)** documents the provenance of every
+component, the one variable that was chosen and why, the learning curve, and how
+the gait was verified rather than assumed.
 
 ### Track 3 — the transfer: **scaffolding and a plan**
 

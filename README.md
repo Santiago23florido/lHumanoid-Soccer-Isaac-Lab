@@ -1,240 +1,322 @@
 # Humanoid Soccer Isaac Lab
 
-Isaac Lab project for humanoid robot soccer research, built on the SoftBank
-Robotics / Aldebaran **NAO H25 V5.0**.
+Isaac Lab research project on humanoid balance and locomotion, built on the
+SoftBank Robotics / Aldebaran **NAO H25 V5.0**. The long-term target is robot
+soccer; the current work is the foundation that has to hold first — standing up
+and staying up when pushed.
 
-The previous Franka Lagrangian MBRL work is preserved on:
+<p align="center">
+  <img src="docs/img/nao_stand.png" alt="NAO H25 V5.0 in its nominal standing posture in Isaac Sim" width="640">
+</p>
+<p align="center">
+  <sub>NAO H25 V5.0 in Isaac Sim, held in the nominal posture every controller
+  in this repository is referenced to: hips −0.35 rad, knees +0.70, ankles
+  −0.35, giving a vertical torso and flat soles with the centre of mass 0.2689 m
+  above the ground. Reproduce with <code>scripts/render_nao.py</code>.</sub>
+</p>
+
+---
+
+## Research status
+
+The current problem is **zero-step balance under perturbation**: hold the
+standing posture against external pushes *without changing the contact
+configuration*. A foot that lifts or slides more than 50 mm ends the episode.
+
+That constraint is what makes the problem well posed. Without it the robot
+solves the task by stepping, which is a different problem governed by different
+theory, and the zero-step capturability bound the reward is built on stops
+applying.
+
+### Headline result
+
+Four controllers, one environment instance, one protocol: pushes at 90 % of the
+direction-dependent capturability bound, **n = 2048** environments, 600 control
+steps.
+
+| Controller | Fall-free | 95 % CI | Ankle torque | Saturation |
+| --- | --- | --- | --- | --- |
+| **PPO policy** | **82.3 %** | [80.6, 84.0] | 44.0 % | 4.2 % |
+| PPO, arms frozen | 83.0 % | [81.4, 84.6] | 47.9 % | 4.9 % |
+| Joint PD | 77.6 % | [75.8, 79.4] | 34.3 % | 2.6 % |
+| Capture-point PD | 27.8 % | [25.9, 29.7] | 30.2 % | 3.6 % |
+
+| Contrast | Δ | SE | z | Verdict |
+| --- | --- | --- | --- | --- |
+| PPO − joint PD | +4.7 | 1.25 | 3.76 | **significant** |
+| Arms frozen − PPO | +0.7 | 1.18 | 0.59 | not significant |
+| Joint PD − capture-point PD | +49.8 | 1.35 | 36.8 | **significant** |
+
+Raw data: [`docs/results/comparison_directional.json`](docs/results/comparison_directional.json).
+
+### What has been established
+
+1. **The learned policy beats an analytically derived joint PD by 4.7 points**
+   (z = 3.76). The mechanism is visible in the torque column: the policy uses
+   44.0 % of the ankle budget against the PD's 34.3 %. A joint PD has no
+   representation of its centre of pressure, so it never *tries* to drive it to
+   the edge of the foot; the policy exploits authority the capturability bound
+   permits and the PD leaves unused.
+
+2. **The arms contribute nothing measurable** (z = 0.59). This contradicts the
+   usual explanation for why learned controllers beat model-based ones, which
+   appeals to angular-momentum strategies of the arms and trunk. Under this
+   zero-step constraint, that contribution is indistinguishable from zero.
+
+3. **Zero-step capturability is anisotropic by a factor of 1.75** on this robot
+   — 0.443 m/s backward against 0.775 m/s diagonal — because the support polygon
+   is asymmetric (103 mm ahead of the ankle axis, 61 mm behind) and the centre
+   of mass sits 12.6 mm forward of it. Perturbation curricula are scaled by
+   `ω₀·d(θ)` rather than by an absolute speed for this reason.
+
+4. **The inertia that sizes the leg gains is the whole body about each joint
+   axis, not the distal subtree** — larger by a factor of **543** at the ankle.
+   Using the open-chain value is a three-order-of-magnitude error with no
+   symptom other than the robot falling over.
+
+5. **PPO's entropy coefficient is not scale-free.** Adding the zero-step
+   constraint cut the mean return from 116 to 25; the entropy bonus `c_H·H` does
+   not scale with the return, so buying entropy became more profitable than
+   balancing. The policy standard deviation climbed monotonically 0.50 → 1.25
+   and performance decayed 61 % *at constant curriculum difficulty*. Nothing
+   raised an error. `entropy_coef` is now 0.001 and `Mean action std` is the
+   one-line diagnostic.
+
+6. **Sample size gates every claim here.** At n = 128 the standard error on a
+   proportion near 0.85 is 3.2 points, which is larger than any effect this task
+   produces. Results measured at n = 128 were not reproducible; n ≳ 1800 is
+   required to resolve a 2.3-point difference.
+
+### Open questions
+
+- **Single seed.** The +4.7 margin characterises one policy, not the method.
+  Three independent training seeds are needed before it describes the algorithm.
+- **The capture-point controller underperforms badly** (27.8 %). The likely
+  cause is per-foot saturation of the pressure-centre command limiting lateral
+  authority, but this has not been verified.
+- **No hardware.** Everything here is simulation. Inertials are approximate,
+  collision geometry is convex hulls, and there is no measured actuator model.
+
+---
+
+## Repository map
+
+Where to find each thing, and what it is responsible for.
 
 ```text
-archive/franka-lagrangian-mbrl-2026-07-25
+.
+├── assets/
+│   ├── robots/nao/
+│   │   ├── urdf/nao.urdf              tracked, BSD, verbatim upstream
+│   │   ├── meshes/  texture/          UNTRACKED (CC BY-NC-ND), fetched locally
+│   │   └── README.md                  asset provenance
+│   └── generated/nao/                 UNTRACKED build output (derived URDF, USD)
+├── configs/                           YAML planning configs for later phases
+├── docs/                              see the documentation index below
+├── scripts/                           every entry point (see table below)
+├── source/humanoid_soccer_lab/        the installable Isaac Lab extension
+├── tests/                             run without Isaac Sim
+└── third_party/nao/                   upstream licenses and attribution
 ```
 
-## Current development status
+### The extension — `source/humanoid_soccer_lab/humanoid_soccer_lab/`
 
-Three controllers now stand the NAO up, and all three are scored on one shared
-protocol — 128 environments, the same reset distribution, omnidirectional
-pushes to 0.548 m/s — so the numbers mean the same thing.
-
-Stepping ends the episode: a foot more than 50 mm from where it started fails
-the run. That makes this zero-step balance, and it is what lets a controller be
-compared against the capturability bound at all.
-
-| Controller | What it is | Fall-free | Ankle torque |
-| --- | --- | --- | --- |
-| **PPO, arms frozen** | The policy with its 8 arm joints held at nominal. | **88.3 %** | 55.9 % |
-| PPO policy | 19 joint offsets, asymmetric actor-critic. | 84.4 % | 56.8 % |
-| Joint PD | Holds the nominal posture. One line of control. | 80.5 % | 33.5 % |
-| Capture-point PD | Feedback on the divergent component, ankle/hip/arm strategies. | 28.9 % | 27.3 % |
-
-An earlier version of this table read 99.2 % for the policy, against a task
-that did not forbid stepping. It was stepping: 20 of 20 survivors of a backward
-push moved a foot, up to 762 mm. With that removed the margin over the joint PD
-falls from +17.2 points to **+3.9**, and the drop is the measurement of what
-stepping was worth.
-
-Two things that follow, both recorded rather than smoothed over:
-
-- The policy does **not** win by using less effort. It uses 56.8 % of the ankle
-  torque budget against the PD's 33.5 %, and saturates three times as often.
-- **Freezing its arms improves it.** On the stepping task the arms were the
-  backward recovery mechanism; here they are a liability. Unexplained.
-
-Reproduce any row with:
-
-```powershell
-python scripts\compare_controllers.py --headless --num-envs 128 --steps 600 `
-       --ablate-arms --policy logssl_rl
-ao_stand\<run>\exported\policy.pt
-```
-
-See [`docs/stand_nao.md`](docs/stand_nao.md) for the joint PD,
-[`docs/stand_nao_dcm.md`](docs/stand_nao_dcm.md) for the capture-point
-controller, [`docs/nao_stand.md`](docs/nao_stand.md) for the learning task and
-[`docs/nao_stand_plan.md`](docs/nao_stand_plan.md) for what beating these
-baselines is allowed to mean.
-
-`scripts/train.py` and `scripts/play.py` are real entry points now, delegating
-to Isaac Lab's RSL-RL scripts after registering this extension's task ids.
-
-The original passive asset/viewer described below remains available. Its zero
-drives are distinct from the standing configuration's active PD drives.
-
-## Phase 1 — original passive NAO asset integration
-
-The NAO is imported from its upstream URDF, converted to USD, and loads as a
-valid free-floating PhysX articulation with correct masses, inertias, joint
-limits and collision geometry.
-
-Verified on Isaac Sim 5.1.0 / Isaac Lab 2.3.2, Windows 11, RTX 4070:
-
-| Property | Value |
+| Path | Responsibility |
 | --- | --- |
-| Robot | `NaoH25V50` (NAO H25, version 5.0) |
-| Bodies | 43 |
-| Joints / DOFs | 42 (25 independently actuated + 17 upstream `mimic`) |
-| Articulation root | `base_link`, **not** fixed to the world |
-| Total mass | 5.3054 kg, matching the URDF exactly |
-| Fixed frames merged | 36 sensor frames (cameras, sonars, FSRs, bumpers, IMU, tactile) |
+| `assets/nao_kinematics.py` | **All derived numbers.** Forward kinematics, centre of mass, composite inertia, support polygon, capturability bounds. NumPy only, no simulator, so tests verify it directly. |
+| `assets/nao.py` | `NAO_CFG` (passive, zero drives) and `NAO_STAND_CFG` (actuator groups, nominal posture, soft limits). |
+| `assets/nao_usd.py` | Derived-URDF generation and USD conversion. |
+| `assets/nao_paths.py` | Filesystem layout and mesh availability. Standard library only. |
+| `assets/soccer_field.py` | Field geometry, for later phases. |
+| `controllers/dcm_balance.py` | Capture-point controller. Plain torch, so it is testable without Isaac Sim. |
+| `tasks/direct/nao_stand/nao_stand_env.py` | The balance environment: observations, rewards, terminations, push curriculum. |
+| `tasks/direct/nao_stand/nao_stand_env_cfg.py` | Every tunable of that environment, each documented with its derivation. |
+| `tasks/direct/nao_stand/agents/rsl_rl_ppo_cfg.py` | Network architecture and PPO hyperparameters. |
+| `tasks/direct/humanoid_soccer/` | Scaffold for the eventual soccer task. Intentionally unimplemented. |
 
-**The original Phase 1 asset contains no reinforcement learning.** No rewards, observations,
-actions, soccer, ball, locomotion, balance controller, training code, PPO,
-policy networks or multi-agent environments. The robot has no controller and
-collapses under gravity when the simulation starts — that fall is precisely
-what validates the articulation, its collision geometry and gravity.
+### Entry points — `scripts/`
+
+| Script | What it does |
+| --- | --- |
+| `fetch_nao_meshes.py` | One-time licensed asset bootstrap. Run this first. |
+| `view_nao.py` | Phase-1 smoke test: loads the passive articulation and lets it fall. Validates geometry, mass and gravity. |
+| `render_nao.py` | Renders the standing posture to `docs/img/nao_stand.png`. |
+| `derive_gains.py` | Reproduces the joint gain table from the URDF. Tests assert the shipped gains match it. |
+| `stand_nao.py` | The model-based baselines. `--controller {joint_pd,dcm}`. |
+| `train.py` | Trains a policy. Thin wrapper that registers this extension's task ids, then delegates to Isaac Lab. |
+| `play.py` | Replays a checkpoint and exports TorchScript to `<run>/exported/policy.pt`. |
+| `compare_controllers.py` | **Scores every controller on one environment instance.** The source of the headline table. |
+| `sweep_thresholds.py` | Largest push survived, per direction, against the theoretical bound. |
+| `diagnose_recovery.py` | Checks the four assumptions a capturability comparison needs, including whether the robot actually stepped. |
+| `check_nao_stand_env.py` | Environment instantiation and stepping check. |
+| `stand_metrics.py` | Metric export shared by the baseline scripts. |
+| `list_tasks.py` | Lists registered task ids. |
+| `diagnose_isaac_startup.py` | Isolates Isaac Sim startup failures. |
+
+### Documentation — `docs/`
+
+| Document | Covers |
+| --- | --- |
+| [`task_nao_stand.md`](docs/task_nao_stand.md) | **The RL task**: full specification, observations, reward table, curriculum, training and evaluation procedure. |
+| [`stand_nao.md`](docs/stand_nao.md) | The joint PD baseline and its measurements. |
+| [`stand_nao_dcm.md`](docs/stand_nao_dcm.md) | The capture-point controller, its derivation and its failure modes. |
+| [`view_nao.md`](docs/view_nao.md) | The asset smoke test, options and troubleshooting. |
+| [`architecture.md`](docs/architecture.md) | Project layering and task boundaries. |
+| [`asset_pipeline.md`](docs/asset_pipeline.md) | URDF → USD conversion and asset policy. |
+| `results/` | Measured results as JSON. |
+| `img/` | Figures. |
+
+---
 
 ## Setup
 
-### 1. Install Isaac Lab
+### 1. Isaac Lab
 
-Install Isaac Lab separately (this project is developed against a source
-checkout at `C:\IsaacLab`, Isaac Lab 2.3.2 / Isaac Sim 5.1.0).
+Install Isaac Lab separately. Developed against a source checkout at
+`C:\IsaacLab`.
 
-### 2. Install this extension
+| Component | Version |
+| --- | --- |
+| Isaac Lab | 2.3.2 (`isaaclab` package 0.54.4) |
+| Isaac Sim | 5.1.0 |
+| rsl-rl-lib | 5.0.1 |
+| PyTorch | 2.7.0+cu128 |
+| Tested on | Windows 11, RTX 4070 Laptop |
+
+### 2. This extension
 
 ```powershell
 python -m pip install -e source\humanoid_soccer_lab
 ```
 
-### 3. Fetch the NAO meshes (one time)
+### 3. NAO meshes, once
 
-The NAO geometry is licensed CC BY-NC-ND 4.0 and upstream permits
-redistribution only through an installer that obtains the user's explicit
-assent, so **this repository ships no mesh file**. Fetch them onto your machine:
+The NAO geometry is CC BY-NC-ND 4.0 and upstream permits redistribution only
+through an installer that obtains explicit assent, so **this repository ships no
+mesh file**:
 
 ```powershell
 python scripts\fetch_nao_meshes.py
 ```
 
-The script prints the license and requires you to type `I ACCEPT` before
-downloading anything; pass `--accept-license` to skip the prompt in automation.
-It downloads the official ROS Noetic `nao_meshes` package, verifies its SHA-256,
-and extracts it using only the Python standard library — **native Windows, no
-WSL, no Ubuntu, no ROS, no 7-Zip**.
+It prints the license and requires you to type `I ACCEPT`. It downloads the
+official ROS Noetic `nao_meshes` package, verifies its SHA-256 and extracts it
+using only the Python standard library — native Windows, no WSL, no ROS.
 
-## Smoke test — the one command
+### 4. Verify
 
 ```powershell
-& "C:\Users\USER\miniconda3\shell\condabin\conda-hook.ps1"
-conda activate env_isaaclab
-cd C:\IsaacLab
-.\isaaclab.bat -p "C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_nao.py" --device cuda:0 --rendering_mode performance --kit_args=--/app/vulkan=false
+python -m pytest                       # needs neither Isaac Sim nor rendering
+python scripts\view_nao.py --headless --max-steps 1
 ```
 
-`--rendering_mode performance --kit_args=--/app/vulkan=false` forces Direct3D 12
-and is required on this machine, where the RTX/Vulkan path crashes at GUI
-startup. Headless runs do not need it:
+`view_nao.py` intentionally lets the robot collapse: that fall is what validates
+the articulation, its collision geometry and gravity.
+
+---
+
+## Reproducing the results
 
 ```powershell
-.\isaaclab.bat -p "C:\Users\USER\Documents\FrugalStage\lagrangian-mbrl-franka\scripts\view_nao.py" --device cuda:0 --headless --max-steps 1
+# derived parameters and the gain table
+python scripts\derive_gains.py
+
+# model-based baseline
+python scripts\stand_nao.py --headless --controller joint_pd
+
+# train (about 81 minutes for 700 iterations on an RTX 4070 Laptop)
+python scripts\train.py --task NaoStand-Direct-v0 --headless `
+    --num_envs 4096 --max_iterations 700 --seed 1 --run_name my_run
+
+# export TorchScript from a checkpoint
+python scripts\play.py --task NaoStand-Direct-v0 --headless --num_envs 8 `
+    --checkpoint logs\rsl_rl\nao_stand\<run>\model_699.pt
+
+# the headline table
+python scripts\compare_controllers.py --headless --num-envs 2048 --steps 600 `
+    --protocol directional --ablate-arms `
+    --policy logs\rsl_rl\nao_stand\<run>\exported\policy.pt
 ```
 
-The command does everything automatically: on first run it generates the derived
-URDF, converts it to USD (~10 s, cached in `assets/generated/nao/`), builds the
-scene and loads the robot. **No manual import through the Isaac Sim GUI.**
+Use `--num-envs 2048`. At 128 the binomial error swamps every effect this task
+produces.
 
-### Expected behavior
+### Rendering on this machine
 
-1. Isaac Sim opens showing a NAO hovering ~2.7 cm above a ground plane.
-2. Diagnostics print to the terminal: robot name, body count, joint count, DOF
-   count read back from the articulation, per-body masses, the full joint limit
-   table with effort and velocity limits, total mass, and the articulation root.
-3. Checks report `PASS` for geometry/scale and for physics/gravity.
-4. Physics starts and the robot collapses to the ground and stays there.
-
-See [`docs/view_nao.md`](docs/view_nao.md) for options and troubleshooting.
-
-## Tests
+Offscreen capture crashes in the RTX renderer under `--headless` on this
+hybrid-graphics laptop (the failure is in `rtx.scenedb` during Hydra engine
+creation). `render_nao.py` therefore runs with a window:
 
 ```powershell
-python -m pytest
+python scripts\render_nao.py --width 1280 --height 960
 ```
 
-They need neither Isaac Sim nor rendering. Mesh-dependent tests skip themselves
-if the bootstrap has not been run.
+Training and evaluation are unaffected; they need no renderer.
 
-## Source attribution and licensing
+---
+
+## Licensing and attribution
 
 This repository contains **no original NAO model**. Full provenance, upstream
-commit SHAs, the exact files copied, and the licensing decisions are documented
-in [`third_party/nao/README.md`](third_party/nao/README.md).
+commit SHAs and the licensing reasoning are in
+[`third_party/nao/README.md`](third_party/nao/README.md).
 
 | Component | Upstream | Commit | License |
 | --- | --- | --- | --- |
-| URDF (`assets/robots/nao/urdf/nao.urdf`, verbatim) | [ros-naoqi/nao_robot](https://github.com/ros-naoqi/nao_robot) | `6747646` | BSD 3-Clause, © 2009-2013 A. Hornung, University of Freiburg |
+| URDF (tracked, verbatim) | [ros-naoqi/nao_robot](https://github.com/ros-naoqi/nao_robot) | `6747646` | BSD 3-Clause, © 2009–2013 A. Hornung, University of Freiburg |
 | Meshes and texture (fetched, untracked) | [ros-naoqi/nao_meshes](https://github.com/ros-naoqi/nao_meshes) | `7c5b9f3` | CC BY-NC-ND 4.0, © Aldebaran / SoftBank Robotics |
 
-The top-level [`LICENSE`](LICENSE) covers **only this project's own code**. It
-does not apply to, and does not relicense, any upstream NAO asset.
+Two consequences are load-bearing:
 
-Two consequences are load-bearing, and are argued in full in
-`third_party/nao/README.md`:
-
-- **Meshes are never committed.** Upstream allows redistribution only via an
+- **Meshes are never committed.** Redistribution is permitted only via an
   installer that obtains the user's assent, so they are fetched locally.
-- **The generated USD is never committed.** It embeds the licensed geometry, so
-  under CC BY-NC-ND 4.0 §2(a)(1)(B) it may be produced for non-commercial use
-  but not shared. `assets/generated/` is untracked.
+- **The generated USD is never committed.** It embeds the licensed geometry and
+  counts as Adapted Material, which under CC BY-NC-ND 4.0 §2(a)(1)(B) may be
+  produced for non-commercial use but not shared.
 
-**Non-commercial only.** Any commercial use of this project would require
-removing the NAO geometry or a separate license from SoftBank Robotics.
+The top-level [`LICENSE`](LICENSE) covers **only this project's own code**.
+**Non-commercial only**: commercial use would require removing the NAO geometry
+or a separate license from SoftBank Robotics.
 
-## Repository layout
-
-```text
-.
-|-- assets/
-|   |-- robots/nao/
-|   |   |-- urdf/nao.urdf        # tracked, BSD, verbatim upstream
-|   |   |-- meshes/ texture/     # UNTRACKED, CC BY-NC-ND, fetched locally
-|   |   `-- README.md
-|   `-- generated/nao/           # UNTRACKED build artifacts (derived URDF, USD)
-|-- configs/                     # planning configs
-|-- docs/                        # architecture, asset pipeline, viewer guide
-|-- scripts/
-|   |-- fetch_nao_meshes.py      # one-time licensed asset bootstrap
-|   `-- view_nao.py              # canonical Phase 1 smoke test
-|-- source/humanoid_soccer_lab/  # Isaac Lab external extension
-|   `-- humanoid_soccer_lab/
-|       |-- assets/
-|       |   |-- nao.py           # NAO_CFG ArticulationCfg
-|       |   |-- nao_usd.py       # derived URDF + USD conversion
-|       |   `-- nao_paths.py     # layout, stdlib only
-|       `-- tasks/               # RL scaffold, intentionally unimplemented
-|-- third_party/nao/             # attribution and upstream licenses
-`-- tests/
-```
+---
 
 ## Known limitations
 
-- **Passive viewer.** `view_nao.py` intentionally lets the robot fall. Use
-  `stand_nao.py` for the active PD baseline.
-- **Meshes must be fetched** once per checkout; they cannot be redistributed.
+**Method**
+
+- Single training seed; the measured margin describes one policy, not the method.
+- Simulation only. No hardware transfer attempted or evaluated.
+- The support polygon is an axis-aligned bounding box, which overestimates the
+  contact region under foot roll or edge contact.
+- No contact-mode state machine; controllers run without explicit knowledge of
+  single versus double support.
+- Actuator gains are an analytical design from URDF inertias, not hardware
+  identification.
+
+**Model**
+
 - **The URDF zero pose is unreachable.** `LElbowRoll` is limited to
-  `[-1.545, -0.035]` and `RElbowRoll` to `[0.035, 1.545]`, because a NAO elbow
-  cannot fully straighten. Defaults are clamped into the URDF's own limits.
-- **Finger links carry placeholder inertials** of 2e-06 kg with 1.1e-09 inertia
-  in the upstream URDF. They are imported as-is. Because they are `mimic`
-  joints they are imported as PhysX mimic constraints; with the drives left at
-  zero the articulation is stable, but these links remain the least trustworthy
-  part of the model and residual finger jitter is visible.
-- **Two actuator configurations.** `NAO_CFG` keeps passive drives;
-  `NAO_STAND_CFG` provides posture gains. Their gains are documented in the
-  standing guide and are an approximate design, not hardware identification.
-- **Four links have no geometry.** `LElbow`, `RElbow`, `l_gripper` and
-  `r_gripper` carry inertia but no visual or collision mesh upstream, producing
-  harmless "unresolved reference" warnings.
-- **Collision geometry is convex hulls** of the upstream collision STLs. Good
-  enough for foot contact; revisit before fine manipulation.
-- **Windows GUI needs the Direct3D 12 flags** shown above.
-- **Isaac Sim emits deprecation warnings** while merging the 36 fixed sensor
-  frames. Merging is required: 27 of those links have no inertial at all.
+  `[-1.545, -0.035]` and `RElbowRoll` to `[0.035, 1.545]`; a NAO elbow cannot
+  straighten. Defaults are clamped into the URDF's own limits.
+- **Finger links carry placeholder inertials** (2e−06 kg). They are `mimic`
+  joints imported as PhysX mimic constraints with zero drive gains; stable, but
+  the least trustworthy part of the model.
+- **Four links have no geometry** — `LElbow`, `RElbow`, `l_gripper`,
+  `r_gripper` — producing harmless "unresolved reference" warnings.
+- **Collision geometry is convex hulls.** Adequate for foot contact; revisit
+  before manipulation.
+- **`torso` does not exist in the simulator.** Fixed-joint merging folds it into
+  `base_link`. Read body names from the loaded model, not from the URDF.
 
-## Next phases
+---
 
-Development sequence, following the standing baseline:
+## Roadmap
 
-1. Actuator model and joint gains: implemented and verified for the PD baseline.
-2. Soccer field, ball asset, contact sensors, reset logic.
-3. Complete and validate the standing RL draft, then add locomotion and ball approach.
-4. Reward terms for balance, gait regularity, ball control, shooting.
-5. Multi-agent play once the single-agent task is stable.
+1. ~~NAO asset integration and validation~~ — done.
+2. ~~Actuator model and analytically derived joint gains~~ — done.
+3. ~~Model-based balance baselines (joint PD, capture point)~~ — done.
+4. ~~Zero-step balance RL task and trained policy~~ — done.
+5. **Multiple seeds and an explanation for the capture-point result** — next.
+6. Soccer field, ball asset, reset distributions.
+7. Locomotion and ball approach.
+8. Multi-agent play once the single-agent task is stable.

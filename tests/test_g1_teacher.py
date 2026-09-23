@@ -89,12 +89,12 @@ def test_non_positive_lengths_are_rejected(bad: float) -> None:
 
 
 def test_every_selectable_teacher_is_taller_than_the_student() -> None:
-    for name in ("g1_29dof", "g1", "h1"):
+    for name in ("g1", "h1"):
         assert NOMINAL_BASE_HEIGHT[name] > STUDENT_LEG
 
 
 def test_the_default_teacher_has_more_joints_than_the_student_commands() -> None:
-    assert describe_source_robot()["actuated_dof"] > 19
+    assert describe_source_robot()["body_dof"] > 19
 
 
 # --- the task configuration ---------------------------------------------------

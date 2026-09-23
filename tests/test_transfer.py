@@ -20,9 +20,12 @@ from humanoid_transfer.common.capturability import (
 )
 from humanoid_transfer.g1.assets.g1 import SOURCE_ROBOT, describe_source_robot
 from humanoid_transfer.transfer.correspondence import (
+    EXPECTED_UNMAPPED,
     STUDENT_JOINTS,
     TEACHER_JOINTS,
     build_correspondence,
+    is_hand_joint,
+    unexpected_unmapped_joints,
     unmapped_teacher_joints,
 )
 from humanoid_transfer.transfer.distillation import DistillationCfg, TeacherSignal
@@ -148,11 +151,48 @@ def test_the_hip_yaw_asymmetry_is_recorded_rather_than_hidden() -> None:
 
 
 def test_teacher_joints_outside_the_map_are_reported() -> None:
-    """Waist and wrist joints have no student counterpart and must surface."""
+    """Joints with no student counterpart must surface; hands must not."""
     unmapped = unmapped_teacher_joints(
-        ["left_knee_joint", "waist_yaw_joint", "left_wrist_roll_joint"]
+        ["left_knee_joint", "torso_joint", "left_elbow_roll_joint", "left_two_joint"]
     )
-    assert unmapped == ["waist_yaw_joint", "left_wrist_roll_joint"]
+    assert unmapped == ["torso_joint", "left_elbow_roll_joint"]
+
+
+def test_hand_joints_are_excluded_by_construction() -> None:
+    """Seven per hand, contributing nothing to a gait, and the NAO drives its
+    own hands from one mimic joint per side."""
+    for ordinal in ("zero", "one", "two", "three", "four", "five", "six"):
+        assert is_hand_joint(f"left_{ordinal}_joint")
+    assert not is_hand_joint("left_knee_joint")
+    assert not is_hand_joint("torso_joint")
+
+
+def test_the_elbow_maps_to_flexion_not_to_the_matching_word() -> None:
+    """NAO ElbowRoll is elbow flexion; the G1 elbow_roll is forearm pronation.
+
+    Matching on the word rather than on the motion is the defect this pins:
+    the map named left_elbow_joint, which the robot does not have, and the
+    channel would have been dropped silently."""
+    assert STUDENT_JOINTS["elbow_flexion"] == ("LElbowRoll", "RElbowRoll")
+    assert TEACHER_JOINTS["elbow_flexion"] == (
+        "left_elbow_pitch_joint",
+        "right_elbow_pitch_joint",
+    )
+    named = {n for names in TEACHER_JOINTS.values() for n in names}
+    assert "left_elbow_joint" not in named
+
+
+def test_the_waist_and_forearm_are_recorded_as_understood_gaps() -> None:
+    """The NAO has no waist and does not command its wrist."""
+    assert "torso_joint" in EXPECTED_UNMAPPED
+    assert "left_elbow_roll_joint" in EXPECTED_UNMAPPED
+
+
+def test_a_joint_the_map_names_but_the_robot_lacks_is_a_defect() -> None:
+    """An unexpected gap differs in kind from an understood one."""
+    joints = ["left_knee_joint", "torso_joint", "some_new_joint"]
+    assert unexpected_unmapped_joints(joints) == ["some_new_joint"]
+    assert unexpected_unmapped_joints(["left_knee_joint", "torso_joint"]) == []
 
 
 # --- feasibility -------------------------------------------------------------
@@ -212,13 +252,23 @@ def test_the_source_robot_is_more_articulated_than_the_student() -> None:
     """The premise of the study: the teacher is the more capable machine."""
     source = describe_source_robot()
     student_commanded = 19
-    assert source["actuated_dof"] > student_commanded
+    assert source["body_dof"] > student_commanded
+
+
+def test_the_reported_joint_counts_match_the_loaded_articulation() -> None:
+    """23 body joints plus seven per hand is 37, which is what the simulator
+    reports. Isaac Lab names the configuration G1_29DOF_CFG and loads the same
+    USD as G1_CFG; repeating that 29 is where the discrepancy came from."""
+    source = describe_source_robot("g1")
+    assert source["body_dof"] == 23
+    assert source["hand_dof"] == 14
+    assert source["total_dof"] == 37
 
 
 def test_every_selectable_source_robot_is_described() -> None:
-    for name in ("g1_29dof", "g1", "h1"):
+    for name in ("g1", "h1"):
         described = describe_source_robot(name)
-        assert described["actuated_dof"] > 0
+        assert described["body_dof"] > 0
         assert described["nominal_base_height"] > 0.5
 
 
@@ -228,4 +278,4 @@ def test_an_unknown_source_robot_is_rejected() -> None:
 
 
 def test_the_default_source_robot_is_selectable() -> None:
-    assert SOURCE_ROBOT in {"g1_29dof", "g1", "h1"}
+    assert SOURCE_ROBOT in {"g1", "h1"}

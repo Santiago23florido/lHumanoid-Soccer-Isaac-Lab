@@ -71,7 +71,7 @@ import gymnasium as gym
 import isaaclab.sim as sim_utils
 import numpy as np
 import torch
-from isaaclab.sensors import Camera, CameraCfg
+from isaaclab.sensors import CameraCfg
 
 import humanoid_transfer.tasks  # noqa: F401  (registers the task ids)
 from humanoid_transfer.g1.tasks.g1_walk import PLAY_TASK_ID
@@ -81,23 +81,27 @@ def main() -> int:
     from isaaclab_tasks.utils import parse_env_cfg
 
     cfg = parse_env_cfg(PLAY_TASK_ID, num_envs=1)
+
+    # The camera has to be part of the scene configuration, not built beside it.
+    # A Camera constructed standalone never has its internal buffers allocated
+    # -- InteractiveScene does that -- and the first call that needs them fails
+    # with a missing _ALL_INDICES rather than with anything informative.
+    cfg.scene.gait_camera = CameraCfg(
+        prim_path="{ENV_REGEX_NS}/GaitCamera",
+        update_period=0.0,
+        height=args_cli.height,
+        width=args_cli.width,
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=22.0, clipping_range=(0.05, 40.0)
+        ),
+    )
+
     env = gym.make(PLAY_TASK_ID, cfg=cfg)
     inner = env.unwrapped
     device = inner.device
     robot = inner.scene["robot"]
-
-    camera = Camera(
-        CameraCfg(
-            prim_path="/World/GaitCamera",
-            update_period=0.0,
-            height=args_cli.height,
-            width=args_cli.width,
-            data_types=["rgb"],
-            spawn=sim_utils.PinholeCameraCfg(
-                focal_length=22.0, clipping_range=(0.05, 40.0)
-            ),
-        )
-    )
+    camera = inner.scene["gait_camera"]
 
     policy = torch.jit.load(str(args_cli.checkpoint), map_location=device)
     policy.eval()
@@ -113,25 +117,46 @@ def main() -> int:
         obs, _, _, _, _ = env.step(act(obs))
 
     frames = []
-    for index in range(args_cli.frames):
+    # One extra pass, discarded. The render product lags a step behind the pose
+    # that was just written, so the first capture comes back empty.
+    for index in range(args_cli.frames + 1):
         for _ in range(args_cli.frame_stride):
             obs, _, _, _, _ = env.step(act(obs))
 
         # Follow the robot: it is walking, so a fixed camera loses it.
-        base = robot.data.root_pos_w[0].detach().cpu().numpy()
+        # Place the camera in the robot's *heading* frame, not the world's.
+        # Initial yaw is randomised, so a world-frame offset shows the robot
+        # from an arbitrary angle -- and a world-frame position reading makes a
+        # robot walking forward look like one drifting backwards, which is
+        # exactly how this gait was first misread.
+        base = robot.data.root_pos_w[0].detach()
+        quat = robot.data.root_quat_w[0].detach()
+        yaw = torch.atan2(
+            2.0 * (quat[0] * quat[3] + quat[1] * quat[2]),
+            1.0 - 2.0 * (quat[2] ** 2 + quat[3] ** 2),
+        )
+        cos, sin = torch.cos(yaw), torch.sin(yaw)
+
+        # Side view: 2.6 m to the robot's left, slightly ahead and above.
+        side_x, side_y, height = 0.4, -2.6, 0.35
+        offset = torch.stack(
+            [
+                cos * side_x - sin * side_y,
+                sin * side_x + cos * side_y,
+                torch.full_like(cos, height),
+            ]
+        )
+        aim = torch.tensor([0.0, 0.0, -0.15], device=device, dtype=torch.float32)
         camera.set_world_poses_from_view(
-            eyes=torch.tensor(
-                [[base[0] + 0.4, base[1] - 2.6, base[2] + 0.35]], device=device
-            ),
-            targets=torch.tensor(
-                [[base[0], base[1], base[2] - 0.15]], device=device
-            ),
+            eyes=(base + offset).unsqueeze(0),
+            targets=(base + aim).unsqueeze(0),
         )
         camera.update(inner.step_dt)
 
         rgb = camera.data.output["rgb"][0].detach().cpu().numpy()
-        frames.append(rgb[..., :3] if rgb.shape[-1] == 4 else rgb)
-        print(f"  frame {index + 1}/{args_cli.frames}  base at x={base[0]:+.2f} m")
+        if index > 0:
+            frames.append(rgb[..., :3] if rgb.shape[-1] == 4 else rgb)
+        print(f"  frame {index + 1}/{args_cli.frames}  heading {float(yaw):+.2f} rad")
 
     try:
         from PIL import Image

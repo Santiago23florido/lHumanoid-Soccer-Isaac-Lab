@@ -16,11 +16,15 @@ from .capturability import (
     lipm_omega,
     ray_box_distance,
 )
+from .scaling import froude_matched_speed, froude_matched_time, froude_number
 
 __all__ = [
     "capturable_velocity",
     "capturable_velocity_in_direction",
     "dcm",
     "lipm_omega",
+    "froude_matched_speed",
+    "froude_matched_time",
+    "froude_number",
     "ray_box_distance",
 ]

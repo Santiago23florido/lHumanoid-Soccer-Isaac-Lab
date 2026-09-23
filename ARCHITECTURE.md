@@ -2,7 +2,7 @@
 
 The project is an Isaac Lab external extension: a repository-level project with
 `scripts/`, `source/` and documentation at the root, and one installable
-extension under `source/humanoid_soccer_lab`.
+extension under `source/humanoid_transfer`.
 
 ## Organising principle
 
@@ -11,7 +11,7 @@ its controllers and its tasks live together, because they are coupled through
 numbers derived from that specific machine and nothing else uses them.
 
 ```text
-humanoid_soccer_lab/
+humanoid_transfer/
 ├── common/      theory that mentions no robot
 ├── nao/         the constrained target embodiment
 ├── g1/          the capable source embodiment
@@ -60,7 +60,7 @@ Joint correspondence, feasibility masking and the student objective. Depends on
 stated at the level of kinematic roles, and the student's envelope is passed in
 as geometry.
 
-See [`transfer.md`](transfer.md) for the plan and the open questions.
+See [`transfer.md`](transfer/docs/plan.md) for the plan and the open questions.
 
 ### `soccer/` — the long horizon
 
@@ -89,7 +89,7 @@ the gym ids register; it owns nothing.
 
 Isaac Lab discovers tasks by importing `isaaclab_tasks`, which knows nothing
 about an external extension. `scripts/train.py` and `scripts/play.py` therefore
-import `humanoid_soccer_lab.tasks` before delegating, which registers:
+import `humanoid_transfer.tasks` before delegating, which registers:
 
 | Id | Robot | Purpose |
 | --- | --- | --- |

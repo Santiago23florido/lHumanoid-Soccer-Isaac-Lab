@@ -47,8 +47,19 @@ def _resolve_repo_root() -> Path:
     override = os.environ.get("NAO_ASSET_ROOT")
     if override:
         return Path(override).expanduser().resolve()
-    # .../source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao_paths.py
-    return Path(__file__).resolve().parents[4]
+
+    # Search upward for the checkout rather than counting parents. The previous
+    # version hardcoded parents[4], which silently resolved to the wrong
+    # directory the moment this module moved one level deeper, and the failure
+    # surfaced as a missing URDF rather than as a path bug.
+    here = Path(__file__).resolve()
+    for candidate in here.parents:
+        if (candidate / "assets" / "robots" / "nao").is_dir():
+            return candidate
+    raise RuntimeError(
+        f"could not locate the repository root above {here}: no ancestor "
+        "contains assets/robots/nao. Set NAO_ASSET_ROOT to point at it."
+    )
 
 
 REPO_ROOT = _resolve_repo_root()

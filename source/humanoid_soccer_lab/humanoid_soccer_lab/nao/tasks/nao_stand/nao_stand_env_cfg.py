@@ -6,10 +6,10 @@ stack and still has something for a policy to learn that a fixed feedback law
 cannot do.
 
 Every number here that could have been guessed is instead derived from the
-robot, in :mod:`humanoid_soccer_lab.assets.nao_kinematics`. The ones that matter
+robot, in :mod:`humanoid_soccer_lab.nao.assets.nao_kinematics`. The ones that matter
 most:
 
-* :data:`~humanoid_soccer_lab.assets.nao.NAO_STAND_LIPM_OMEGA` = 6.04 rad/s, the
+* :data:`~humanoid_soccer_lab.nao.assets.nao.NAO_STAND_LIPM_OMEGA` = 6.04 rad/s, the
   inverted-pendulum frequency. An uncorrected balance error doubles in 115 ms,
   which is what forces the control rate.
 * The zero-step capturable velocity, 0.554 m/s forward. Pushes beyond it cannot
@@ -34,8 +34,8 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 
-from humanoid_soccer_lab.assets import nao_kinematics as nk
-from humanoid_soccer_lab.assets.nao import (
+from humanoid_soccer_lab.nao.assets import nao_kinematics as nk
+from humanoid_soccer_lab.nao.assets.nao import (
     NAO_STAND_CFG,
     NAO_STAND_COM_HEIGHT,
     NAO_STAND_LIPM_OMEGA,
@@ -310,7 +310,7 @@ class NaoStandEnvCfg(DirectRLEnvCfg):
     """Final push, as a fraction of the directional capturable bound.
 
     A fraction rather than a speed, because the bound is not the same in every
-    direction: 0.548 m/s forward, 0.443 m/s backward, up to 0.77 m/s diagonally.
+    direction: 0.548 m/s forward, 0.443 m/s backward, up to 0.827 m/s diagonally.
     The first curriculum ramped to a fixed 0.548 m/s in every direction, which
     is 124% of what is recoverable backward, so roughly half the pushes landed
     where no zero-step controller could have survived.

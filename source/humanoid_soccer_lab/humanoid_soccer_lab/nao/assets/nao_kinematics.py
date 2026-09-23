@@ -546,7 +546,7 @@ sagittal plane collapses. Bending the knee by 0.70 rad moves the configuration
 well away from that singularity at a cost of only 12 mm of standing height.
 
 Joints not listed keep the URDF zero, except the elbow rolls above whose limits
-exclude zero (see :func:`~humanoid_soccer_lab.assets.nao_paths.default_joint_positions`).
+exclude zero (see :func:`~humanoid_soccer_lab.nao.assets.nao_paths.default_joint_positions`).
 """
 
 

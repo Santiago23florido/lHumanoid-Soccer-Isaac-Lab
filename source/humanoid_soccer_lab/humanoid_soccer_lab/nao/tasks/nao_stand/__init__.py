@@ -15,7 +15,7 @@ from __future__ import annotations
 TASK_ID = "NaoStand-Direct-v0"
 PLAY_TASK_ID = "NaoStand-Direct-Play-v0"
 
-_MODULE = "humanoid_soccer_lab.tasks.direct.nao_stand"
+_MODULE = "humanoid_soccer_lab.nao.tasks.nao_stand"
 _AGENTS = f"{_MODULE}.agents"
 
 

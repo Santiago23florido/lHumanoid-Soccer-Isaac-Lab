@@ -33,7 +33,7 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor
 
-from humanoid_soccer_lab.assets import nao_kinematics as nk
+from humanoid_soccer_lab.nao.assets import nao_kinematics as nk
 
 from .nao_stand_env_cfg import NaoStandEnvCfg
 

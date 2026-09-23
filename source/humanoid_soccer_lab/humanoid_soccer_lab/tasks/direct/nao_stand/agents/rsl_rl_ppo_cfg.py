@@ -77,7 +77,7 @@ class NaoStandPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.005,
+        entropy_coef=0.001,
         num_learning_epochs=5,
         num_mini_batches=4,
         learning_rate=1.0e-3,
@@ -100,6 +100,36 @@ class NaoStandPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     policy KL divergence near ``desired_kl``. With a curriculum the difficulty
     of the task changes underneath the optimiser, and a fixed rate that suited
     gentle pushes is wrong once they are four times larger.
+
+    ``entropy_coef=0.001``, lowered from 0.005, and the reason is worth keeping
+    because it invalidated four training runs before anyone noticed.
+
+    The entropy bonus is ``entropy_coef * H``, a term whose size does not depend
+    on the reward. That is fine while the return is large, and it stops being
+    fine when the return shrinks. Adding the stepping constraint did exactly
+    that: the foot penalties and the early termination cut the mean return from
+    116 to 25. The bonus did not shrink with it, so buying entropy became a
+    better trade than standing up, and PPO took it -- the action standard
+    deviation climbed monotonically from 0.50 to 1.25 and never levelled off.
+    On a task where success is measured in millimetres of foot travel, that is
+    injected noise, and the policy degrades while the loss curve looks ordinary.
+
+    Four runs make the case, because the one variable that tracks the runaway
+    is the return, not the episode length::
+
+        run        mean reward   action std (start -> iter 600)
+        seed1          116          0.50 -> 0.64   stable
+        nostep          66          0.50 -> 1.14   runaway
+        zerostep        27          0.50 -> 1.22   runaway
+        dircurr         25          0.50 -> 1.17   runaway
+
+    ``nostep`` is the decisive row: its episodes run to the 2000-step timeout,
+    so nothing was cut short, and its std still ran away once the foot penalties
+    pulled the return down. Episode length is not the variable. Return is.
+
+    0.001 restores roughly the ratio ``seed1`` had. It is a scale-dependent
+    constant, so it has to be revisited whenever the reward terms change; the
+    check is one line, ``Mean action std`` must flatten rather than climb.
     """
 
 

@@ -21,7 +21,7 @@ REQUIRED_PATHS = [
     "scripts/view_nao.py",
     "scripts/render_nao.py",
     "source/humanoid_soccer_lab/config/extension.toml",
-    "source/humanoid_soccer_lab/humanoid_soccer_lab/tasks/direct/humanoid_soccer/__init__.py",
+    "source/humanoid_soccer_lab/humanoid_soccer_lab/soccer/tasks/humanoid_soccer/__init__.py",
 ]
 
 
@@ -33,7 +33,7 @@ def test_scaffold_paths_exist() -> None:
 def test_task_id_is_registered_in_scaffold() -> None:
     task_init = (
         ROOT
-        / "source/humanoid_soccer_lab/humanoid_soccer_lab/tasks/direct/humanoid_soccer/__init__.py"
+        / "source/humanoid_soccer_lab/humanoid_soccer_lab/soccer/tasks/humanoid_soccer/__init__.py"
     )
     assert "HumanoidSoccer-Direct-v0" in task_init.read_text(encoding="utf-8")
 

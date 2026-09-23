@@ -9,9 +9,9 @@ problem by stepping, which is a different problem with different theory behind
 it, and the zero-step capturability bound that the reward is built on no longer
 applies.
 
-- Task package: [`source/humanoid_soccer_lab/humanoid_soccer_lab/tasks/direct/nao_stand/`](../source/humanoid_soccer_lab/humanoid_soccer_lab/tasks/direct/nao_stand/)
+- Task package: [`source/humanoid_soccer_lab/humanoid_soccer_lab/tasks/direct/nao_stand/`](../source/humanoid_soccer_lab/humanoid_soccer_lab/nao/tasks/nao_stand/)
 - Registered ids: `NaoStand-Direct-v0`, `NaoStand-Direct-Play-v0`
-- Robot configuration: `NAO_STAND_CFG` in [`assets/nao.py`](../source/humanoid_soccer_lab/humanoid_soccer_lab/assets/nao.py)
+- Robot configuration: `NAO_STAND_CFG` in [`assets/nao.py`](../source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao.py)
 
 ## Specification
 
@@ -128,8 +128,8 @@ v_push(θ, t) = α(t) · ω₀ · d(θ),      α: 0.15 → 0.90
 ramped over 24e6 consumed environment steps. `d(θ)` comes from
 `nao_kinematics.capturable_velocity_in_direction`.
 
-This matters because the bound is anisotropic by a factor of 1.75 on this robot
-(0.443 m/s backward, 0.775 m/s diagonal). A curriculum fixed at the forward
+This matters because the bound is anisotropic by a factor of 1.87 on this robot
+(0.443 m/s backward, 0.827 m/s diagonal). A curriculum fixed at the forward
 bound would ask for 124 % of what is recoverable backward, which is not a hard
 episode but an impossible one.
 

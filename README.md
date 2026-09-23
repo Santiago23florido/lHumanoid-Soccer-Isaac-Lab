@@ -1,9 +1,16 @@
 # Humanoid Soccer Isaac Lab
 
-Isaac Lab research project on humanoid balance and locomotion, built on the
-SoftBank Robotics / Aldebaran **NAO H25 V5.0**. The long-term target is robot
-soccer; the current work is the foundation that has to hold first — standing up
-and staying up when pushed.
+Isaac Lab research project on **cross-embodiment humanoid skill transfer**.
+
+A skill is learned on a robot capable enough to learn it — a 29-DOF Unitree G1 —
+and the research question is what has to happen for that skill to end up on a
+robot that is not: the SoftBank Robotics / Aldebaran **NAO H25 V5.0**, which is
+limited for physical rather than algorithmic reasons.
+
+The balance work below is the foundation that question rests on. It is what
+established, for the NAO specifically, *what is physically possible* — and
+therefore which parts of a teacher's behaviour are worth imitating and which
+are asking for something no controller on that body could do.
 
 <p align="center">
   <img src="docs/img/nao_stand.png" alt="NAO H25 V5.0 in its nominal standing posture in Isaac Sim" width="640">
@@ -63,8 +70,8 @@ Raw data: [`docs/results/comparison_directional.json`](docs/results/comparison_d
    appeals to angular-momentum strategies of the arms and trunk. Under this
    zero-step constraint, that contribution is indistinguishable from zero.
 
-3. **Zero-step capturability is anisotropic by a factor of 1.75** on this robot
-   — 0.443 m/s backward against 0.775 m/s diagonal — because the support polygon
+3. **Zero-step capturability is anisotropic by a factor of 1.87** on this robot
+   — 0.443 m/s backward against 0.827 m/s diagonal — because the support polygon
    is asymmetric (103 mm ahead of the ankle axis, 61 mm behind) and the centre
    of mass sits 12.6 mm forward of it. Perturbation curricula are scaled by
    `ω₀·d(θ)` rather than by an absolute speed for this reason.
@@ -121,18 +128,34 @@ Where to find each thing, and what it is responsible for.
 
 ### The extension — `source/humanoid_soccer_lab/humanoid_soccer_lab/`
 
+Split by **embodiment**, not by software layer: a robot's model, controllers and
+tasks live together because they are coupled through numbers derived from that
+machine and nothing else uses them.
+
+```text
+humanoid_soccer_lab/
+├── common/      theory that mentions no robot
+├── nao/         the constrained target embodiment
+├── g1/          the capable source embodiment
+├── transfer/    teaching one through the other
+├── soccer/      the long-horizon target, inactive
+└── tasks.py     registers every gym id
+```
+
 | Path | Responsibility |
 | --- | --- |
-| `assets/nao_kinematics.py` | **All derived numbers.** Forward kinematics, centre of mass, composite inertia, support polygon, capturability bounds. NumPy only, no simulator, so tests verify it directly. |
-| `assets/nao.py` | `NAO_CFG` (passive, zero drives) and `NAO_STAND_CFG` (actuator groups, nominal posture, soft limits). |
-| `assets/nao_usd.py` | Derived-URDF generation and USD conversion. |
-| `assets/nao_paths.py` | Filesystem layout and mesh availability. Standard library only. |
-| `assets/soccer_field.py` | Field geometry, for later phases. |
-| `controllers/dcm_balance.py` | Capture-point controller. Plain torch, so it is testable without Isaac Sim. |
-| `tasks/direct/nao_stand/nao_stand_env.py` | The balance environment: observations, rewards, terminations, push curriculum. |
-| `tasks/direct/nao_stand/nao_stand_env_cfg.py` | Every tunable of that environment, each documented with its derivation. |
-| `tasks/direct/nao_stand/agents/rsl_rl_ppo_cfg.py` | Network architecture and PPO hyperparameters. |
-| `tasks/direct/humanoid_soccer/` | Scaffold for the eventual soccer task. Intentionally unimplemented. |
+| `common/capturability.py` | LIPM, DCM and zero-step capturability for **any** legged robot: takes a CoM height, a support polygon and a point inside it. NumPy only. |
+| `nao/assets/nao_kinematics.py` | **All NAO-derived numbers.** Forward kinematics, centre of mass, composite inertia, support polygon. NumPy only, so tests verify it directly. |
+| `nao/assets/nao.py` | `NAO_CFG` (passive, zero drives) and `NAO_STAND_CFG` (actuator groups, nominal posture, soft limits). |
+| `nao/assets/nao_usd.py`, `nao_paths.py` | URDF-to-USD pipeline; filesystem layout. |
+| `nao/controllers/dcm_balance.py` | Capture-point controller. Plain torch, testable without Isaac Sim. |
+| `nao/tasks/nao_stand/` | The balance environment, its configuration and its PPO setup. |
+| `g1/assets/g1.py` | Source-robot selection. `SOURCE_ROBOT` swaps between G1-29DOF, G1-23DOF and H1 in one line. |
+| `g1/tasks/g1_walk/` | Teacher walking task, built on Isaac Lab's `G1FlatEnvCfg` with commands capped at the Froude-matched speed. |
+| `transfer/correspondence.py` | Which joint on one robot stands for which on the other — and what the map cannot express. |
+| `transfer/feasibility.py` | What the student can physically do, per direction, so the teacher can be ignored where it asks for the impossible. |
+| `transfer/distillation.py` | The student objective and the three candidate teacher signals. |
+| `soccer/` | Scaffold for the eventual soccer task. Intentionally unimplemented. |
 
 ### Entry points — `scripts/`
 
@@ -157,7 +180,8 @@ Where to find each thing, and what it is responsible for.
 
 | Document | Covers |
 | --- | --- |
-| [`task_nao_stand.md`](docs/task_nao_stand.md) | **The RL task**: full specification, observations, reward table, curriculum, training and evaluation procedure. |
+| [`transfer.md`](docs/transfer.md) | **The research plan**: the embodiment gap, the hypothesis, the three candidate teacher signals, order of work and threats to the result. |
+| [`task_nao_stand.md`](docs/task_nao_stand.md) | **The balance task**: full specification, observations, reward table, curriculum, training and evaluation procedure. |
 | [`stand_nao.md`](docs/stand_nao.md) | The joint PD baseline and its measurements. |
 | [`stand_nao_dcm.md`](docs/stand_nao_dcm.md) | The capture-point controller, its derivation and its failure modes. |
 | [`view_nao.md`](docs/view_nao.md) | The asset smoke test, options and troubleshooting. |

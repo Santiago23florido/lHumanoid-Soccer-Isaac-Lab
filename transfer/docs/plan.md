@@ -130,6 +130,6 @@ nobody checked for weeks, because it ran without error the whole time.
 
 ## Related documents
 
-- [`task_nao_stand.md`](task_nao_stand.md) — the student's balance task, and the
+- [`task_nao_stand.md`](../../nao/docs/task_balance.md) — the student's balance task, and the
   source of the capturability numbers used here.
-- [`architecture.md`](architecture.md) — where each package lives.
+- [`architecture.md`](../../ARCHITECTURE.md) — where each package lives.

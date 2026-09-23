@@ -2,7 +2,7 @@
 
 These run without Isaac Sim. They exist because every gain, reward scale and
 termination threshold in the standing task is derived from the numbers in
-:mod:`humanoid_soccer_lab.nao.assets.nao_kinematics`; if one of them silently
+:mod:`humanoid_transfer.nao.assets.nao_kinematics`; if one of them silently
 drifted from the URDF the whole controller would be detuned with no error.
 
 Tests that need the CC BY-NC-ND geometry skip themselves when it has not been
@@ -18,10 +18,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "source" / "humanoid_soccer_lab"))
+sys.path.insert(0, str(ROOT / "source" / "humanoid_transfer"))
 
-from humanoid_soccer_lab.nao.assets import nao_kinematics as nk  # noqa: E402
-from humanoid_soccer_lab.nao.assets import nao_paths  # noqa: E402
+from humanoid_transfer.nao.assets import nao_kinematics as nk  # noqa: E402
+from humanoid_transfer.nao.assets import nao_paths  # noqa: E402
 
 requires_meshes = pytest.mark.skipif(
     not nao_paths.meshes_are_available(),

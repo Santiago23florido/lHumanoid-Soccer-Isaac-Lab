@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "nao" / "scripts"))
 
-from stand_metrics import Recorder, minimum_margin, validate_run  # noqa: E402
+from metrics import Recorder, minimum_margin, validate_run  # noqa: E402
 
 
 def test_worst_margin_is_not_always_the_largest_absolute_excursion():

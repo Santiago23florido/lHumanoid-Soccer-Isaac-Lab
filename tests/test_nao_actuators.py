@@ -1,6 +1,6 @@
 """Checks on the NAO actuator model.
 
-``humanoid_soccer_lab.nao.assets.nao`` imports ``isaaclab``, which cannot load
+``humanoid_transfer.nao.assets.nao`` imports ``isaaclab``, which cannot load
 outside the Isaac Sim Kit application because it needs ``pxr``. These tests
 therefore read the configuration out of the module source rather than importing
 it, which keeps them runnable anywhere — the same constraint the rest of the
@@ -21,14 +21,14 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "source" / "humanoid_soccer_lab"))
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "source" / "humanoid_transfer"))
+sys.path.insert(0, str(ROOT / "nao" / "scripts"))
 
 import derive_gains  # noqa: E402
-from humanoid_soccer_lab.nao.assets import nao_kinematics as nk  # noqa: E402
+from humanoid_transfer.nao.assets import nao_kinematics as nk  # noqa: E402
 
 NAO_SOURCE = (
-    ROOT / "source" / "humanoid_soccer_lab" / "humanoid_soccer_lab" / "nao" / "assets" / "nao.py"
+    ROOT / "source" / "humanoid_transfer" / "humanoid_transfer" / "nao" / "assets" / "nao.py"
 ).read_text(encoding="utf-8")
 
 

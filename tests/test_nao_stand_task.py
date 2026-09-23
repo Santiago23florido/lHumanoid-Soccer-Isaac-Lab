@@ -19,11 +19,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "source" / "humanoid_soccer_lab"))
+sys.path.insert(0, str(ROOT / "source" / "humanoid_transfer"))
 
-from humanoid_soccer_lab.nao.assets import nao_kinematics as nk  # noqa: E402
+from humanoid_transfer.nao.assets import nao_kinematics as nk  # noqa: E402
 
-TASK = ROOT / "source" / "humanoid_soccer_lab" / "humanoid_soccer_lab" / "nao" / "tasks"
+TASK = ROOT / "source" / "humanoid_transfer" / "humanoid_transfer" / "nao" / "tasks"
 CFG_SOURCE = (TASK / "nao_stand" / "nao_stand_env_cfg.py").read_text(encoding="utf-8")
 ENV_SOURCE = (TASK / "nao_stand" / "nao_stand_env.py").read_text(encoding="utf-8")
 
@@ -47,7 +47,7 @@ def _float_field(name: str) -> float:
 
 def test_both_task_variants_register() -> None:
     import gymnasium as gym
-    from humanoid_soccer_lab.nao.tasks.nao_stand import PLAY_TASK_ID, REGISTERED, TASK_ID
+    from humanoid_transfer.nao.tasks.nao_stand import PLAY_TASK_ID, REGISTERED, TASK_ID
 
     assert REGISTERED
     for task_id in (TASK_ID, PLAY_TASK_ID):
@@ -57,7 +57,7 @@ def test_both_task_variants_register() -> None:
 def test_registration_points_at_an_agent_config() -> None:
     """Without this entry point the training script cannot resolve the agent."""
     import gymnasium as gym
-    from humanoid_soccer_lab.nao.tasks.nao_stand import TASK_ID
+    from humanoid_transfer.nao.tasks.nao_stand import TASK_ID
 
     kwargs = gym.envs.registry[TASK_ID].kwargs
     assert "env_cfg_entry_point" in kwargs

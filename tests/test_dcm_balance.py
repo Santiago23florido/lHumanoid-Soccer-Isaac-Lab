@@ -19,10 +19,10 @@ import pytest
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "source" / "humanoid_soccer_lab"))
+sys.path.insert(0, str(ROOT / "source" / "humanoid_transfer"))
 
-from humanoid_soccer_lab.nao.assets import nao_kinematics as nk  # noqa: E402
-from humanoid_soccer_lab.nao.controllers import DcmBalanceCfg, DcmBalanceController  # noqa: E402
+from humanoid_transfer.nao.assets import nao_kinematics as nk  # noqa: E402
+from humanoid_transfer.nao.controllers import DcmBalanceCfg, DcmBalanceController  # noqa: E402
 
 JOINTS = (
     "LAnklePitch",

@@ -5,23 +5,32 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 REQUIRED_PATHS = [
+    # Root: the three research tracks have to be visible without digging.
     "README.md",
-    "configs/robots/nao.yaml",
-    "configs/sim/isaac_lab.yaml",
-    "configs/tasks/humanoid_soccer.yaml",
-    "configs/training/rsl_rl_ppo.yaml",
-    "docs/architecture.md",
-    "docs/asset_pipeline.md",
-    "docs/task_nao_stand.md",
-    "docs/view_nao.md",
-    "docs/img/nao_stand.png",
-    "docs/results/comparison_directional.json",
+    "ARCHITECTURE.md",
+    "nao/README.md",
+    "g1/README.md",
+    "transfer/README.md",
+    # Track 1, the target embodiment.
+    "nao/assets/urdf/nao.urdf",
+    "nao/assets/licenses/README.md",
+    "nao/docs/task_balance.md",
+    "nao/docs/asset_smoke_test.md",
+    "nao/docs/asset_pipeline.md",
+    "nao/img/nao_stand.png",
+    "nao/results/comparison_directional.json",
+    "nao/scripts/view_asset.py",
+    "nao/scripts/render_pose.py",
+    "nao/scripts/fetch_meshes.py",
+    # Track 3, the research question.
+    "transfer/docs/plan.md",
+    # Cross-track entry points.
     "scripts/train.py",
     "scripts/play.py",
-    "scripts/view_nao.py",
-    "scripts/render_nao.py",
-    "source/humanoid_soccer_lab/config/extension.toml",
-    "source/humanoid_soccer_lab/humanoid_soccer_lab/soccer/tasks/humanoid_soccer/__init__.py",
+    "source/humanoid_transfer/config/extension.toml",
+    "source/humanoid_transfer/humanoid_transfer/soccer/tasks/humanoid_soccer/__init__.py",
+    "source/humanoid_transfer/humanoid_transfer/g1/assets/g1.py",
+    "source/humanoid_transfer/humanoid_transfer/transfer/feasibility.py",
 ]
 
 
@@ -33,13 +42,13 @@ def test_scaffold_paths_exist() -> None:
 def test_task_id_is_registered_in_scaffold() -> None:
     task_init = (
         ROOT
-        / "source/humanoid_soccer_lab/humanoid_soccer_lab/soccer/tasks/humanoid_soccer/__init__.py"
+        / "source/humanoid_transfer/humanoid_transfer/soccer/tasks/humanoid_soccer/__init__.py"
     )
     assert "HumanoidSoccer-Direct-v0" in task_init.read_text(encoding="utf-8")
 
 
 def test_nao_viewer_uses_isaac_lab_launcher() -> None:
-    viewer = ROOT / "scripts/view_nao.py"
+    viewer = ROOT / "nao/scripts/view_asset.py"
     text = viewer.read_text(encoding="utf-8")
     assert "AppLauncher" in text
     assert "get_nao_cfg" in text

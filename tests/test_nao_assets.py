@@ -3,7 +3,7 @@
 Deliberately free of Isaac Sim and rendering so they run in any Python
 environment. Tests that need the geometry skip themselves when the mesh tree
 has not been fetched, because the meshes cannot be committed (see
-``third_party/nao/README.md``).
+``nao/assets/licenses/README.md``).
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "source" / "humanoid_soccer_lab"))
+sys.path.insert(0, str(ROOT / "source" / "humanoid_transfer"))
 
-from humanoid_soccer_lab.nao.assets import nao_paths  # noqa: E402
+from humanoid_transfer.nao.assets import nao_paths  # noqa: E402
 
 # Digest of nao_robot @67476469a1371b00b17538eb6ea336367ece7d44,
 # nao_description/urdf/naoV50_generated_urdf/nao.urdf, copied verbatim.
@@ -61,7 +61,7 @@ MAJOR_JOINTS = (
 
 requires_meshes = pytest.mark.skipif(
     not nao_paths.meshes_are_available(),
-    reason="NAO meshes not fetched; run scripts/fetch_nao_meshes.py",
+    reason="NAO meshes not fetched; run nao/scripts/fetch_meshes.py",
 )
 
 
@@ -80,16 +80,16 @@ def _tracked_files() -> list[str]:
 @pytest.mark.parametrize(
     "relative",
     [
-        "assets/robots/nao/urdf/nao.urdf",
-        "assets/robots/nao/README.md",
-        "third_party/nao/README.md",
-        "third_party/nao/LICENSE.nao_robot.txt",
-        "third_party/nao/LICENSE.nao_meshes.txt",
-        "scripts/view_nao.py",
-        "scripts/fetch_nao_meshes.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao_usd.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao_paths.py",
+        "nao/assets/urdf/nao.urdf",
+        "nao/assets/README.md",
+        "nao/assets/licenses/README.md",
+        "nao/assets/licenses/LICENSE.nao_robot.txt",
+        "nao/assets/licenses/LICENSE.nao_meshes.txt",
+        "nao/scripts/view_asset.py",
+        "nao/scripts/fetch_meshes.py",
+        "source/humanoid_transfer/humanoid_transfer/nao/assets/nao.py",
+        "source/humanoid_transfer/humanoid_transfer/nao/assets/nao_usd.py",
+        "source/humanoid_transfer/humanoid_transfer/nao/assets/nao_paths.py",
     ],
 )
 def test_expected_asset_files_exist(relative: str) -> None:
@@ -204,7 +204,7 @@ def test_foot_mesh_is_real_world_sized_once_the_scale_is_applied() -> None:
 
 @requires_meshes
 def test_derived_urdf_resolves_meshes_without_ros_and_drops_gazebo() -> None:
-    from humanoid_soccer_lab.nao.assets import nao_usd
+    from humanoid_transfer.nao.assets import nao_usd
 
     path = nao_usd.build_derived_urdf(force=True)
     root = ET.parse(path).getroot()
@@ -230,16 +230,16 @@ def test_derived_urdf_resolves_meshes_without_ros_and_drops_gazebo() -> None:
 
 
 def test_licenses_are_present_and_are_the_right_licenses() -> None:
-    bsd = (ROOT / "third_party/nao/LICENSE.nao_robot.txt").read_text(encoding="utf-8")
+    bsd = (ROOT / "nao/assets/licenses/LICENSE.nao_robot.txt").read_text(encoding="utf-8")
     assert "Redistribution and use in source and binary forms" in bsd
     assert "University of Freiburg" in bsd
 
-    meshes = (ROOT / "third_party/nao/LICENSE.nao_meshes.txt").read_text(encoding="utf-8")
+    meshes = (ROOT / "nao/assets/licenses/LICENSE.nao_meshes.txt").read_text(encoding="utf-8")
     assert "Attribution-NonCommercial-NoDerivatives 4.0" in meshes
 
 
 def test_attribution_records_upstream_projects_and_commits() -> None:
-    readme = (ROOT / "third_party/nao/README.md").read_text(encoding="utf-8")
+    readme = (ROOT / "nao/assets/licenses/README.md").read_text(encoding="utf-8")
     for token in (
         "ros-naoqi/nao_robot",
         "ros-naoqi/nao_meshes",
@@ -253,7 +253,7 @@ def test_attribution_records_upstream_projects_and_commits() -> None:
 
 
 def test_third_party_assets_are_not_relicensed_under_the_project_license() -> None:
-    readme = (ROOT / "third_party/nao/README.md").read_text(encoding="utf-8")
+    readme = (ROOT / "nao/assets/licenses/README.md").read_text(encoding="utf-8")
     assert "does **not** apply to, and does not relicense" in readme
 
 
@@ -279,11 +279,21 @@ def test_no_ros_stack_was_copied_into_the_repository() -> None:
 
 
 def test_only_the_urdf_was_vendored_from_nao_robot() -> None:
+    """The URDF is the single upstream file this repository carries.
+
+    Everything else under nao/assets/ is either our own documentation or the
+    upstream licence texts, which must be redistributed rather than omitted.
+    The geometry is fetched, never committed.
+    """
     tracked = _tracked_files()
-    nao_asset_files = [f for f in tracked if f.startswith("assets/robots/nao/")]
-    assert sorted(nao_asset_files) == [
-        "assets/robots/nao/README.md",
-        "assets/robots/nao/urdf/nao.urdf",
+    vendored = [
+        f
+        for f in tracked
+        if f.startswith("nao/assets/") and not f.startswith("nao/assets/licenses/")
+    ]
+    assert sorted(vendored) == [
+        "nao/assets/README.md",
+        "nao/assets/urdf/nao.urdf",
     ]
 
 
@@ -299,8 +309,8 @@ def test_meshes_and_generated_artifacts_are_untracked() -> None:
     offenders = [
         f
         for f in tracked
-        if f.startswith(("assets/robots/nao/meshes/", "assets/robots/nao/texture/"))
-        or f.startswith("assets/generated/")
+        if f.startswith(("nao/assets/meshes/", "nao/assets/texture/"))
+        or f.startswith("nao/assets/generated/")
         or f.endswith((".dae", ".stl", ".usd", ".usda", ".usdc"))
     ]
     assert offenders == [], f"licensed or generated binaries are tracked: {offenders}"
@@ -309,9 +319,9 @@ def test_meshes_and_generated_artifacts_are_untracked() -> None:
 def test_gitignore_excludes_the_licensed_and_generated_paths() -> None:
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     for pattern in (
-        "assets/robots/nao/meshes/",
-        "assets/robots/nao/texture/",
-        "assets/generated/",
+        "nao/assets/meshes/",
+        "nao/assets/texture/",
+        "nao/assets/generated/",
     ):
         assert pattern in gitignore, f".gitignore is missing {pattern}"
 
@@ -337,10 +347,10 @@ RL_MARKERS = (
 @pytest.mark.parametrize(
     "relative",
     [
-        "scripts/view_nao.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao_usd.py",
-        "source/humanoid_soccer_lab/humanoid_soccer_lab/nao/assets/nao_paths.py",
+        "nao/scripts/view_asset.py",
+        "source/humanoid_transfer/humanoid_transfer/nao/assets/nao.py",
+        "source/humanoid_transfer/humanoid_transfer/nao/assets/nao_usd.py",
+        "source/humanoid_transfer/humanoid_transfer/nao/assets/nao_paths.py",
     ],
 )
 def test_no_reinforcement_learning_was_implemented_for_the_nao(relative: str) -> None:

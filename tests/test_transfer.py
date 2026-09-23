@@ -12,21 +12,21 @@ import math
 
 import numpy as np
 import pytest
-from humanoid_soccer_lab.common.capturability import (
+from humanoid_transfer.common.capturability import (
     capturable_velocity_in_direction,
     dcm,
     lipm_omega,
     ray_box_distance,
 )
-from humanoid_soccer_lab.g1.assets.g1 import SOURCE_ROBOT, describe_source_robot
-from humanoid_soccer_lab.transfer.correspondence import (
+from humanoid_transfer.g1.assets.g1 import SOURCE_ROBOT, describe_source_robot
+from humanoid_transfer.transfer.correspondence import (
     STUDENT_JOINTS,
     TEACHER_JOINTS,
     build_correspondence,
     unmapped_teacher_joints,
 )
-from humanoid_soccer_lab.transfer.distillation import DistillationCfg, TeacherSignal
-from humanoid_soccer_lab.transfer.feasibility import (
+from humanoid_transfer.transfer.distillation import DistillationCfg, TeacherSignal
+from humanoid_transfer.transfer.feasibility import (
     StudentEnvelope,
     feasible_fraction,
     imitation_mask,

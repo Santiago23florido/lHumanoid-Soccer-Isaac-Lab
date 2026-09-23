@@ -1,0 +1,1 @@
+"""Source-robot asset configuration."""

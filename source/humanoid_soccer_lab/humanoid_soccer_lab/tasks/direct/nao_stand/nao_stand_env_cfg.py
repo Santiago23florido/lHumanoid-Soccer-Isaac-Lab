@@ -16,7 +16,7 @@ most:
   be recovered without stepping, so the curriculum stops there: there is nothing
   to learn from a perturbation no controller could survive.
 
-See ``docs/nao_stand.md`` for the task description and ``docs/stand_nao.md`` for
+See ``docs/task_nao_stand.md`` for the task description and ``docs/stand_nao.md`` for
 the non-learning baseline this is measured against.
 """
 

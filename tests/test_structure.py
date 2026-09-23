@@ -6,16 +6,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_PATHS = [
     "README.md",
-    "CHANGELOG.md",
     "configs/robots/nao.yaml",
     "configs/sim/isaac_lab.yaml",
     "configs/tasks/humanoid_soccer.yaml",
     "configs/training/rsl_rl_ppo.yaml",
     "docs/architecture.md",
+    "docs/asset_pipeline.md",
+    "docs/task_nao_stand.md",
     "docs/view_nao.md",
+    "docs/img/nao_stand.png",
+    "docs/results/comparison_directional.json",
     "scripts/train.py",
     "scripts/play.py",
     "scripts/view_nao.py",
+    "scripts/render_nao.py",
     "source/humanoid_soccer_lab/config/extension.toml",
     "source/humanoid_soccer_lab/humanoid_soccer_lab/tasks/direct/humanoid_soccer/__init__.py",
 ]

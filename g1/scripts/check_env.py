@@ -62,6 +62,8 @@ from humanoid_transfer.g1.tasks.g1_walk.g1_walk_env_cfg import (
 from humanoid_transfer.transfer.correspondence import (
     TEACHER_JOINTS,
     build_correspondence,
+    is_hand_joint,
+    unexpected_unmapped_joints,
     unmapped_teacher_joints,
 )
 
@@ -84,8 +86,11 @@ def main() -> int:
     print("\n  1. ARTICULATION")
     print(f"     source robot          : {described['name']} ({described['config']})")
     print(f"     bodies                : {robot.num_bodies}")
+    hands = sum(1 for n in joint_names if is_hand_joint(n))
     print(f"     joints reported       : {robot.num_joints}")
-    print(f"     joints expected       : {described['actuated_dof']}")
+    print(f"     expected: body        : {described['body_dof']}")
+    print(f"     expected: hands       : {described['hand_dof']}  (measured {hands})")
+    print(f"     expected: total       : {described['total_dof']}")
     print(f"     environments          : {inner.num_envs}")
 
     print("\n  2. CORRESPONDENCE WITH THE STUDENT")
@@ -102,12 +107,20 @@ def main() -> int:
         print("     Those channels would be silently dropped, not reported.")
     else:
         print("     every mapped joint exists on the robot")
-    print(f"     unmapped teacher joints ({len(unmapped)}):")
+    unexpected = unexpected_unmapped_joints(joint_names)
+    print(f"     unmapped, understood ({len(unmapped)}):")
     for name in unmapped:
         print(f"       {name}")
-    print("     Those are degrees of freedom whose teacher signal has nowhere")
-    print("     to go on the student. Whatever they achieve has to be achieved")
-    print("     some other way, or not at all.")
+    print("     Degrees of freedom whose teacher signal has nowhere to go on")
+    print("     the student. Hand joints are excluded by construction.")
+    if unexpected:
+        print(f"     UNEXPECTED GAPS ({len(unexpected)}):")
+        for name in unexpected:
+            print(f"       {name}")
+        print("     Not anticipated by the map. A defect, not a robot")
+        print("     difference: the map should cover these or say why.")
+    else:
+        print("     unexpected gaps       : none")
 
     print("\n  3. COMMAND RANGE")
     ranges = cfg.commands.base_velocity.ranges
@@ -138,7 +151,7 @@ def main() -> int:
     print("     Zero action is not a standing controller here, so the robot")
     print("     falling is expected; only the finiteness matters.")
 
-    ok = finite and not missing and capped
+    ok = finite and not missing and capped and not unexpected
     print("\n" + "=" * 78)
     print(f"  {'PASS' if ok else 'ATTENTION NEEDED'}")
     print("=" * 78 + "\n")

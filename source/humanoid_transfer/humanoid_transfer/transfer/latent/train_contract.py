@@ -23,6 +23,7 @@ import torch
 from ...common.skill_state import DEFAULT_CONTACT_THRESHOLD, SKILL_LAYOUT
 from .contract import ContractClock, ContractDims, ContractGenerator, contract_loss, gaussian_kl
 from .events import ContactEvents
+from .model import Normaliser
 from .sequences import Streams
 from .train_memory import _optimise
 
@@ -53,11 +54,24 @@ def contract_steps(streams: Streams, horizon: int) -> torch.Tensor:
 
 
 def new_generator(
-    streams: Streams, steps: torch.Tensor, config: ContractConfig, clock: ContractClock
+    streams: Streams,
+    steps: torch.Tensor,
+    config: ContractConfig,
+    clock: ContractClock,
+    skill_norm: Normaliser | None = None,
 ) -> ContractGenerator:
+    """A generator with its normalisations fitted on ``steps``.
+
+    ``skill_norm`` fixes the units of ``z*`` instead: a second task reuses the
+    first one's, so that a body's encoder, which estimates ``z*`` in those
+    units, serves every task's generator unchanged.
+    """
     torch.manual_seed(config.seed)
     generator = ContractGenerator(config.dims, clock).to(streams.skill.device)
-    generator.skill_norm.fit(streams.skill[steps])
+    if skill_norm is None:
+        generator.skill_norm.fit(streams.skill[steps])
+    else:
+        generator.skill_norm.load_state_dict(skill_norm.state_dict())
     generator.command_norm.fit(streams.command[steps])
     residual = futures(generator, streams, steps) - generator.skill_norm(streams.skill[steps, None])
     generator.residual_norm.fit(residual.flatten(1))

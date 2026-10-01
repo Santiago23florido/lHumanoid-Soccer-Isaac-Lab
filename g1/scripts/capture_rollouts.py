@@ -98,6 +98,15 @@ parser.add_argument(
     help="Any registered task id, instead of the teacher's play/train pair (e.g. G1Track-Play-v0). "
     "The driver reads the 'policy' observations; the teacher reads 'teacher' when the task has it.",
 )
+parser.add_argument(
+    "--command",
+    type=float,
+    nargs=3,
+    default=None,
+    metavar=("VX", "VY", "WZ"),
+    help="Hold one velocity command (m/s, m/s, rad/s) in every environment: no heading "
+    "control, no standing environments.",
+)
 parser.add_argument("--num-envs", type=int, default=32, help="Parallel rollouts.")
 parser.add_argument("--steps", type=int, default=600, help="Control steps to record.")
 parser.add_argument(
@@ -164,6 +173,14 @@ def main() -> int:
     task_id = args_cli.task_id or (PLAY_TASK_ID if args_cli.task == "play" else TASK_ID)
     cfg = parse_env_cfg(task_id, num_envs=args_cli.num_envs)
     cfg.seed = args_cli.seed
+    if args_cli.command is not None:
+        command = cfg.commands.base_velocity
+        vx, vy, wz = args_cli.command
+        command.ranges.lin_vel_x = (vx, vx)
+        command.ranges.lin_vel_y = (vy, vy)
+        command.ranges.ang_vel_z = (wz, wz)
+        command.heading_command = False
+        command.rel_standing_envs = 0.0
     env = gym.make(task_id, cfg=cfg)
     inner = env.unwrapped
     device = inner.device

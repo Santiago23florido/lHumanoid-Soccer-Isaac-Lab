@@ -40,6 +40,7 @@ from humanoid_transfer.transfer.latent.contract import (  # noqa: E402
     Contract,
     ContractClock,
     ContractDims,
+    load_contract,
     save_contract,
 )
 from humanoid_transfer.transfer.latent.events import contact_events  # noqa: E402
@@ -82,6 +83,13 @@ def main() -> int:
         "validation. Default: g1/rollouts/teacher_dart.npz.",
     )
     parser.add_argument("--gait", type=Path, default=REPO_ROOT / "g1/rollouts/teacher.npz")
+    parser.add_argument(
+        "--encoder-from",
+        type=Path,
+        default=None,
+        help="A body's existing contract (generator.pt): reuse its encoder and its units of z* "
+        "instead of training an encoder -- a new task on a body that already has one.",
+    )
     parser.add_argument("--val-envs", type=int, default=16)
     parser.add_argument("--encoder-epochs", type=int, default=150)
     parser.add_argument("--epochs", type=int, default=1000)
@@ -140,16 +148,26 @@ def main() -> int:
     walking = trustworthy[held_out[trustworthy] & ~streams.falling[trustworthy]]
     gait_steps = contract_steps(gait, clock.horizon)
 
-    generator = new_generator(streams, train_steps, config, clock)
-
     started = time.time()
-    encoder, encoder_history = train_encoder(
-        streams,
-        encoder_steps,
-        G1_OBSERVATION,
-        generator,
-        MemoryConfig(encoder_epochs=args.encoder_epochs, seed=args.seed),
-    )
+    if args.encoder_from is None:
+        generator = new_generator(streams, train_steps, config, clock)
+        encoder, encoder_history = train_encoder(
+            streams,
+            encoder_steps,
+            G1_OBSERVATION,
+            generator,
+            MemoryConfig(encoder_epochs=args.encoder_epochs, seed=args.seed),
+        )
+        final_anchor = encoder_history[-1]["anchor"]
+    else:
+        body = load_contract(args.encoder_from, args.device)
+        encoder = body.encoder
+        generator = new_generator(
+            streams, train_steps, config, clock, skill_norm=body.generator.skill_norm
+        )
+        final_anchor = None
+    # Measured on this task's held-out states either way: an encoder is only as
+    # good as it is on the states a task visits.
     sigma = residual_sigma(encoder, generator, G1_OBSERVATION, streams, walking)
     encoder_seconds = time.time() - started
     print(f"[encoder] {encoder_seconds:.0f} s, sigma median {float(sigma.median()):.3f}")
@@ -235,7 +253,8 @@ def main() -> int:
         },
         "encoder": {
             "seconds": encoder_seconds,
-            "final_anchor_loss": encoder_history[-1]["anchor"],
+            "source": _display(args.encoder_from) if args.encoder_from else "trained here",
+            "final_anchor_loss": final_anchor,
             "sigma": sigma.tolist(),
             "sigma_median": float(sigma.median()),
         },

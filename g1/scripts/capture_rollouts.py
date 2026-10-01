@@ -92,6 +92,12 @@ parser.add_argument(
     default="play",
     help="play: one fixed speed, no noise. train: the teacher's command range and noise.",
 )
+parser.add_argument(
+    "--task-id",
+    default=None,
+    help="Any registered task id, instead of the teacher's play/train pair (e.g. G1Track-Play-v0). "
+    "The driver reads the 'policy' observations; the teacher reads 'teacher' when the task has it.",
+)
 parser.add_argument("--num-envs", type=int, default=32, help="Parallel rollouts.")
 parser.add_argument("--steps", type=int, default=600, help="Control steps to record.")
 parser.add_argument(
@@ -155,7 +161,7 @@ def _sha256(path: Path) -> str:
 def main() -> int:
     from isaaclab_tasks.utils import parse_env_cfg
 
-    task_id = PLAY_TASK_ID if args_cli.task == "play" else TASK_ID
+    task_id = args_cli.task_id or (PLAY_TASK_ID if args_cli.task == "play" else TASK_ID)
     cfg = parse_env_cfg(task_id, num_envs=args_cli.num_envs)
     cfg.seed = args_cli.seed
     env = gym.make(task_id, cfg=cfg)
@@ -216,10 +222,13 @@ def main() -> int:
             "foot_force": sensor.data.net_forces_w[:, sensor_foot_ids, :].cpu().numpy(),
         }
 
-    def act(observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def teacher_view(observation: dict) -> torch.Tensor:
+        return observation["teacher"] if "teacher" in observation else observation["policy"]
+
+    def act(observation: dict) -> tuple[torch.Tensor, torch.Tensor]:
         with torch.inference_mode():
-            label = teacher(observation)
-            executed = driver(observation) if driver is not None else label.clone()
+            label = teacher(teacher_view(observation))
+            executed = driver(observation["policy"]) if driver is not None else label.clone()
         if args_cli.action_noise > 0.0:
             executed = executed + args_cli.action_noise * torch.randn_like(executed)
         return label, executed
@@ -232,7 +241,7 @@ def main() -> int:
 
     obs, _ = env.reset()
     for _ in range(args_cli.settle_steps):
-        _, executed = act(obs["policy"])
+        _, executed = act(obs)
         obs, _, terminated, truncated, _ = env.step(executed)
         episodes_ended(terminated | truncated)
 
@@ -243,6 +252,11 @@ def main() -> int:
         "angular_momentum_spin", "foot_force", "foot_pos", "base_quat", "base_lin_vel",
         "raw_link_quat", "raw_com_pos", "raw_com_lin_vel", "raw_ang_vel",
     )  # fmt: skip
+    contract = inner.command_manager.get_term("base_velocity")
+    if not hasattr(contract, "last_error_other"):
+        contract = None
+    else:
+        keys = keys + ("contract_error", "contract_error_other", "contract_age")
     record: dict[str, list] = {k: [] for k in keys}
 
     for _ in range(args_cli.steps):
@@ -266,8 +280,8 @@ def main() -> int:
             masses_b, inertia_b, link_rot, state["com_pos"], state["com_lin_vel"], state["ang_vel"]
         )
 
-        policy_obs = obs["policy"]
-        label, executed = act(policy_obs)
+        policy_obs = teacher_view(obs)
+        label, executed = act(obs)
         origins = inner.scene.env_origins
 
         record["obs"].append(policy_obs.cpu().numpy())
@@ -295,11 +309,21 @@ def main() -> int:
 
         obs, _, terminated, truncated, _ = env.step(executed)
         episodes_ended(terminated | truncated)
+        if contract is not None:
+            record["contract_error"].append(contract.last_error.cpu().numpy())
+            record["contract_error_other"].append(contract.last_error_other.cpu().numpy())
+            record["contract_age"].append(contract.age.cpu().numpy())
         record["done"].append((terminated | truncated).cpu().numpy())
         record["terminated"].append(terminated.cpu().numpy())
 
     arrays = {
-        k: np.stack(v).astype(np.bool_ if k in ("done", "terminated") else np.float32)
+        k: np.stack(v).astype(
+            np.bool_
+            if k in ("done", "terminated")
+            else np.int64
+            if k == "contract_age"
+            else np.float32
+        )
         for k, v in record.items()
     }
 

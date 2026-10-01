@@ -33,13 +33,21 @@ def contract_privileged(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
 def contract_tracking(
     env: ManagerBasedRLEnv, command_name: str, kernel: float = 1.0
 ) -> torch.Tensor:
-    """``exp(-e / (2 kernel^2))``, ``e`` the mean squared distance to the plan in tolerances.
+    """Mean over the fields of ``z*`` of ``exp(-e_f / (2 kernel^2))``.
 
-    With ``kernel = 1`` this is the Gaussian likelihood of the reached state
-    under the plan at the plan's own tolerance (the generator's spread, floored
-    at the encoder's error): no scale is chosen by hand. A wider kernel keeps a
-    gradient while the body is still far from any plan. Zero on the first step
-    after a reset, which has no plan yet.
+    ``e_f`` is the field's mean squared distance to the plan in units of the
+    plan's tolerance -- the generator's own spread, floored at the encoder's
+    error, so no scale is chosen by hand. With ``kernel = 1`` each field's term
+    is its Gaussian likelihood under the plan.
+
+    That alone is too sharp to learn from: the teacher's walk is so regular
+    that the tolerance on height and on the feet's height is one or two
+    millimetres on the G1, and a body that stands slightly differently scores
+    hundreds of tolerances and a reward of zero, with no gradient. Summing the
+    term at kernels 1, 10 and 100 makes a scale mixture -- a heavy-tailed
+    likelihood -- that still peaks at the plan but rewards getting closer from
+    anywhere; scoring fields apart gives credit for each quantity reached.
+    Zero on the first step after a reset, which has no plan yet.
     """
     return _term(env, command_name).tracking_reward(kernel)
 

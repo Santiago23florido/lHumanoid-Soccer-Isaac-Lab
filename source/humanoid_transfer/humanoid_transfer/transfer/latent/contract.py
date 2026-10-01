@@ -101,7 +101,10 @@ class ContractDims:
 
     flow_hidden: int = 512
     flow_steps: int = 16
-    """Euler steps from noise to a plan."""
+    """Integration steps from noise to a plan."""
+
+    flow_solver: str = "euler"
+    """``euler`` or ``midpoint`` (second order: two velocity evaluations per step)."""
 
 
 _FREQUENCIES = (1.0, 2.0, 4.0, 8.0)
@@ -150,6 +153,7 @@ class ContractGenerator(nn.Module):
         self.skill = dims.skill
         self.intent = dims.intent
         self.flow_steps = dims.flow_steps
+        self.flow_solver = dims.flow_solver
         self.register_buffer("grid_step", torch.tensor(clock.step))
         self.register_buffer("tolerance", torch.ones(clock.horizon, dims.skill))
         self.skill_norm = Normaliser(dims.skill)
@@ -212,9 +216,14 @@ class ContractGenerator(nn.Module):
             residual = self.decode(condition, mean + torch.exp(log_std) * noise)
         else:
             x = noise
+            step = 1.0 / self.flow_steps
             for i in range(self.flow_steps):
-                t = torch.full((x.shape[0], 1), i / self.flow_steps, device=x.device)
-                x = x + self.flow_velocity(x, t, condition) / self.flow_steps
+                t = torch.full((x.shape[0], 1), i * step, device=x.device)
+                velocity = self.flow_velocity(x, t, condition)
+                if self.flow_solver == "midpoint":
+                    middle = x + 0.5 * step * velocity
+                    velocity = self.flow_velocity(middle, t + 0.5 * step, condition)
+                x = x + step * velocity
             residual = self.residual_norm.inverse(x).reshape(-1, self.horizon, self.skill)
         return window[:, -1:] + residual
 

@@ -35,6 +35,7 @@ from isaaclab.envs.mdp.commands import UniformVelocityCommand, UniformVelocityCo
 from isaaclab.utils import configclass
 
 from ....common.similarity import UnitSystem
+from ....common.skill_state import SKILL_LAYOUT
 from ...latent.contract import load_contract
 from ...latent.memory import TimeGrid
 from ...latent.skill_torch import BodyConstants, skill_state
@@ -75,6 +76,10 @@ class ReferenceCommand(UniformVelocityCommand):
         super().__init__(cfg, env)
         contract = load_contract(cfg.contract, self.device)
         self.generator = contract.generator
+        if cfg.flow_solver is not None:
+            self.generator.flow_solver = cfg.flow_solver
+        if cfg.flow_steps is not None:
+            self.generator.flow_steps = cfg.flow_steps
         self.encoder = contract.encoder if cfg.use_encoder else None
         if cfg.use_encoder and self.encoder is None:
             raise ValueError(f"{cfg.contract} carries no encoder")
@@ -138,9 +143,19 @@ class ReferenceCommand(UniformVelocityCommand):
         self.just_reset = torch.ones(n, dtype=torch.bool, device=self.device)
         self.needs_refill = torch.ones(n, dtype=torch.bool, device=self.device)
         self.replan = torch.ones(n, dtype=torch.bool, device=self.device)
+        fields = SKILL_LAYOUT.fields
+        self.field_mean = torch.zeros(size, len(fields), device=self.device)
+        for f, field in enumerate(fields):
+            span = SKILL_LAYOUT.slice_of(field.name)
+            self.field_mean[span, f] = 1.0 / field.size
+        self.field_error = torch.zeros(n, len(fields), device=self.device)
         self.last_error = torch.zeros(n, device=self.device)
+        self.last_error_other = torch.zeros(n, device=self.device)
         self.metrics["contract_error"] = torch.zeros(n, device=self.device)
         self._rows = torch.arange(n, device=self.device)
+        self._reward_stamp = -1
+        self._reward_true = torch.zeros(n, size, device=self.device)
+        self._true_now = torch.zeros(n, size, device=self.device)
 
     def __str__(self) -> str:
         return (
@@ -167,8 +182,7 @@ class ReferenceCommand(UniformVelocityCommand):
 
     def _estimate(self) -> torch.Tensor:
         if self.encoder is None:
-            true = self.true_skill()
-            return true + self.sigma * torch.randn_like(true)
+            return self._true_now + self.sigma * torch.randn_like(self._true_now)
         env = self._env
         observation = torch.cat(
             [
@@ -196,22 +210,38 @@ class ReferenceCommand(UniformVelocityCommand):
         return self.plan[self._rows[:, None], index]
 
     def tracking_error(self) -> torch.Tensor:
-        """``(N,)`` mean squared distance to the due plan, in units of its tolerance."""
-        error = (self.true_skill() - self.due()) / self.tolerance[self.age]
-        return error.pow(2).mean(dim=-1)
+        """``(N, fields)`` mean squared distance to the due plan per field, in tolerances.
+
+        Each field of ``z*`` (height, CoM velocity, gravity, ..., angular momentum)
+        is one physical quantity; averaging within it keeps a field with six
+        components from outweighing one with a single component.
+        """
+        stamp = self._env.common_step_counter
+        if stamp != self._reward_stamp:
+            self._reward_true = self.true_skill()
+            self._reward_stamp = stamp
+        due, tolerance = self.due(), self.tolerance[self.age]
+        error = (self._reward_true - due) / tolerance
+        # The same state against the plan another environment holds: if a tracker
+        # ignored its plan, the two errors would be alike.
+        other = (self._reward_true - due.roll(1, 0)) / tolerance.roll(1, 0)
+        self.last_error_other = (other.pow(2) @ self.field_mean).mean(dim=-1)
+        return error.pow(2) @ self.field_mean
 
     def tracking_reward(self, kernel: float) -> torch.Tensor:
+        """Mean over fields of ``exp(-e_f / (2 kernel^2))``; zero where no plan is held."""
         error = self.tracking_error()
         valid = ~self.needs_refill
-        self.last_error = torch.where(valid, error, self.last_error)
-        return torch.exp(-0.5 * error / kernel**2) * valid
+        self.field_error = torch.where(valid[:, None], error, self.field_error)
+        self.last_error = torch.where(valid, error.mean(dim=-1), self.last_error)
+        return torch.exp(-0.5 * error / kernel**2).mean(dim=-1) * valid
 
     def _draw(self, ids: torch.Tensor) -> None:
         window = torch.einsum("hs,nsd->nhd", self.interpolation, self.history[ids])
         command = self.vel_command_b[ids] * self.command_scale
         noise = torch.randn(len(ids), self.generator.noise_size, device=self.device)
-        with torch.no_grad():
-            plan = self.generator.sample(window, command, noise)
+        with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
+            plan = self.generator.sample(window, command, noise).float()
         full = torch.cat([window[:, -1:], plan], dim=1)
         self.plan[ids] = torch.einsum("lk,nkd->nld", self.plan_matrix, full)
         self.age[ids] = 0
@@ -237,6 +267,7 @@ class ReferenceCommand(UniformVelocityCommand):
 
     def _update_command(self) -> None:
         super()._update_command()
+        self._true_now = self.true_skill()
         estimate = self._estimate()
         ready = ~self.just_reset
         refill = ready & self.needs_refill
@@ -269,7 +300,7 @@ class ReferenceCommand(UniformVelocityCommand):
 
     def privileged(self) -> torch.Tensor:
         """``(N, view * 27 + 28)``: the plan relative to the true ``z*``, the true ``z*``, age."""
-        true = self.true_skill()
+        true = self._true_now
         relative = self.upcoming() - true[:, None]
         relative = torch.where(self.needs_refill[:, None, None], 0.0, relative)
         age = (self.age.float() / self.commit)[:, None]
@@ -303,6 +334,15 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     noise_scale: float = 1.0
     """Multiplies the encoder error used as noise on the true state while training."""
+
+    flow_solver: str | None = None
+    """Overrides the generator's integrator (``euler`` or ``midpoint``); None keeps it."""
+
+    flow_steps: int | None = None
+    """Overrides the generator's integration steps; None keeps them."""
+
+    half_precision: bool = False
+    """Draw plans under float16 autocast (the state, history and plan stay float32)."""
 
 
 __all__ = ["ReferenceCommand", "ReferenceCommandCfg", "plan_interpolation"]

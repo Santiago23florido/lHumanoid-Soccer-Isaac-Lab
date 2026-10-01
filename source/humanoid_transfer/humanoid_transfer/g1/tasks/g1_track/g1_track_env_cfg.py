@@ -126,10 +126,13 @@ class TrackPlayObservationsCfg(TrackObservationsCfg):
 @configclass
 class G1TrackRewards(G1Rewards):
     contract = RewTerm(
-        func=contract_tracking, weight=1.5, params={"command_name": COMMAND, "kernel": 1.0}
+        func=contract_tracking, weight=1.0, params={"command_name": COMMAND, "kernel": 1.0}
+    )
+    contract_medium = RewTerm(
+        func=contract_tracking, weight=0.5, params={"command_name": COMMAND, "kernel": 10.0}
     )
     contract_coarse = RewTerm(
-        func=contract_tracking, weight=0.5, params={"command_name": COMMAND, "kernel": 3.0}
+        func=contract_tracking, weight=0.25, params={"command_name": COMMAND, "kernel": 100.0}
     )
 
 
@@ -158,6 +161,9 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             foot_bodies=list(FOOT_BODIES),
             sole_points=[list(card["foot"][name]["sole_point_link"]) for name in FOOT_BODIES],
             leg_length=float(card["leg_length"]),
+            flow_solver="midpoint",
+            flow_steps=8,
+            half_precision=True,
         )
 
         self.observations = TrackObservationsCfg()

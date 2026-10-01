@@ -16,7 +16,20 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from humanoid_transfer.transfer.latent.memory import TimeGrid  # noqa: E402
+from humanoid_transfer.transfer.latent.memory import (  # noqa: E402
+    MemoryDims,
+    MemoryPolicy,
+    MemorySkill,
+    StateEncoder,
+    TimeGrid,
+    anchor_loss,
+    skill_losses,
+)
+from humanoid_transfer.transfer.latent.model import (  # noqa: E402
+    G1_OBSERVATION,
+    BodyDecoder,
+    LatentDims,
+)
 from humanoid_transfer.transfer.latent.probes import linear_probe, mlp_probe  # noqa: E402
 from humanoid_transfer.transfer.latent.sequences import load_streams  # noqa: E402
 
@@ -135,3 +148,140 @@ def test_the_probes_find_what_is_there_and_the_mlp_finds_more() -> None:
     assert linear[0] > 0.999
     assert linear[1] < 0.05
     assert nonlinear[1] > 0.9
+
+
+# --- what the memory may see -------------------------------------------------
+
+DIMS = MemoryDims(hidden=32, channels=8)
+GRID = TimeGrid(step=G1_DT_STAR, samples=26)
+
+
+class _Echo(torch.nn.Module):
+    """A decoder that hands back what it was given: the latent action, then the context."""
+
+    def forward(self, action: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
+        return torch.cat([action, context], dim=-1)
+
+
+class _BaseOnly(torch.nn.Module):
+    """An encoder that reads only the base terms -- so the joints cannot reach ẑ*."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.net = torch.nn.Linear(9, 27)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        return self.net(state[:, :9])
+
+
+def _policy(encoder, decoder, memory=None) -> MemoryPolicy:
+    torch.manual_seed(0)
+    return MemoryPolicy(
+        encoder,
+        MemorySkill(DIMS, GRID),
+        decoder,
+        G1_OBSERVATION,
+        velocity_unit=2.53,
+        time_unit=0.258,
+        dt_star=G1_DT_STAR,
+        memory=memory,
+    ).eval()
+
+
+def test_the_shared_skill_sees_the_body_only_through_its_physical_state() -> None:
+    policy = _policy(_BaseOnly(), _Echo())
+    obs = torch.randn(30, 4, 123)
+    moved = obs.clone()
+    moved[..., 12:123] += torch.randn(30, 4, 111)  # the joints and the last action, only
+    with torch.no_grad():
+        first = torch.stack([policy(o) for o in obs])
+        policy.history = torch.zeros(0, policy.history_steps, 27)
+        second = torch.stack([policy(o) for o in moved])
+    assert torch.allclose(first[..., :16], second[..., :16])  # u: unchanged
+    assert not torch.allclose(first[..., 16:], second[..., 16:])  # the decoder's context: moved
+
+
+def test_no_imitation_gradient_reaches_the_encoder() -> None:
+    torch.manual_seed(0)
+    encoder = StateEncoder(120, 27, 32)
+    skill = MemorySkill(DIMS, GRID)
+    decoder = BodyDecoder(74, 37, LatentDims(action=16, hidden=32))
+    streams = _random_streams(steps=60)
+    steps = streams.samples(future=3)
+    losses = skill_losses(skill, decoder, G1_OBSERVATION, streams, steps, torch.ones(27), 3, 0.5)
+    losses["total"].backward()
+    assert all(p.grad is None for p in encoder.parameters())
+    assert all(p.grad is not None for p in skill.memory.parameters())
+
+    skill.zero_grad(set_to_none=True)
+    anchor_loss(encoder, skill, G1_OBSERVATION, streams, steps).backward()
+    assert all(p.grad is None for p in skill.parameters())
+    assert all(p.grad is not None for p in encoder.parameters())
+
+
+def _random_streams(steps: int, envs: int = 2):
+    from humanoid_transfer.transfer.latent.sequences import Streams
+
+    generator = torch.Generator().manual_seed(1)
+    total = steps * envs
+    start = torch.repeat_interleave(torch.arange(envs) * steps + 1, steps)
+    return Streams(
+        obs=torch.randn(total, 123, generator=generator),
+        skill=torch.randn(total, 27, generator=generator),
+        command=torch.randn(total, 3, generator=generator),
+        action=torch.randn(total, 37, generator=generator),
+        falling=torch.zeros(total, dtype=torch.bool),
+        start=start,
+        end=start + steps - 2,
+        capture=torch.zeros(total, dtype=torch.long),
+        env=torch.repeat_interleave(torch.arange(envs), steps),
+    )
+
+
+def test_the_exported_policy_keeps_its_history_and_forgets_it_at_a_reset() -> None:
+    torch.manual_seed(0)
+    encoder = StateEncoder(120, 27, 32)
+    decoder = BodyDecoder(74, 37, LatentDims(action=16, hidden=32))
+    policy = _policy(encoder, decoder)
+    scripted = torch.jit.script(_policy(encoder, decoder))
+
+    obs = torch.randn(40, 3, 123)
+    done = torch.zeros(40, 3, dtype=torch.bool)
+    done[17, 1] = True
+    with torch.no_grad():
+        outputs = []
+        for t in range(40):
+            outputs.append(scripted(obs[t]))
+            scripted.reset(done[t])
+        outputs = torch.stack(outputs)
+
+        # The same, from explicit windows: history since the last reset, start repeated.
+        estimate = encoder(G1_OBSERVATION.encoder_input(obs))
+        command = obs[..., 9:12] * policy.command_scale
+        for env in range(3):
+            begin = 0
+            for t in range(40):
+                index = torch.clamp(torch.arange(t - 25, t + 1), min=begin)
+                memory = policy.skill.remember(estimate[index, env][None])
+                action = policy.skill.act(estimate[t, env][None], memory, command[t, env][None])
+                expected = decoder(action, obs[t, env, 12:86][None])
+                assert torch.allclose(outputs[t, env], expected[0], atol=1e-5), (t, env)
+                if done[t, env]:
+                    begin = t + 1
+
+
+def test_the_frozen_memory_policy_ignores_the_history() -> None:
+    torch.manual_seed(0)
+    encoder = StateEncoder(120, 27, 32)
+    decoder = BodyDecoder(74, 37, LatentDims(action=16, hidden=32))
+    fixed = torch.randn(16)
+    policy = torch.jit.script(_policy(encoder, decoder, memory=fixed))
+    obs = torch.randn(30, 2, 123)
+    with torch.no_grad():
+        outputs = torch.stack([policy(o) for o in obs])
+        reference = _policy(encoder, decoder)
+        command = obs[-1, :, 9:12] * reference.command_scale
+        estimate = encoder(G1_OBSERVATION.encoder_input(obs[-1]))
+        action = reference.skill.act(estimate, fixed.expand(2, -1), command)
+        expected = decoder(action, obs[-1, :, 12:86])
+    assert torch.allclose(outputs[-1], expected, atol=1e-5)

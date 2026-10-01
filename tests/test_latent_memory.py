@@ -33,6 +33,15 @@ from humanoid_transfer.transfer.latent.model import (  # noqa: E402
 )
 from humanoid_transfer.transfer.latent.probes import linear_probe, mlp_probe  # noqa: E402
 from humanoid_transfer.transfer.latent.sequences import load_streams  # noqa: E402
+from humanoid_transfer.transfer.latent.train_memory import (  # noqa: E402
+    MemoryConfig,
+    MemoryModel,
+    act,
+    fit_skill_normaliser,
+    new_decoder,
+    new_skill,
+    train_skill,
+)
 
 G1_DT_STAR = 0.02 / np.sqrt(0.65457 / 9.81)
 NAO_DT_STAR = 0.02 / np.sqrt(0.24801 / 9.81)
@@ -351,3 +360,68 @@ def test_a_limb_reads_only_its_own_joints() -> None:
         change = (decoder(action, moved) - decoder(action, context)).abs()
     assert float(change[:, others].max()) < 1e-6
     assert float(change[:, list(right_arm.joints)].max()) > 1e-6
+
+
+# --- training ----------------------------------------------------------------
+
+
+def _phase_streams(steps: int = 300, envs: int = 4):
+    """A gait whose present cannot tell rising from falling; only its history can.
+
+    ``z[0] = |sin(ω t + θ)|`` and the action is the sign of its slope: the
+    same ``z`` comes with both actions, so a memoryless policy can do no
+    better than guessing, and one that remembers the last few steps is exact.
+    """
+    from humanoid_transfer.transfer.latent.sequences import Streams
+
+    generator = torch.Generator().manual_seed(2)
+    t = torch.arange(steps, dtype=torch.float32)
+    skill, action = [], []
+    for _ in range(envs):
+        theta = float(torch.rand(1, generator=generator)) * 6.28
+        wave = torch.sin(2 * np.pi * t / 20.0 + theta)
+        z = torch.zeros(steps, 27)
+        z[:, 0] = wave.abs()
+        z[:, 1:] = 0.01 * torch.randn(steps, 26, generator=generator)
+        a = torch.zeros(steps, 37)
+        a[:, 0] = torch.sign(wave * torch.cos(2 * np.pi * t / 20.0 + theta))
+        skill.append(z)
+        action.append(a)
+    total = steps * envs
+    start = torch.repeat_interleave(torch.arange(envs) * steps + 1, steps)
+    return Streams(
+        obs=torch.randn(total, 123, generator=generator),
+        skill=torch.cat(skill),
+        command=torch.zeros(total, 3),
+        action=torch.cat(action),
+        falling=torch.zeros(total, dtype=torch.bool),
+        start=start,
+        end=start + steps - 2,
+        capture=torch.zeros(total, dtype=torch.long),
+        env=torch.repeat_interleave(torch.arange(envs), steps),
+    )
+
+
+def test_the_memory_recovers_a_phase_the_present_cannot_show() -> None:
+    config = MemoryConfig(
+        skill_epochs=20, batch_size=128, learning_rate=3e-3, samples=13, horizon=2, seed=0,
+        dims=MemoryDims(hidden=64, channels=16, memory=4),
+    )  # fmt: skip
+    streams = _phase_streams()
+    steps = streams.samples(future=config.horizon)
+    norm = fit_skill_normaliser(streams, steps, config.dims)
+    skill = new_skill(streams, steps, norm, config, dt_star=G1_DT_STAR)
+    decoder = new_decoder(streams, steps, G1_OBSERVATION, config, G1_JOINTS)
+    train_skill(streams, steps, G1_OBSERVATION, skill, decoder, torch.full((27,), 0.01), config)
+
+    model = MemoryModel(StateEncoder(120, 27, 8), skill, decoder, G1_OBSERVATION, torch.ones(27))
+    truth = skill.skill_norm(streams.skill)
+    context = G1_OBSERVATION.context_input(streams.obs[steps])
+    target = streams.action[steps, 0]
+    with torch.no_grad():
+        memory, action = act(model, streams, truth, steps)
+        _, frozen = act(model, streams, truth, steps, memory=memory.mean(dim=0))
+        remembered = (torch.sign(decoder(action, context)[:, 0]) == target).float().mean()
+        forgotten = (torch.sign(decoder(frozen, context)[:, 0]) == target).float().mean()
+    assert remembered > 0.9
+    assert forgotten < 0.75

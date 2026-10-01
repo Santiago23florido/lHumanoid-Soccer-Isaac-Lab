@@ -103,6 +103,9 @@ class MemoryDims:
     """``u``: the same width as the memoryless model's, so the two compare."""
 
     command: int = 3
+    plan: int = 0
+    """Width of a contact plan the policy also reads (:mod:`.plan`); 0 for none."""
+
     hidden: int = 256
     channels: int = 64
     """Width of Φ's temporal convolutions."""
@@ -165,7 +168,9 @@ class MemorySkill(nn.Module):
         self.skill_norm = Normaliser(dims.skill)
         self.command_norm = Normaliser(dims.command)
         self.memory = SkillMemory(dims.skill, grid.samples, dims.memory, dims.channels)
-        self.policy = mlp(dims.skill + dims.memory + dims.command, dims.action, dims.hidden)
+        self.policy = mlp(
+            dims.skill + dims.memory + dims.command + dims.plan, dims.action, dims.hidden
+        )
         self.dynamics = mlp(dims.skill + dims.memory + dims.action, dims.skill, dims.hidden)
 
     @property
@@ -179,10 +184,17 @@ class MemorySkill(nn.Module):
         return self.memory(flat).reshape(shape)
 
     def act(
-        self, skill_n: torch.Tensor, memory: torch.Tensor, command: torch.Tensor
+        self,
+        skill_n: torch.Tensor,
+        memory: torch.Tensor,
+        command: torch.Tensor,
+        plan: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """``u = π(ẑ*, φ, c*)``. ``command`` is the dimensionless command, not normalised."""
-        return self.policy(torch.cat([skill_n, memory, self.command_norm(command)], dim=-1))
+        """``u = π(ẑ*, φ, c*[, plan])``; ``command`` dimensionless, not normalised."""
+        inputs = [skill_n, memory, self.command_norm(command)]
+        if plan is not None:
+            inputs.append(plan)
+        return self.policy(torch.cat(inputs, dim=-1))
 
     def predict(
         self, skill_n: torch.Tensor, memory: torch.Tensor, action: torch.Tensor
@@ -310,7 +322,8 @@ class MemoryPolicy(nn.Module):
         fixed = memory if memory is not None else torch.zeros(skill.memory.readout.out_features)
         self.register_buffer("fixed_memory", fixed.detach().reshape(-1).clone())
 
-    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+    def observe(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """``(ẑ*, φ, c*)`` for this step, after pushing ``ẑ*`` into the history."""
         state = torch.cat(
             [observation[:, : self.command_start], observation[:, self.command_stop :]], dim=-1
         )
@@ -332,6 +345,10 @@ class MemoryPolicy(nn.Module):
         else:
             memory = self.skill.remember(torch.matmul(self.interpolation, self.history))
         command = observation[:, self.command_start : self.command_stop] * self.command_scale
+        return skill_n, memory, command
+
+    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+        skill_n, memory, command = self.observe(observation)
         action = self.skill.act(skill_n, memory, command)
         return self.decoder(action, observation[:, self.context_start : self.context_stop])
 

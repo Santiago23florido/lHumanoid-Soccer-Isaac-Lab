@@ -83,3 +83,136 @@ def test_events_never_cross_an_episode_or_count_the_reset_as_one() -> None:
     assert events.to_change[4:7, 0].tolist() == [3.0, 2.0, 1.0]
     assert not events.landing_known[4:, 0].any()
     assert events.remaining.tolist() == [3, 2, 1, 0, 3, 2, 1, 0]
+
+
+# ---------------------------------------------------------------------------
+# The planner
+# ---------------------------------------------------------------------------
+
+from humanoid_transfer.transfer.latent.memory import MemoryDims, MemorySkill, TimeGrid  # noqa: E402
+from humanoid_transfer.transfer.latent.model import (  # noqa: E402
+    G1_OBSERVATION,
+    BodyDecoder,
+    LatentDims,
+)
+from humanoid_transfer.transfer.latent.plan import (  # noqa: E402
+    ContactPlanner,
+    EventClock,
+    calibration,
+    cdf,
+    fit_landing_normaliser,
+    plan_targets,
+    planned_losses,
+    sample_bins,
+    survival_nll,
+)
+
+G1_DT_STAR = 0.02 / (0.65457 / 9.81) ** 0.5
+NAO_DT_STAR = 0.02 / (0.24801 / 9.81) ** 0.5
+
+
+def test_the_clock_counts_bins_of_body_time_on_any_body() -> None:
+    clock = EventClock(step=G1_DT_STAR, bins=26)
+    steps = torch.tensor([1.0, 2.0, 26.0, 27.0, float("inf")])
+    assert clock.event_bin(steps, G1_DT_STAR).tolist() == [1, 2, 26, 27, 27]
+    assert clock.observed_bins(torch.tensor([0.0, 5.0, 40.0]), G1_DT_STAR).tolist() == [0, 5, 26]
+
+    # The NAO's step is 1.63 of the G1's: 3 of its steps end 4.9 bins ahead, inside bin 5.
+    assert clock.event_bin(torch.tensor([1.0, 3.0]), NAO_DT_STAR).tolist() == [2, 5]
+    assert clock.observed_bins(torch.tensor([3.0]), NAO_DT_STAR).tolist() == [4]
+
+
+def test_the_survival_likelihood_counts_events_and_censoring() -> None:
+    logits = torch.tensor([[0.0, 1.0, -1.0]])
+    h = torch.sigmoid(logits[0])
+    event = survival_nll(logits, torch.tensor([2]), torch.tensor([0]))
+    assert torch.isclose(event, -(torch.log(1 - h[0]) + torch.log(h[1])))[0]
+    censored = survival_nll(logits, torch.tensor([4]), torch.tensor([2]))
+    assert torch.isclose(censored, -(torch.log(1 - h[0]) + torch.log(1 - h[1])))[0]
+
+
+def test_a_constant_hazard_is_recovered_through_censoring() -> None:
+    generator = torch.Generator().manual_seed(0)
+    truth, bins, total = 0.2, 10, 20000
+    times = torch.distributions.Geometric(probs=torch.tensor(truth)).sample((total,)) + 1
+    seen = torch.randint(0, bins + 1, (total,), generator=generator)
+    event_bin = torch.where((times <= seen) & (times <= bins), times.long(), bins + 1)
+    observed = seen.clamp(max=bins)
+
+    logit = torch.zeros(1, requires_grad=True)
+    optimiser = torch.optim.Adam([logit], lr=0.05)
+    for _ in range(300):
+        loss = survival_nll(logit.expand(total, bins), event_bin, observed).mean()
+        optimiser.zero_grad()
+        loss.backward()
+        optimiser.step()
+    assert abs(float(torch.sigmoid(logit)) - truth) < 0.01
+
+
+def test_sampling_follows_the_planned_distribution() -> None:
+    torch.manual_seed(0)
+    logits = torch.randn(1, 2, 12)
+    draws = sample_bins(logits.expand(40000, 2, 12), torch.rand(40000, 2))
+    k = torch.arange(1, 13)
+    empirical = (draws[..., None] <= k).float().mean(dim=0)
+    assert torch.allclose(empirical, cdf(logits)[0], atol=0.01)
+    # Sampled outcomes are calibrated against the logits that produced them.
+    error = calibration(logits.expand(40000, 2, 12), draws, torch.full_like(draws, 12))
+    assert (error < 0.01).all()
+
+
+def _planned_setup(parts: int = 2):
+    from humanoid_transfer.transfer.latent.events import contact_events
+
+    left = ([1] * 6 + [0] * 2) * 6
+    right = ([1] * 2 + [0] * 2 + [1] * 4) * 6
+    streams = _streams(_skill(left, right), [24, 24])
+    streams.obs.normal_()
+    events = contact_events(streams)
+    dims = MemoryDims(hidden=32, channels=8, memory=4, plan=3 * parts)
+    clock = EventClock(step=G1_DT_STAR, bins=8)
+    skill = MemorySkill(dims, TimeGrid(step=G1_DT_STAR, samples=13))
+    planner = ContactPlanner(dims, parts, clock)
+    steps = streams.samples(future=2)
+    skill.skill_norm.fit(streams.skill[steps])
+    fit_landing_normaliser(planner, events, steps)
+    decoder = BodyDecoder(74, 37, LatentDims(action=16, hidden=32))
+    return streams, events, skill, planner, decoder, clock, steps
+
+
+def test_the_hindsight_plan_is_the_schedule_that_followed() -> None:
+    streams, events, _, planner, _, clock, _ = _planned_setup()
+    steps = torch.tensor([1, 2, 5])
+    targets = plan_targets(planner, streams, events, steps, clock, G1_DT_STAR, FEET)
+    # Left foot lifts off at 6: 5, 4 and 1 steps ahead. Right foot lifts off at 2, lands at 4
+    # and lifts off again at 10: 1, 2 and 5 steps ahead.
+    assert targets.event_bin[:, 0].tolist() == [5, 4, 1]
+    assert targets.event_bin[:, 1].tolist() == [1, 2, 5]
+    # Its landing at 4 is known from steps 1 and 2; from 5 on, it is the one at 12.
+    assert targets.landing_known[:, 1].all()
+    fraction = targets.plan[:, :2]
+    assert torch.allclose(fraction[:, 0], torch.tensor([5.0, 4.0, 1.0]) / 8)
+
+
+def test_rollouts_a_student_drove_never_teach_the_planner() -> None:
+    torch.manual_seed(0)
+    streams, events, skill, planner, decoder, clock, steps = _planned_setup()
+    sigma = torch.full((27,), 0.1)
+
+    def losses(hindsight: bool):
+        flags = torch.full((len(streams),), hindsight)
+        return planned_losses(
+            skill, planner, decoder, G1_OBSERVATION, streams, events, flags, steps, sigma,
+            horizon=2, dynamics_weight=0.5, plan_weight=1.0, clock=clock, dt_star=G1_DT_STAR,
+            feet=FEET,
+        )  # fmt: skip
+
+    student = losses(False)
+    assert float(student["survival"]) == 0.0 and float(student["landing"]) == 0.0
+    planner.zero_grad(set_to_none=True)
+    student["total"].backward()
+    assert all(p.grad is None or not p.grad.any() for p in planner.net.parameters())
+
+    planner.zero_grad(set_to_none=True)
+    losses(True)["total"].backward()
+    assert any(p.grad is not None and p.grad.any() for p in planner.net.parameters())

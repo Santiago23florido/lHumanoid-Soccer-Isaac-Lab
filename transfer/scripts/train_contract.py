@@ -84,13 +84,13 @@ def main() -> int:
     parser.add_argument("--gait", type=Path, default=REPO_ROOT / "g1/rollouts/teacher.npz")
     parser.add_argument("--val-envs", type=int, default=16)
     parser.add_argument("--encoder-epochs", type=int, default=150)
-    parser.add_argument("--epochs", type=int, default=150)
+    parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--free-bits", type=float, default=0.1)
     parser.add_argument("--kind", choices=("flow", "cvae"), default="flow")
-    parser.add_argument("--flow-steps", type=int, default=16)
-    parser.add_argument("--memory", type=int, default=16, help="Width of the history summary.")
-    parser.add_argument("--channels", type=int, default=64)
-    parser.add_argument("--flow-hidden", type=int, default=512)
+    parser.add_argument("--flow-steps", type=int, default=32)
+    parser.add_argument("--memory", type=int, default=64, help="Width of the history summary.")
+    parser.add_argument("--channels", type=int, default=128)
+    parser.add_argument("--flow-hidden", type=int, default=1024)
     parser.add_argument(
         "--noise-scale",
         type=float,

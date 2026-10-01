@@ -31,6 +31,9 @@ REQUIRED_PATHS = [
     "g1/policy/teacher_policy.json",
     "g1/policy/teacher_env.yaml",
     "g1/policy/teacher_agent.yaml",
+    # The teacher's body as its simulation integrates it. Measured, not derived:
+    # the G1 USD is downloaded at run time, so a test cannot re-derive it.
+    "g1/body/body_card.json",
     # Track 3, the research question.
     "transfer/docs/plan.md",
     # Cross-track entry points.

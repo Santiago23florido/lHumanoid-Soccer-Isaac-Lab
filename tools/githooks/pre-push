@@ -1,0 +1,55 @@
+#!/bin/sh
+# Refuse to push straight to an integration branch.
+#
+# Every change reaches main through a pull request. This hook is the fast
+# half of that rule: it fails locally, in under a millisecond, before a
+# mistake becomes a commit on a branch other people have pulled. The
+# enforcing half is the server-side ruleset described in CONTRIBUTING.md,
+# which this hook cannot speak for and does not try to.
+#
+# Installed by pointing git at this directory:
+#
+#     git config core.hooksPath tools/githooks
+#
+# which keeps the hook versioned instead of hidden in .git/hooks.
+
+PROTECTED="main master"
+
+# An escape hatch for the repository owner, deliberately awkward to type and
+# deliberately not a flag: ALLOW_PUSH_TO_MAIN=yes git push origin main
+# Automated contributors must not set it. See CLAUDE.md.
+if [ "${ALLOW_PUSH_TO_MAIN:-}" = "yes" ]; then
+	echo "pre-push: ALLOW_PUSH_TO_MAIN=yes, letting a protected push through." >&2
+	exit 0
+fi
+
+status=0
+
+# stdin carries one line per ref: <local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+	[ -n "$remote_ref" ] || continue
+	branch=${remote_ref#refs/heads/}
+	[ "$branch" != "$remote_ref" ] || continue
+
+	for protected in $PROTECTED; do
+		if [ "$branch" = "$protected" ]; then
+			echo "" >&2
+			echo "pre-push: refusing to push to '$protected'." >&2
+			echo "" >&2
+			echo "  Open a pull request instead:" >&2
+			echo "" >&2
+			echo "    git switch -c <type>/<short-description>" >&2
+			echo "    git push -u origin HEAD" >&2
+			echo "    gh pr create --fill" >&2
+			echo "" >&2
+			echo "  If work is already committed on '$protected', move it:" >&2
+			echo "" >&2
+			echo "    git switch -c <type>/<short-description>" >&2
+			echo "    git branch -f $protected origin/$protected" >&2
+			echo "" >&2
+			status=1
+		fi
+	done
+done
+
+exit $status

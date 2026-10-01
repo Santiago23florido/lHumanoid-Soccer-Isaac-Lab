@@ -51,12 +51,11 @@ import torch.nn.functional as F
 from torch import nn
 
 from .events import ContactEvents
-from .memory import MemoryDims, MemorySkill
+from .memory import MemoryDims, MemoryPolicy, MemorySkill, StateEncoder
 from .model import Normaliser, ObservationLayout, mlp
 from .sequences import Streams
 
 _TOLERANCE = 1e-6
-_LOG_STD_RANGE = (-5.0, 2.0)
 
 
 @dataclass(frozen=True)
@@ -121,7 +120,7 @@ class ContactPlanner(nn.Module):
         out = out.reshape(list(out.shape[:-1]) + [self.parts, self.bins + 4])
         logits = out[..., : self.bins]
         mean = out[..., self.bins : self.bins + 2]
-        log_std = out[..., self.bins + 2 :].clamp(_LOG_STD_RANGE[0], _LOG_STD_RANGE[1])
+        log_std = out[..., self.bins + 2 :].clamp(-5.0, 2.0)
         return logits, mean, log_std
 
     def remaining(self, bins: torch.Tensor) -> torch.Tensor:
@@ -344,10 +343,113 @@ def marginal_hazard(event_bin: torch.Tensor, observed: torch.Tensor, bins: int) 
     return torch.log(rate) - torch.log1p(-rate)
 
 
+# ---------------------------------------------------------------------------
+# The policy that runs
+# ---------------------------------------------------------------------------
+
+
+class PlannedPolicy(MemoryPolicy):
+    """:class:`~.memory.MemoryPolicy` that draws a contact schedule and holds it.
+
+    Per environment and part it keeps the body time left to the planned
+    change and the planned landing. Each step the time counts down by
+    ``dt*``; the plan is redrawn when the part's contact (read off ``ẑ*``)
+    changes, when the time falls due, while no change is planned within the
+    horizon, and after a reset. The landing is fixed when the time is drawn.
+
+    ``stochastic=False`` draws the median instead of a sample. With ``plan``
+    given, the policy reads that fixed plan instead: the bypass test for the
+    schedule.
+    """
+
+    def __init__(
+        self,
+        encoder: StateEncoder,
+        skill: MemorySkill,
+        planner: ContactPlanner,
+        decoder: nn.Module,
+        layout: ObservationLayout,
+        velocity_unit: float,
+        time_unit: float,
+        dt_star: float,
+        threshold: float,
+        load: slice,
+        memory: torch.Tensor | None = None,
+        plan: torch.Tensor | None = None,
+        stochastic: bool = True,
+    ) -> None:
+        super().__init__(
+            encoder, skill, decoder, layout, velocity_unit, time_unit, dt_star, memory=memory
+        )
+        self.planner = planner
+        self.dt_star = dt_star
+        self.threshold = threshold
+        self.load_start, self.load_stop = load.start, load.stop
+        self.stochastic = stochastic
+        parts = planner.parts
+        self.register_buffer("remaining", torch.zeros(0, parts), persistent=False)
+        self.register_buffer("landing", torch.zeros(0, parts, 2), persistent=False)
+        self.register_buffer("contact", torch.zeros(0, parts, dtype=torch.bool), persistent=False)
+        self.frozen_plan = plan is not None
+        fixed = plan if plan is not None else torch.zeros(planner.width)
+        self.register_buffer("fixed_plan", fixed.detach().reshape(-1).clone())
+
+    def schedule(
+        self,
+        skill_n: torch.Tensor,
+        memory: torch.Tensor,
+        command: torch.Tensor,
+        fresh: torch.Tensor,
+    ) -> torch.Tensor:
+        """Advance every environment's plan by one step and return it as the policy reads it."""
+        batch = skill_n.shape[0]
+        load = self.skill.skill_norm.inverse(skill_n)[:, self.load_start : self.load_stop]
+        contact = load > self.threshold
+        if self.remaining.shape[0] != batch:
+            self.remaining = torch.zeros(batch, self.planner.parts, device=skill_n.device)
+            self.landing = torch.zeros(batch, self.planner.parts, 2, device=skill_n.device)
+            self.contact = contact
+            fresh = torch.ones(batch, dtype=torch.bool, device=skill_n.device)
+
+        within = self.remaining <= self.planner.horizon
+        remaining = torch.where(within, self.remaining - self.dt_star, self.remaining)
+        redraw = (
+            fresh.unsqueeze(-1)
+            | (contact != self.contact)
+            | (remaining < 0.5 * self.dt_star)
+            | ~within
+        )
+        logits, mean, _ = self.planner(skill_n, memory, self.skill.command_norm(command))
+        if self.stochastic:
+            uniform = torch.rand(logits.shape[:-1], device=logits.device)
+        else:
+            uniform = torch.full(logits.shape[:-1], 0.5, device=logits.device)
+        drawn = self.planner.remaining(sample_bins(logits, uniform))
+
+        self.remaining = torch.where(redraw, drawn, remaining)
+        self.landing = torch.where(redraw.unsqueeze(-1), mean, self.landing)
+        self.contact = contact
+        return plan_features(self.remaining, self.landing, self.planner.horizon)
+
+    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+        batch = observation.shape[0]
+        if self.fresh.shape[0] == batch:
+            fresh = self.fresh.clone()
+        else:
+            fresh = torch.ones(batch, dtype=torch.bool, device=observation.device)
+        skill_n, memory, command = self.observe(observation)
+        plan = self.schedule(skill_n, memory, command, fresh)
+        if self.frozen_plan:
+            plan = self.fixed_plan.unsqueeze(0).expand(batch, -1)
+        action = self.skill.act(skill_n, memory, command, plan)
+        return self.decoder(action, observation[:, self.context_start : self.context_stop])
+
+
 __all__ = [
     "ContactPlanner",
     "EventClock",
     "PlanTargets",
+    "PlannedPolicy",
     "calibration",
     "cdf",
     "fit_landing_normaliser",

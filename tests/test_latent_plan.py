@@ -216,3 +216,106 @@ def test_rollouts_a_student_drove_never_teach_the_planner() -> None:
     planner.zero_grad(set_to_none=True)
     losses(True)["total"].backward()
     assert any(p.grad is not None and p.grad.any() for p in planner.net.parameters())
+
+
+# ---------------------------------------------------------------------------
+# The policy that commits to its plan
+# ---------------------------------------------------------------------------
+
+from humanoid_transfer.transfer.latent.plan import PlannedPolicy  # noqa: E402
+
+BINS = 8
+
+
+class _LoadEncoder(torch.nn.Module):
+    """``ẑ*`` with both foot loads read straight from the first two observations."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.start, self.stop = LOAD.start, LOAD.stop
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        z = torch.zeros(state.shape[0], 27, device=state.device)
+        z[:, self.start : self.stop] = state[:, :2]
+        return z
+
+
+def _planned_policy(certain_bin: int | None = None, **kwargs) -> PlannedPolicy:
+    torch.manual_seed(0)
+    dims = MemoryDims(hidden=32, channels=8, memory=4, plan=6)
+    clock = EventClock(step=G1_DT_STAR, bins=BINS)
+    skill = MemorySkill(dims, TimeGrid(step=G1_DT_STAR, samples=13))
+    planner = ContactPlanner(dims, 2, clock)
+    if certain_bin is not None:
+        last = planner.net[-1]
+        torch.nn.init.zeros_(last.weight)
+        bias = torch.zeros(2, BINS + 4)
+        bias[:, :BINS] = -30.0
+        bias[:, certain_bin - 1] = 30.0
+        last.bias.data.copy_(bias.reshape(-1))
+    decoder = BodyDecoder(74, 37, LatentDims(action=16, hidden=32))
+    return PlannedPolicy(
+        _LoadEncoder(), skill, planner, decoder, G1_OBSERVATION, velocity_unit=2.53,
+        time_unit=0.258, dt_star=G1_DT_STAR, threshold=0.05, load=LOAD, **kwargs,
+    ).eval()  # fmt: skip
+
+
+def _left_plan(policy: PlannedPolicy) -> float:
+    return round(float(policy.remaining[0, 0]) / G1_DT_STAR, 3)
+
+
+def test_the_policy_counts_down_its_plan_and_redraws_only_when_it_must() -> None:
+    policy = _planned_policy(certain_bin=3)
+    obs = torch.zeros(1, 123)
+    obs[:, :2] = 0.5
+    seen = []
+    with torch.no_grad():
+        for t in range(8):
+            if t == 4:
+                obs[:, 0] = 0.0  # the left foot lifts off a step early
+            if t == 6:
+                policy.reset(torch.tensor([True]))
+            policy(obs)
+            seen.append(_left_plan(policy))
+    # Drawn at 0, held 2, 1, redrawn when due at 3; redrawn at 4 by the lift-off
+    # and at 6 by the reset.
+    assert seen == [3, 2, 1, 3, 3, 2, 3, 2]
+
+
+def test_a_change_not_expected_within_the_horizon_is_redrawn_every_step() -> None:
+    policy = _planned_policy(certain_bin=BINS + 1)  # every bin certain not to change
+    obs = torch.zeros(1, 123)
+    obs[:, :2] = 0.5
+    with torch.no_grad():
+        for _ in range(3):
+            policy(obs)
+            assert _left_plan(policy) == BINS + 1
+
+
+def test_the_exported_planned_policy_matches_the_eager_one() -> None:
+    policy = _planned_policy()
+    scripted = torch.jit.script(_planned_policy())
+    generator = torch.Generator().manual_seed(2)
+    obs = torch.rand(30, 4, 123, generator=generator)
+    done = torch.zeros(30, 4, dtype=torch.bool)
+    done[11, 2] = True
+    with torch.no_grad():
+        for t in range(30):
+            torch.manual_seed(t)
+            eager = policy(obs[t])
+            torch.manual_seed(t)
+            assert torch.allclose(eager, scripted(obs[t]), atol=1e-5)
+            policy.reset(done[t])
+            scripted.reset(done[t])
+
+
+def test_a_frozen_plan_is_what_the_policy_reads() -> None:
+    fixed = torch.full((6,), 0.3)
+    policy = _planned_policy(plan=fixed)
+    obs = torch.rand(5, 123)
+    with torch.no_grad():
+        action = policy(obs)
+        skill_n, memory, command = policy.observe(obs)
+        expected = policy.skill.act(skill_n, memory, command, fixed.expand(5, -1))
+        context = obs[:, G1_OBSERVATION.context[0] : G1_OBSERVATION.context[1]]
+    assert torch.allclose(action, policy.decoder(expected, context))

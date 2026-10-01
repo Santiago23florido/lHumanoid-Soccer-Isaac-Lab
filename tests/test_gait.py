@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from humanoid_transfer.common.gait import gait_signature, stride_periods, touchdowns
+from humanoid_transfer.common.gait import (
+    dominant_rhythm,
+    gait_signature,
+    stride_periods,
+    touchdowns,
+)
 from humanoid_transfer.common.skill_state import SKILL_LAYOUT
 
 PERIOD = 40
@@ -75,3 +80,18 @@ def test_no_event_or_interval_crosses_a_reset() -> None:
     landing = touchdowns(contact, done)
     assert np.flatnonzero(landing[:, 0, 0]).tolist() == [2]
     assert stride_periods(landing, done).size == 0
+
+
+def test_the_dominant_rhythm_is_the_stride_whatever_the_contact_threshold() -> None:
+    """The weight shift of the synthetic walk repeats every PERIOD steps, a clean clock."""
+    dt_star = 0.08
+    rhythm = dominant_rhythm(_walk(), dt_star, skip=0)
+    assert rhythm.period == pytest.approx(PERIOD * dt_star)
+    assert rhythm.power_share > 0.5
+
+
+def test_a_shuffle_without_a_clock_has_no_dominant_rhythm() -> None:
+    z = _walk(envs=8)
+    loads = SKILL_LAYOUT.slice_of("foot_load")
+    z[..., loads] = np.random.default_rng(0).uniform(0.0, 1.0, size=(STEPS, 8, 2))
+    assert dominant_rhythm(z, 0.08, skip=0).power_share < 0.05

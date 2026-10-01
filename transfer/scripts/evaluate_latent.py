@@ -38,7 +38,11 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 
-from humanoid_transfer.common.gait import episode_start, gait_signature  # noqa: E402
+from humanoid_transfer.common.gait import (  # noqa: E402
+    dominant_rhythm,
+    episode_start,
+    gait_signature,
+)
 from humanoid_transfer.common.similarity import UnitSystem  # noqa: E402
 from humanoid_transfer.common.skill_state import SKILL_LAYOUT  # noqa: E402
 
@@ -71,7 +75,9 @@ def summarise(path: Path) -> dict:
     forward = SKILL_LAYOUT.unpack(z)["com_velocity"][..., 0] * units.velocity
     episodes = int(done.shape[1] + done.sum())
     executed, label = data["action_executed"], data["action_teacher"]
-    signature = gait_signature(z, done, float(data["control_dt"]) / units.time).as_dict()
+    dt_star = float(data["control_dt"]) / units.time
+    signature = gait_signature(z, done, dt_star).as_dict()
+    rhythm = dominant_rhythm(z, dt_star)
     return {
         "file": path.resolve().relative_to(REPO_ROOT).as_posix(),
         "driver": str(data["driver"]),
@@ -85,6 +91,13 @@ def summarise(path: Path) -> dict:
         "on_policy_disagreement_mse": float(((executed - label) ** 2).mean()),
         "teacher_action_variance": float(label.reshape(-1, label.shape[-1]).var(axis=0).mean()),
         "signature": signature,
+        # Supplementary, added after the touchdown-based period proved sensitive to
+        # the contact threshold on this gait (swings last about two control steps).
+        "stride_period_by_threshold": {
+            f"{t:.2f}": gait_signature(z, done, dt_star, threshold=t).stride_period
+            for t in (0.01, 0.05, 0.10, 0.20)
+        },
+        "weight_shift_rhythm": {"period": rhythm.period, "power_share": rhythm.power_share},
     }
 
 
@@ -108,11 +121,14 @@ def verdict(run: dict, teacher: dict) -> dict:
             np.isfinite(v) and v <= CRITERIA["signature_tolerance"] for v in deviations.values()
         )
     )
+    reference = teacher["weight_shift_rhythm"]["period"]
+    rhythm = abs(run["weight_shift_rhythm"]["period"] - reference) / reference
     return {
         "speed_ratio": ratio,
         "fall_rate_excess": excess,
         "signature_deviation": deviations,
         "passes": bool(passes),
+        "supplementary_rhythm_deviation": rhythm,
     }
 
 
@@ -143,7 +159,7 @@ def main() -> int:
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
     header = f"{'run':<16}{'falls':>8}{'speed':>9}{'ratio':>8}{'stride':>9}{'period':>9}"
-    print(header + f"{'duty L/R':>13}{'disagree':>10}  verdict")
+    print(header + f"{'duty L/R':>13}{'rhythm':>8}{'disagree':>10}  verdict")
     for name, run in runs.items():
         sig = run["signature"]
         ratio = run.get("verdict", {}).get("speed_ratio", 1.0)
@@ -153,6 +169,7 @@ def main() -> int:
             f"{name:<16}{run['falls']:>4}/{run['episodes']:<3}{speed:>9.3f}"
             f"{ratio:>8.2f}{sig['stride_length']:>9.3f}{sig['stride_period']:>9.2f}"
             f"{sig['duty_factor'][0]:>7.2f}/{sig['duty_factor'][1]:.2f}"
+            f"{run['weight_shift_rhythm']['period']:>8.2f}"
             f"{run['on_policy_disagreement_mse']:>10.4f}  "
             f"{'reference' if status is None else ('PASS' if status else 'fail')}"
         )

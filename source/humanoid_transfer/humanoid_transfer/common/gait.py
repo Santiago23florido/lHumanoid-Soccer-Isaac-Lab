@@ -142,8 +142,45 @@ def gait_signature(
     )
 
 
+@dataclass(frozen=True)
+class Rhythm:
+    """The dominant period of a gait signal and how much of the signal it explains."""
+
+    period: float
+    """In the time unit of ``dt_star``: pendulum times when fed skill states."""
+
+    power_share: float
+    """Fraction of the (non-constant) power at that frequency. Near 1 for a clock, small
+    for a broadband shuffle -- whose "period" is then a weak description of it."""
+
+
+def dominant_rhythm(
+    z: np.ndarray, dt_star: float, layout: ZLayout = SKILL_LAYOUT, skip: int = 100
+) -> Rhythm:
+    """Dominant period of the left-right weight shift ``load_L - load_R``, threshold-free.
+
+    Touchdown-based periods need a contact threshold, and on a gait whose swings
+    last two control steps they are fragile: a missed lift-off merges two
+    strides. The weight shift completes one cycle per stride whatever the
+    threshold, so its spectrum -- averaged over rollouts, Hann-windowed, after
+    ``skip`` start-up steps -- gives a period no threshold can move.
+    """
+    loads = layout.unpack(z[skip:])["foot_load"]
+    shift = loads[..., 0] - loads[..., 1]
+    shift = shift - shift.mean(axis=0)
+    window = np.hanning(shift.shape[0])[:, None]
+    power = (np.abs(np.fft.rfft(shift * window, axis=0)) ** 2).mean(axis=1)[1:]
+    frequencies = np.fft.rfftfreq(shift.shape[0], d=dt_star)[1:]
+    peak = int(power.argmax())
+    return Rhythm(
+        period=float(1.0 / frequencies[peak]), power_share=float(power[peak] / power.sum())
+    )
+
+
 __all__ = [
     "GaitSignature",
+    "Rhythm",
+    "dominant_rhythm",
     "episode_start",
     "gait_signature",
     "stride_periods",

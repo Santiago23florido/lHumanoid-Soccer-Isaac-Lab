@@ -11,10 +11,17 @@ identical.
     L = \\lambda_{\\text{task}} L_{\\text{task}}
       + \\lambda_{\\text{im}} \\, w \\, L_{\\text{imitate}}
 
-``L_task`` is the student's own reward, the same shape as the one the standing
-task already uses. ``L_imitate`` is the teacher term. ``w`` is the per-sample
-feasibility weight from :mod:`feasibility`, which is what stops the teacher from
-being followed into states the student cannot occupy.
+``L_task`` is the student's own reward. ``L_imitate`` is the teacher term. ``w``
+is the per-sample reachability weight from :mod:`feasibility`, which stops the
+teacher from being followed into configurations the student's joints cannot
+reach.
+
+``w`` constrains the *body*, not the behaviour. It carries no term about
+stepping, contact or velocity: those are things the student can physically do,
+so they belong to ``L_task`` and to the dynamics, not to a weight the designer
+chose. ``L_task`` is therefore **not** the standing task's reward. That task
+terminates on a step, which is correct for it -- not stepping is what it poses
+-- and exactly wrong here.
 
 Status
 ------
@@ -88,8 +95,19 @@ class DistillationCfg:
     standing is the student.
     """
 
-    feasibility_margin: float = 0.9
-    """Where the feasibility weight starts decaying. See ``feasibility``."""
+    reachability_tolerance: float = 0.05
+    """Smoothing width, in radians, of the reachability weight.
+
+    Passed to ``feasibility.reachability_mask``. The weight is full while every
+    mapped joint sits inside the student's range and reaches zero this far past
+    the worst bound. About 3 degrees.
+
+    This replaced a ``feasibility_margin`` that scaled a zero-step capturability
+    mask. That mask weighted by whether a state could be brought to rest without
+    stepping, which for a walking skill discounts the teacher precisely where it
+    is walking -- and which, measured on the captured gait, down-weighted 0 of
+    12 800 samples. See ``feasibility`` for the derivation.
+    """
 
     anneal_steps: int = 0
     """Environment steps over which to decay ``imitation_weight`` to zero.

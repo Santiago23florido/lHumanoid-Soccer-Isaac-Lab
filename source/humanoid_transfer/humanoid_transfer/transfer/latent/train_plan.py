@@ -36,10 +36,12 @@ from .plan import (
     PlannedPolicy,
     calibration,
     fit_landing_normaliser,
+    follow_plan,
     marginal_hazard,
     median_bin,
     plan_features,
     plan_targets,
+    planned_contacts,
     planned_losses,
     sample_bins,
     survival_nll,
@@ -60,6 +62,11 @@ class PlanConfig(MemoryConfig):
     """``K``: the planner's horizon in grid steps, about 2 ``T`` like the memory."""
 
     plan_weight: float = 1.0
+    consistency: float = 0.0
+    """Weight of holding the policy to drawn plans through the latent dynamics."""
+
+    temperature: float = 0.05
+    """Load share over which the predicted contact goes from unloaded to loaded."""
 
 
 def plan_config(**kwargs) -> PlanConfig:
@@ -159,6 +166,8 @@ def train_planned(
         return planned_losses(
             skill, planner, decoder, layout, streams, events, hindsight, batch, sigma,
             config.horizon, config.dynamics, config.plan_weight, clock, dt_star, FEET,
+            consistency_weight=config.consistency, load=LOAD,
+            threshold=DEFAULT_CONTACT_THRESHOLD, temperature=config.temperature,
         )  # fmt: skip
 
     for module in modules:
@@ -277,6 +286,54 @@ def evaluate_plan(
 
 
 @torch.no_grad()
+def plan_following(
+    model: PlannedModel,
+    streams: Streams,
+    events: ContactEvents,
+    steps: torch.Tensor,
+    source: torch.Tensor,
+    dt_star: float,
+    mean_plan: torch.Tensor,
+    rollout: int,
+    temperature: float,
+    seed: int = 0,
+) -> dict:
+    """Does the policy do what a drawn plan says, in the latent dynamics?
+
+    Plans are drawn from the planner at ``steps``, the dynamics rolled out
+    ``rollout`` steps under the policy, and the predicted contacts compared
+    with the plan's, up to the planned change. The same rollouts with the plan
+    withheld (held at its mean) say how often the plan is met anyway.
+    """
+    generator = torch.Generator(device=source.device).manual_seed(seed)
+    window = source[streams.windows(steps, model.skill.samples)]
+    _, logits, mean = schedule_inputs(model, streams, source, steps)
+    uniform = torch.rand(logits.shape[:-1], generator=generator, device=source.device)
+    remaining = model.planner.remaining(sample_bins(logits, uniform))
+    wanted, spoken = planned_contacts(events.contact[steps], remaining, rollout, dt_star)
+
+    changes = spoken & (wanted != events.contact[steps].unsqueeze(1))
+
+    def agreement(fixed: torch.Tensor | None) -> tuple[float, float]:
+        loaded = follow_plan(
+            model.skill, window, streams.command[steps], remaining, mean, rollout, model.clock,
+            dt_star, LOAD, DEFAULT_CONTACT_THRESHOLD, temperature, fixed_plan=fixed,
+        )  # fmt: skip
+        right = (loaded > 0.5) == wanted
+        return float(right[spoken].float().mean()), float(right[changes].float().mean())
+
+    followed, at_change = agreement(None)
+    withheld, withheld_at_change = agreement(mean_plan)
+    return {
+        "agreement": followed,
+        "agreement_at_planned_change": at_change,
+        "agreement_plan_withheld": withheld,
+        "agreement_at_planned_change_plan_withheld": withheld_at_change,
+        "planned_changes_within_rollout": float(changes.any(dim=1).float().mean()),
+    }
+
+
+@torch.no_grad()
 def runtime_imitation(
     policy: PlannedPolicy,
     obs: torch.Tensor,
@@ -319,6 +376,7 @@ __all__ = [
     "hindsight_plans",
     "new_planner",
     "plan_config",
+    "plan_following",
     "population_hazard",
     "runtime_imitation",
     "schedule_inputs",

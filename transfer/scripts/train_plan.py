@@ -9,6 +9,12 @@ planner in the loop (:mod:`humanoid_transfer.transfer.latent.plan`):
 ``plan_limbs``
     The same with a decoder per limb.
 
+With ``--consistency`` (the default, 0.02: the same order as the imitation
+loss), the policy is also held to plans drawn from the planner through the
+latent dynamics -- the contacts ``T`` predicts under its actions must change
+when the plan says. Without it, the first run found the plan calibrated but
+unused.
+
 Rollouts whose ``driver`` is the teacher give the policy the schedule that
 actually followed, and teach the planner; rollouts a student drove give the
 policy a schedule drawn from the planner and teach the planner nothing.
@@ -73,6 +79,7 @@ from humanoid_transfer.transfer.latent.train_plan import (  # noqa: E402
     hindsight_plans,
     new_planner,
     plan_config,
+    plan_following,
     population_hazard,
     runtime_imitation,
     schedule_inputs,
@@ -124,6 +131,8 @@ def main() -> int:
     parser.add_argument("--tag", default="")
     parser.add_argument("--encoder-epochs", type=int, default=150)
     parser.add_argument("--skill-epochs", type=int, default=150)
+    parser.add_argument("--consistency", type=float, default=0.02)
+    parser.add_argument("--temperature", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--logdir", type=Path, default=REPO_ROOT / "logs/latent")
@@ -153,7 +162,11 @@ def main() -> int:
     held_out = (streams.capture == 0) & (streams.env >= envs - args.val_envs)
 
     base = plan_config(
-        encoder_epochs=args.encoder_epochs, skill_epochs=args.skill_epochs, seed=args.seed
+        encoder_epochs=args.encoder_epochs,
+        skill_epochs=args.skill_epochs,
+        seed=args.seed,
+        consistency=args.consistency,
+        temperature=args.temperature,
     )
     trustworthy = streams.samples()
     train_steps = trustworthy[~held_out[trustworthy]]
@@ -242,6 +255,24 @@ def main() -> int:
                 ("gait", (gait, gait_events, gait_steps, gait_estimate)),
             )
         }
+        metrics["plan_following"] = {
+            split: plan_following(
+                model,
+                source_streams,
+                source_events,
+                steps,
+                source_estimate,
+                dt_star,
+                mean_plan,
+                config.horizon,
+                config.temperature,
+                seed=args.seed,
+            )  # fmt: skip
+            for split, (source_streams, source_events, steps, source_estimate) in (
+                ("validation_walking", (streams, events, walking, estimate)),
+                ("gait", (gait, gait_events, gait_steps, gait_estimate)),
+            )
+        }
         metrics["runtime_validation_walking"] = {
             mode: runtime_imitation(
                 model.policy(units.velocity, units.time, dt_star, stochastic=mode == "drawn").to(
@@ -312,6 +343,9 @@ def main() -> int:
               f"frozen {walk['imitation_r2_frozen_plan']:.3f}  "
               f"(use {walk['plan_use']:+.3f})")  # fmt: skip
         print(f"  running policy     drawn {runtime['drawn']:.3f}  median {runtime['median']:.3f}")
+        follow = metrics["plan_following"]["validation_walking"]
+        print(f"  plan followed      at change {follow['agreement_at_planned_change']:.3f}  "
+              f"withheld {follow['agreement_at_planned_change_plan_withheld']:.3f}")  # fmt: skip
         print(f"  bypass u           {walk['bypass_action_r2']:.3f}")
         print(f"  joint probes       excess {leakage['excess_mlp']:+.3f}")
 

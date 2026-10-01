@@ -319,3 +319,50 @@ def test_a_frozen_plan_is_what_the_policy_reads() -> None:
         expected = policy.skill.act(skill_n, memory, command, fixed.expand(5, -1))
         context = obs[:, G1_OBSERVATION.context[0] : G1_OBSERVATION.context[1]]
     assert torch.allclose(action, policy.decoder(expected, context))
+
+
+# ---------------------------------------------------------------------------
+# Holding the policy to its plan
+# ---------------------------------------------------------------------------
+
+from humanoid_transfer.transfer.latent.plan import follow_plan, planned_contacts  # noqa: E402
+
+
+def test_a_plan_speaks_only_up_to_its_change() -> None:
+    contact = torch.tensor([[True, False]])
+    remaining = torch.tensor([[3.0, 20.0]]) * G1_DT_STAR  # left lifts off at 3; right: no change
+    wanted, spoken = planned_contacts(contact, remaining, 5, G1_DT_STAR)
+    assert wanted[0, :, 0].tolist() == [True, True, False, False, False]
+    assert spoken[0, :, 0].tolist() == [True, True, True, False, False]
+    assert not wanted[0, :, 1].any() and spoken[0, :, 1].all()
+
+
+def test_only_the_policy_learns_from_following_a_plan() -> None:
+    torch.manual_seed(0)
+    _, _, skill, planner, decoder, clock, _ = _planned_setup()
+    window = torch.randn(4, skill.samples, 27)
+    remaining = torch.full((4, 2), 2 * G1_DT_STAR)
+    loaded = follow_plan(
+        skill, window, torch.zeros(4, 3), remaining, torch.zeros(4, 2, 2), 3, clock,
+        G1_DT_STAR, LOAD, 0.05, 0.05,
+    )  # fmt: skip
+    assert loaded.shape == (4, 3, 2)
+    loaded.sum().backward()
+    assert all(p.grad is not None for p in skill.policy.parameters())
+    for module in (skill.memory, skill.dynamics, planner, decoder):
+        assert all(p.grad is None for p in module.parameters())
+
+
+def test_the_consistency_term_reaches_the_policy_on_any_driver() -> None:
+    torch.manual_seed(0)
+    streams, events, skill, planner, decoder, clock, steps = _planned_setup()
+    flags = torch.zeros(len(streams), dtype=torch.bool)  # a student drove every step
+    losses = planned_losses(
+        skill, planner, decoder, G1_OBSERVATION, streams, events, flags, steps,
+        torch.full((27,), 0.1), horizon=2, dynamics_weight=0.0, plan_weight=0.0, clock=clock,
+        dt_star=G1_DT_STAR, feet=FEET, consistency_weight=1.0, load=LOAD,
+    )  # fmt: skip
+    assert float(losses["consistency"]) > 0.0
+    skill.zero_grad(set_to_none=True)
+    losses["consistency"].backward()
+    assert any(p.grad is not None and p.grad.any() for p in skill.policy.parameters())

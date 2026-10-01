@@ -49,6 +49,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.func import functional_call
 
 from .events import ContactEvents
 from .memory import MemoryDims, MemoryPolicy, MemorySkill, StateEncoder
@@ -220,6 +221,86 @@ def fit_landing_normaliser(
 
 
 # ---------------------------------------------------------------------------
+# Holding the policy to its plan
+# ---------------------------------------------------------------------------
+
+
+def _frozen(module: nn.Module) -> dict[str, torch.Tensor]:
+    return {name: value.detach() for name, value in module.named_parameters()}
+
+
+def follow_plan(
+    skill: MemorySkill,
+    window: torch.Tensor,
+    command: torch.Tensor,
+    remaining: torch.Tensor,
+    landing_n: torch.Tensor,
+    steps: int,
+    clock: EventClock,
+    dt_star: float,
+    load: slice,
+    threshold: float,
+    temperature: float,
+    fixed_plan: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Roll the latent dynamics forward under the policy given a plan; ``(B, steps, P)``
+    probabilities that each contact is loaded after each step.
+
+    The rollout is closed inside the shared space: the state advances by
+    ``T``, the memory reads a window that the predicted states extend, and
+    the plan counts down by ``dt*`` -- once a planned change is due, the
+    policy is told no further change is planned, as it would be until a
+    redraw. Nothing of the recorded future enters, so the plan can differ
+    from what the teacher did.
+
+    ``Φ`` and ``T`` are used with their parameters detached: through this
+    rollout only the policy can learn, so it cannot make the model of the
+    world agree with it.
+
+    With ``fixed_plan``, the policy reads that instead: what it does when the
+    plan is withheld.
+    """
+    memory_params = _frozen(skill.memory)
+    dynamics_params = _frozen(skill.dynamics)
+    state = window[:, -1]
+    loaded = []
+    for j in range(steps):
+        phi = functional_call(skill.memory, memory_params, (window,))
+        left = remaining - j * dt_star
+        left = torch.where(left < 0.5 * dt_star, torch.full_like(left, clock.horizon), left)
+        plan = plan_features(left, landing_n, clock.horizon)
+        if fixed_plan is not None:
+            plan = fixed_plan.expand_as(plan)
+        action = skill.act(state, phi, command, plan)
+        delta = functional_call(
+            skill.dynamics, dynamics_params, (torch.cat([state, phi, action], dim=-1),)
+        )
+        state = state + delta
+        window = torch.cat([window[:, 1:], state.unsqueeze(1)], dim=1)
+        share = skill.skill_norm.inverse(state)[:, load]
+        loaded.append(torch.sigmoid((share - threshold) / temperature))
+    return torch.stack(loaded, dim=1)
+
+
+def planned_contacts(
+    contact: torch.Tensor, remaining: torch.Tensor, steps: int, dt_star: float
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """What a plan says about the contacts after each step, ``(B, steps, P)`` each.
+
+    The contact stays as it is now until the planned change is due and is
+    flipped from then on. The plan speaks only up to that change, inclusive:
+    whatever follows -- a landing three steps after a planned lift-off -- is
+    the next plan's business, so those steps are not held to anything.
+    """
+    elapsed = torch.arange(1, steps + 1, device=remaining.device) * dt_star
+    elapsed = elapsed[None, :, None]
+    due = remaining.unsqueeze(1)
+    wanted = contact.unsqueeze(1) ^ (elapsed >= due - 1e-6)
+    spoken = elapsed < due + 0.5 * dt_star
+    return wanted, spoken
+
+
+# ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
 
@@ -240,6 +321,10 @@ def planned_losses(
     clock: EventClock,
     dt_star: float,
     feet: slice,
+    consistency_weight: float = 0.0,
+    load: slice | None = None,
+    threshold: float = 0.05,
+    temperature: float = 0.05,
 ) -> dict[str, torch.Tensor]:
     """:func:`~.memory.skill_losses` with a contact plan in the loop.
 
@@ -247,6 +332,12 @@ def planned_losses(
     rollout, so the schedule that followed is the teacher's. Only there does
     the planner learn, and only there does the policy read the schedule that
     followed; elsewhere it reads one sampled from the planner.
+
+    With ``consistency_weight``, the policy is also held to a plan drawn from
+    the planner -- on every rollout, whoever drove it -- through
+    :func:`follow_plan`: the contacts the latent dynamics predict under its
+    actions should change when the plan says. Imitation alone has almost no
+    use for the plan; this is what makes the plan an instruction.
     """
     samples = skill.samples
     span = samples + horizon - 1
@@ -289,13 +380,29 @@ def planned_losses(
     target = skill.skill_norm(streams.skill[acting + 1])
     dynamics = F.mse_loss(torch.stack(predicted, dim=1), target)
 
-    return {
-        "total": imitation + dynamics_weight * dynamics + plan_weight * (survival + landing),
+    total = imitation + dynamics_weight * dynamics + plan_weight * (survival + landing)
+    losses = {
         "imitation": imitation,
         "dynamics": dynamics,
         "survival": survival,
         "landing": landing,
     }
+    if consistency_weight > 0.0:
+        assert load is not None
+        with torch.no_grad():
+            uniform = torch.rand(logits.shape[0], logits.shape[2], device=logits.device)
+            remaining = planner.remaining(sample_bins(logits[:, 0], uniform))
+        loaded = follow_plan(
+            skill, windows[:, 0], command[:, 0], remaining, mean[:, 0].detach(), horizon,
+            clock, dt_star, load, threshold, temperature,
+        )  # fmt: skip
+        wanted, spoken = planned_contacts(events.contact[steps], remaining, horizon, dt_star)
+        weight = spoken.float()
+        mismatch = F.binary_cross_entropy(loaded, wanted.float(), reduction="none")
+        consistency = (mismatch * weight).sum() / weight.sum().clamp(min=1.0)
+        total = total + consistency_weight * consistency
+        losses["consistency"] = consistency
+    return {"total": total, **losses}
 
 
 # ---------------------------------------------------------------------------
@@ -452,12 +559,14 @@ __all__ = [
     "PlannedPolicy",
     "calibration",
     "cdf",
+    "follow_plan",
     "fit_landing_normaliser",
     "gaussian_nll",
     "marginal_hazard",
     "median_bin",
     "plan_features",
     "plan_targets",
+    "planned_contacts",
     "planned_losses",
     "sample_bins",
     "survival_nll",

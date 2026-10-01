@@ -16,6 +16,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from humanoid_transfer.transfer.latent.limbs import LimbDecoder, LimbLayout, g1_limbs  # noqa: E402
 from humanoid_transfer.transfer.latent.memory import (  # noqa: E402
     MemoryDims,
     MemoryPolicy,
@@ -285,3 +286,68 @@ def test_the_frozen_memory_policy_ignores_the_history() -> None:
         action = reference.skill.act(estimate, fixed.expand(2, -1), command)
         expected = decoder(action, obs[-1, :, 12:86])
     assert torch.allclose(outputs[-1], expected, atol=1e-5)
+
+
+# --- a decoder per limb ------------------------------------------------------
+
+G1_JOINTS = [
+    "left_hip_pitch_joint", "right_hip_pitch_joint", "torso_joint", "left_hip_roll_joint",
+    "right_hip_roll_joint", "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
+    "left_hip_yaw_joint", "right_hip_yaw_joint", "left_shoulder_roll_joint",
+    "right_shoulder_roll_joint", "left_knee_joint", "right_knee_joint",
+    "left_shoulder_yaw_joint", "right_shoulder_yaw_joint", "left_ankle_pitch_joint",
+    "right_ankle_pitch_joint", "left_elbow_pitch_joint", "right_elbow_pitch_joint",
+    "left_ankle_roll_joint", "right_ankle_roll_joint", "left_elbow_roll_joint",
+    "right_elbow_roll_joint", "left_five_joint", "left_three_joint", "left_zero_joint",
+    "right_five_joint", "right_three_joint", "right_zero_joint", "left_six_joint",
+    "left_four_joint", "left_one_joint", "right_six_joint", "right_four_joint",
+    "right_one_joint", "left_two_joint", "right_two_joint",
+]  # fmt: skip
+"""The teacher's joint order, as the captures record it."""
+
+
+def test_every_g1_joint_belongs_to_exactly_one_limb() -> None:
+    layout = g1_limbs(G1_JOINTS)
+    joints = sorted(j for limb in layout.limbs for j in limb.joints)
+    assert joints == list(range(37))
+    sizes = {limb.name: len(limb.joints) for limb in layout.limbs}
+    assert sizes == {"trunk": 1, "left_leg": 6, "right_leg": 6, "left_arm": 12, "right_arm": 12}
+    assert layout.action == 16
+
+
+def test_a_joint_in_two_limbs_or_in_none_is_refused() -> None:
+    with pytest.raises(ValueError, match="matches"):
+        LimbLayout.from_names(["a_joint"], {"x": ("a_.*", 1), "y": (".*joint", 1)}, 1)
+    with pytest.raises(ValueError, match="no limb"):
+        LimbLayout.from_names(["a_joint", "b_joint"], {"x": ("a_.*", 1)}, 1)
+
+
+def test_a_limbs_share_of_the_latent_action_moves_only_that_limb() -> None:
+    torch.manual_seed(0)
+    layout = g1_limbs(G1_JOINTS)
+    decoder = torch.jit.script(LimbDecoder(layout, hidden=16))
+    action, context = torch.randn(5, 16), torch.randn(5, 74)
+    left_leg = next(limb for limb in layout.limbs if limb.name == "left_leg")
+    share = layout.shared + 2  # after u_0 and the trunk's two
+    moved = action.clone()
+    moved[:, share : share + left_leg.action] += 1.0
+    with torch.no_grad():
+        change = (decoder(moved, context) - decoder(action, context)).abs().amax(dim=0)
+    changed = set(torch.nonzero(change > 1e-6).flatten().tolist())
+    assert changed and changed <= set(left_leg.joints)
+
+
+def test_a_limb_reads_only_its_own_joints() -> None:
+    torch.manual_seed(0)
+    layout = g1_limbs(G1_JOINTS)
+    decoder = LimbDecoder(layout, hidden=16)
+    action, context = torch.randn(5, 16), torch.randn(5, 74)
+    right_arm = next(limb for limb in layout.limbs if limb.name == "right_arm")
+    others = [j for j in range(37) if j not in right_arm.joints]
+    moved = context.clone()
+    moved[:, right_arm.joints] += 1.0
+    moved[:, [37 + j for j in right_arm.joints]] -= 1.0
+    with torch.no_grad():
+        change = (decoder(action, moved) - decoder(action, context)).abs()
+    assert float(change[:, others].max()) < 1e-6
+    assert float(change[:, list(right_arm.joints)].max()) > 1e-6

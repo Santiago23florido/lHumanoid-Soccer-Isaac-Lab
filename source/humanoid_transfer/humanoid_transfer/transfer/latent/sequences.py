@@ -93,19 +93,22 @@ def load_streams(paths: list[Path]) -> Streams:
         done = data["done"]
         steps, envs = done.shape
         terminated = data["terminated"] if "terminated" in data.files else np.zeros_like(done)
-        falling = falling_steps(terminated)
-        command = dimensionless_command(data["command"], units)
+
+        def columns(array: np.ndarray) -> np.ndarray:
+            """``(T, N, ...)`` to ``(N * T, ...)``: each environment's steps contiguous."""
+            return np.swapaxes(array, 0, 1).reshape(-1, *array.shape[2:])
+
+        parts["obs"].append(columns(data["obs"]))
+        parts["skill"].append(columns(data["skill_state"]))
+        parts["command"].append(columns(dimensionless_command(data["command"], units)))
+        parts["action"].append(columns(data["action_teacher"]))
+        parts["falling"].append(columns(falling_steps(terminated)))
+        parts["capture"].append(np.full(steps * envs, capture))
+        parts["env"].append(np.repeat(np.arange(envs), steps))
         for env in range(envs):
             start, end = _column_bounds(done[:, env])
-            parts["obs"].append(data["obs"][:, env])
-            parts["skill"].append(data["skill_state"][:, env])
-            parts["command"].append(command[:, env])
-            parts["action"].append(data["action_teacher"][:, env])
-            parts["falling"].append(falling[:, env])
             parts["start"].append(start + offset)
             parts["end"].append(end + offset)
-            parts["capture"].append(np.full(steps, capture))
-            parts["env"].append(np.full(steps, env))
             offset += steps
 
     def stack(key: str, dtype: torch.dtype) -> torch.Tensor:

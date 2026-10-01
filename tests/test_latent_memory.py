@@ -17,6 +17,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from humanoid_transfer.transfer.latent.memory import TimeGrid  # noqa: E402
+from humanoid_transfer.transfer.latent.probes import linear_probe, mlp_probe  # noqa: E402
 from humanoid_transfer.transfer.latent.sequences import load_streams  # noqa: E402
 
 G1_DT_STAR = 0.02 / np.sqrt(0.65457 / 9.81)
@@ -114,3 +115,23 @@ def test_captures_are_concatenated_without_sharing_an_episode(tmp_path: Path) ->
     np.testing.assert_array_equal(joined.capture.numpy(), [0] * 5 + [1] * 5)
     windows = joined.windows(torch.tensor([6]), length=3)
     np.testing.assert_array_equal(windows.numpy(), [[6, 6, 6]])
+
+
+# --- the probes ---------------------------------------------------------------
+
+
+def test_the_probes_find_what_is_there_and_the_mlp_finds_more() -> None:
+    generator = torch.Generator().manual_seed(0)
+    x = torch.randn(6000, 4, generator=generator)
+    targets = torch.stack([x @ torch.tensor([1.0, -2.0, 0.5, 0.0]), x[:, 0] ** 2], dim=1)
+    steps = torch.arange(6000)
+    train, test = steps[:5000], steps[5000:]
+
+    def features(idx: torch.Tensor) -> torch.Tensor:
+        return x[idx]
+
+    linear = linear_probe(features, targets, train, test)
+    nonlinear = mlp_probe(features, targets, train, test, epochs=40, hidden=64, batch=500)
+    assert linear[0] > 0.999
+    assert linear[1] < 0.05
+    assert nonlinear[1] > 0.9

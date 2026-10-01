@@ -21,10 +21,7 @@ from humanoid_transfer.common.scaling import (
 from humanoid_transfer.g1.assets.g1 import NOMINAL_BASE_HEIGHT, describe_source_robot
 
 ROOT = Path(__file__).resolve().parents[1]
-TASK_CFG = (
-    ROOT
-    / "source/humanoid_transfer/humanoid_transfer/g1/tasks/g1_walk/g1_walk_env_cfg.py"
-)
+TASK_CFG = ROOT / "source/humanoid_transfer/humanoid_transfer/g1/tasks/g1_walk/g1_walk_env_cfg.py"
 
 STUDENT_LEG = 0.2689
 TEACHER_LEG = 0.74
@@ -37,15 +34,11 @@ def test_matched_speeds_have_equal_froude_numbers() -> None:
     """The defining property. If this fails, the scaling is not Froude matching."""
     student = 0.15
     teacher = froude_matched_speed(student, STUDENT_LEG, TEACHER_LEG)
-    assert froude_number(student, STUDENT_LEG) == pytest.approx(
-        froude_number(teacher, TEACHER_LEG)
-    )
+    assert froude_number(student, STUDENT_LEG) == pytest.approx(froude_number(teacher, TEACHER_LEG))
 
 
 def test_the_teacher_speed_for_this_pair_is_about_a_quarter_metre_per_second() -> None:
-    assert froude_matched_speed(0.15, STUDENT_LEG, TEACHER_LEG) == pytest.approx(
-        0.2488, abs=1e-3
-    )
+    assert froude_matched_speed(0.15, STUDENT_LEG, TEACHER_LEG) == pytest.approx(0.2488, abs=1e-3)
 
 
 def test_scaling_goes_with_the_square_root_not_the_ratio() -> None:
@@ -138,12 +131,48 @@ def test_the_scaling_is_imported_rather_than_reimplemented() -> None:
     assert "def froude_matched_speed" not in source
 
 
-def test_the_student_target_stays_inside_its_weakest_capturable_direction() -> None:
-    """0.443 m/s backward is the binding limit, and a gait has to stay
-    recoverable between steps rather than only at the boundary."""
+def test_the_student_target_is_declared_a_free_parameter() -> None:
+    """Froude relates the two speeds; it does not choose either of them.
+
+    Something has to pick 0.15 m/s, and this asserts that the something is an
+    explicit choice about the experiment rather than a derivation.
+    """
     source = TASK_CFG.read_text(encoding="utf-8")
     assert "STUDENT_TARGET_SPEED = 0.15" in source
-    assert 0.15 < 0.443 / 2.0
+    assert "free parameter of the experiment" in source
+
+
+def test_the_student_target_is_not_justified_by_the_standing_envelope() -> None:
+    """The regression this file previously asserted the wrong way round.
+
+    An earlier version of both the docstring and this test derived 0.15 m/s from
+    the student's 0.443 m/s weakest zero-step capturable direction -- "stay near
+    a third of the bound". That bound is the *standing* task's definition: it
+    measures how close to rest a state is. Deriving the walking speed from it
+    puts a condition on how the student may walk, taken from a quantity that only
+    means something for a robot trying not to step, and it makes the margin a
+    learned gait keeps an assumption instead of the result it is.
+
+    Froude matching alone fixes the teacher's speed from the student's, which is
+    checked above. This asserts the old reasoning has not crept back.
+    """
+    source = TASK_CFG.read_text(encoding="utf-8")
+    assert "not** derived from the student's zero-step capturable envelope" in source
+    # The number may be mentioned while explaining why it is not the reason; it
+    # may not be the reason. These are the phrasings that made it the reason.
+    for resurrection in (
+        "Chosen well inside",
+        "has to leave margin against that bound",
+        "stay recoverable between steps, so the target",
+    ):
+        assert resurrection not in source
+
+
+def test_both_robots_end_up_at_the_same_froude_number() -> None:
+    """The only claim the speed pair actually makes, and it is checkable."""
+    teacher = froude_matched_speed(0.15, STUDENT_LEG, TEACHER_LEG)
+    assert froude_number(0.15, STUDENT_LEG) == pytest.approx(0.00853, abs=1e-5)
+    assert froude_number(teacher, TEACHER_LEG) == pytest.approx(0.00853, abs=1e-5)
 
 
 def test_the_play_variant_fixes_the_speed_for_comparable_rollouts() -> None:
@@ -155,9 +184,7 @@ def test_the_play_variant_fixes_the_speed_for_comparable_rollouts() -> None:
 # --- the scripts that make the track usable ----------------------------------
 
 
-@pytest.mark.parametrize(
-    "script", ["check_env.py", "capture_rollouts.py", "render_gait.py"]
-)
+@pytest.mark.parametrize("script", ["check_env.py", "capture_rollouts.py", "render_gait.py"])
 def test_teacher_scripts_exist(script: str) -> None:
     assert (ROOT / "g1" / "scripts" / script).is_file()
 

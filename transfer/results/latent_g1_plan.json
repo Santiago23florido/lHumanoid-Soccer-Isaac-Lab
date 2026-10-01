@@ -1,0 +1,397 @@
+{
+  "data": {
+    "training_captures": [
+      "g1/rollouts/teacher_dart.npz",
+      "g1/rollouts/dagger_1.npz",
+      "g1/rollouts/dagger_2.npz",
+      "g1/rollouts/dagger_3.npz",
+      "g1/rollouts/memory_dagger_1.npz"
+    ],
+    "drivers": [
+      "teacher",
+      "logs\\latent\\anchored\\policy.pt",
+      "logs\\latent\\anchored_dagger1\\policy.pt",
+      "logs\\latent\\anchored_dagger2\\policy.pt",
+      "logs\\latent\\memory\\policy.pt"
+    ],
+    "gait_capture": "g1/rollouts/teacher.npz",
+    "train_steps": 622742,
+    "train_steps_teacher_driven": 111776,
+    "validation_steps": 15968,
+    "validation_falling_steps": 50,
+    "validation_envs": 16,
+    "teacher_sha256": "fdcbe88c0e83257304ee09a8d454d9d68503cfa8211ddeaa23659e286d95dcb3",
+    "dt_star": 0.07742576129865368
+  },
+  "gate": {
+    "rule": "calibration_error <= 0.05 for each foot and plan_use >= 0.02, held-out walking, deployed path"
+  },
+  "variants": {
+    "plan": {
+      "config": {
+        "encoder_epochs": 150,
+        "skill_epochs": 150,
+        "batch_size": 4096,
+        "learning_rate": 0.001,
+        "horizon": 8,
+        "dynamics": 0.5,
+        "samples": 26,
+        "limbs": false,
+        "limb_hidden": 128,
+        "seed": 0,
+        "dims": {
+          "skill": 27,
+          "memory": 16,
+          "action": 16,
+          "command": 3,
+          "plan": 6,
+          "hidden": 256,
+          "channels": 64
+        },
+        "bins": 26,
+        "plan_weight": 1.0
+      },
+      "train_seconds": 1309.5,
+      "final_losses": {
+        "total": 0.903155151208242,
+        "imitation": 0.004471746589988468,
+        "dynamics": 0.1016326203942299,
+        "survival": 1.5912290287017818,
+        "landing": -0.7433619348208113
+      },
+      "gate": {
+        "calibration_error": [
+          0.019600680097937584,
+          0.005326706916093826
+        ],
+        "plan_use": 0.0036965608596801758,
+        "passes": false
+      },
+      "metrics": {
+        "validation": {
+          "samples": 15968,
+          "calibration_error": [
+            0.019307732582092285,
+            0.006181871984153986
+          ],
+          "hazard_nll": [
+            2.5174567699432373,
+            2.0522267818450928
+          ],
+          "population_hazard_nll": [
+            2.7171874046325684,
+            2.720870018005371
+          ],
+          "nll_gain_nats": [
+            0.19973063468933105,
+            0.6686432361602783
+          ],
+          "median_bin_r2": [
+            -0.2657257318496704,
+            -0.02788674831390381
+          ],
+          "landing_r2_median": [
+            0.29615217447280884,
+            0.4616358280181885
+          ],
+          "imitation_r2_followed_plan": 0.9153215885162354,
+          "imitation_r2_drawn_plan": 0.9149503707885742,
+          "imitation_r2_frozen_plan": 0.9121061563491821,
+          "plan_use": 0.0032154321670532227,
+          "imitation_r2_true_state": 0.9098114967346191,
+          "bypass_action_r2": 0.6733444333076477
+        },
+        "validation_walking": {
+          "samples": 15918,
+          "calibration_error": [
+            0.019600680097937584,
+            0.005326706916093826
+          ],
+          "hazard_nll": [
+            2.2633562088012695,
+            1.9754878282546997
+          ],
+          "population_hazard_nll": [
+            2.7153332233428955,
+            2.719717502593994
+          ],
+          "nll_gain_nats": [
+            0.451977014541626,
+            0.7442296743392944
+          ],
+          "median_bin_r2": [
+            -0.26851320266723633,
+            -0.0077037811279296875
+          ],
+          "landing_r2_median": [
+            0.28567367792129517,
+            0.42485517263412476
+          ],
+          "imitation_r2_followed_plan": 0.9150812029838562,
+          "imitation_r2_drawn_plan": 0.9144710302352905,
+          "imitation_r2_frozen_plan": 0.911384642124176,
+          "plan_use": 0.0036965608596801758,
+          "imitation_r2_true_state": 0.9092471599578857,
+          "bypass_action_r2": 0.6841700077056885
+        },
+        "gait": {
+          "samples": 19168,
+          "calibration_error": [
+            0.1390445977449417,
+            0.06924506276845932
+          ],
+          "hazard_nll": [
+            3.1564438343048096,
+            2.1350789070129395
+          ],
+          "population_hazard_nll": [
+            3.087120771408081,
+            3.338700294494629
+          ],
+          "nll_gain_nats": [
+            -0.06932306289672852,
+            1.2036213874816895
+          ],
+          "median_bin_r2": [
+            0.5259324908256531,
+            0.767498254776001
+          ],
+          "landing_r2_median": [
+            0.16205912828445435,
+            0.37975814938545227
+          ],
+          "imitation_r2_followed_plan": 0.9869663715362549,
+          "imitation_r2_drawn_plan": 0.9876235723495483,
+          "imitation_r2_frozen_plan": 0.9855295419692993,
+          "plan_use": 0.0014368295669555664,
+          "imitation_r2_true_state": 0.9871246218681335,
+          "bypass_action_r2": 0.7660447955131531
+        },
+        "runtime_validation_walking": {
+          "drawn": 0.9141300320625305,
+          "median": 0.9140725135803223
+        }
+      },
+      "leakage_validation_walking": {
+        "policy_input": {
+          "linear_r2_median": 0.4224300980567932,
+          "mlp_r2_median": 0.5353249311447144
+        },
+        "physical_history": {
+          "linear_r2_median": 0.5477137565612793,
+          "mlp_r2_median": 0.6400829553604126
+        },
+        "physical_state": {
+          "linear_r2_median": 0.34879177808761597,
+          "mlp_r2_median": 0.44788801670074463
+        },
+        "excess_linear": -0.12528365850448608,
+        "excess_mlp": -0.10475802421569824
+      },
+      "export_max_error": 0.0,
+      "policy_export": "logs/latent/plan/policy.pt",
+      "frozen_plan_export": "logs/latent/plan/policy_frozen_plan.pt",
+      "bypass_export": "logs/latent/plan/policy_bypass.pt"
+    },
+    "plan_limbs": {
+      "config": {
+        "encoder_epochs": 150,
+        "skill_epochs": 150,
+        "batch_size": 4096,
+        "learning_rate": 0.001,
+        "horizon": 8,
+        "dynamics": 0.5,
+        "samples": 26,
+        "limbs": true,
+        "limb_hidden": 128,
+        "seed": 0,
+        "dims": {
+          "skill": 27,
+          "memory": 16,
+          "action": 16,
+          "command": 3,
+          "plan": 6,
+          "hidden": 256,
+          "channels": 64
+        },
+        "bins": 26,
+        "plan_weight": 1.0
+      },
+      "train_seconds": 1632.4,
+      "final_losses": {
+        "total": 0.899381686846415,
+        "imitation": 0.00746287366375327,
+        "dynamics": 0.10175439710418385,
+        "survival": 1.5938386503855388,
+        "landing": -0.7527970365683235
+      },
+      "gate": {
+        "calibration_error": [
+          0.019159046933054924,
+          0.004873123951256275
+        ],
+        "plan_use": 0.01099008321762085,
+        "passes": false
+      },
+      "metrics": {
+        "validation": {
+          "samples": 15968,
+          "calibration_error": [
+            0.018839159980416298,
+            0.004638494458049536
+          ],
+          "hazard_nll": [
+            2.7043113708496094,
+            2.06354022026062
+          ],
+          "population_hazard_nll": [
+            2.7171874046325684,
+            2.720870018005371
+          ],
+          "nll_gain_nats": [
+            0.012876033782958984,
+            0.657329797744751
+          ],
+          "median_bin_r2": [
+            -0.25010573863983154,
+            -0.023344755172729492
+          ],
+          "landing_r2_median": [
+            -0.04298439621925354,
+            0.4919302463531494
+          ],
+          "imitation_r2_followed_plan": 0.8560581803321838,
+          "imitation_r2_drawn_plan": 0.8554689884185791,
+          "imitation_r2_frozen_plan": 0.8458495736122131,
+          "plan_use": 0.010208606719970703,
+          "imitation_r2_true_state": 0.8477711081504822,
+          "bypass_action_r2": 0.262298047542572
+        },
+        "validation_walking": {
+          "samples": 15918,
+          "calibration_error": [
+            0.019159046933054924,
+            0.004873123951256275
+          ],
+          "hazard_nll": [
+            2.2383992671966553,
+            2.0036559104919434
+          ],
+          "population_hazard_nll": [
+            2.7153332233428955,
+            2.719717502593994
+          ],
+          "nll_gain_nats": [
+            0.47693395614624023,
+            0.7160615921020508
+          ],
+          "median_bin_r2": [
+            -0.2526308298110962,
+            -0.023078203201293945
+          ],
+          "landing_r2_median": [
+            0.29093053936958313,
+            0.43482986092567444
+          ],
+          "imitation_r2_followed_plan": 0.8573499321937561,
+          "imitation_r2_drawn_plan": 0.8554531335830688,
+          "imitation_r2_frozen_plan": 0.8463598489761353,
+          "plan_use": 0.01099008321762085,
+          "imitation_r2_true_state": 0.8485398292541504,
+          "bypass_action_r2": 0.2736440896987915
+        },
+        "gait": {
+          "samples": 19168,
+          "calibration_error": [
+            0.1443193405866623,
+            0.051747966557741165
+          ],
+          "hazard_nll": [
+            3.4113025665283203,
+            1.8793896436691284
+          ],
+          "population_hazard_nll": [
+            3.087120771408081,
+            3.338700294494629
+          ],
+          "nll_gain_nats": [
+            -0.32418179512023926,
+            1.4593106508255005
+          ],
+          "median_bin_r2": [
+            0.5450832843780518,
+            0.8025956153869629
+          ],
+          "landing_r2_median": [
+            0.10964921116828918,
+            0.30387377738952637
+          ],
+          "imitation_r2_followed_plan": 0.9763068556785583,
+          "imitation_r2_drawn_plan": 0.9786376357078552,
+          "imitation_r2_frozen_plan": 0.9696493744850159,
+          "plan_use": 0.0066574811935424805,
+          "imitation_r2_true_state": 0.9740307331085205,
+          "bypass_action_r2": 0.26246321201324463
+        },
+        "runtime_validation_walking": {
+          "drawn": 0.8543077707290649,
+          "median": 0.8540791869163513
+        }
+      },
+      "leakage_validation_walking": {
+        "policy_input": {
+          "linear_r2_median": 0.451762318611145,
+          "mlp_r2_median": 0.5404701828956604
+        },
+        "physical_history": {
+          "linear_r2_median": 0.5477137565612793,
+          "mlp_r2_median": 0.6400829553604126
+        },
+        "physical_state": {
+          "linear_r2_median": 0.34879177808761597,
+          "mlp_r2_median": 0.44788801670074463
+        },
+        "excess_linear": -0.09595143795013428,
+        "excess_mlp": -0.0996127724647522
+      },
+      "export_max_error": 0.0,
+      "policy_export": "logs/latent/plan_limbs/policy.pt",
+      "frozen_plan_export": "logs/latent/plan_limbs/policy_frozen_plan.pt",
+      "bypass_export": "logs/latent/plan_limbs/policy_bypass.pt"
+    }
+  },
+  "encoder": {
+    "train_seconds": 84.9,
+    "final_anchor_loss": 0.03157919686701563,
+    "sigma_normalised": [
+      0.07924419641494751,
+      0.23971298336982727,
+      0.35675156116485596,
+      0.306012362241745,
+      0.19668200612068176,
+      0.15203839540481567,
+      0.04511504992842674,
+      0.3661235570907593,
+      0.4007222652435303,
+      0.32029420137405396,
+      0.1440911889076233,
+      0.12683320045471191,
+      0.05069129168987274,
+      0.17250607907772064,
+      0.15708504617214203,
+      0.04961303621530533,
+      0.20068475604057312,
+      0.332350492477417,
+      0.14182806015014648,
+      0.2130102515220642,
+      0.39024561643600464,
+      0.14622972905635834,
+      0.3383053243160248,
+      0.32383590936660767,
+      0.30750754475593567,
+      0.2919382154941559,
+      0.7179876565933228
+    ],
+    "sigma_median": 0.2130102515220642
+  }
+}

@@ -41,11 +41,15 @@ sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 from humanoid_transfer.common.similarity import UnitSystem  # noqa: E402
 from humanoid_transfer.transfer.latent.dataset import load_transitions  # noqa: E402
 from humanoid_transfer.transfer.latent.losses import LossWeights  # noqa: E402
-from humanoid_transfer.transfer.latent.model import G1_OBSERVATION  # noqa: E402
+from humanoid_transfer.transfer.latent.model import (  # noqa: E402
+    G1_OBSERVATION,
+    FrozenActionPolicy,
+)
 from humanoid_transfer.transfer.latent.train import (  # noqa: E402
     TrainConfig,
     config_dict,
     evaluate,
+    latents,
     train,
 )
 
@@ -63,9 +67,19 @@ def _display(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--data", type=Path, default=REPO_ROOT / "g1/rollouts/teacher_dart.npz")
+    parser.add_argument(
+        "--data",
+        type=Path,
+        action="append",
+        help="Training capture; repeat to aggregate (DAgger). The first one is split for "
+        "validation, the rest only train. Default: g1/rollouts/teacher_dart.npz.",
+    )
     parser.add_argument("--gait", type=Path, default=REPO_ROOT / "g1/rollouts/teacher.npz")
     parser.add_argument("--val-envs", type=int, default=16)
+    parser.add_argument(
+        "--variants", nargs="+", default=None, help="Subset of variants to train (default: all)."
+    )
+    parser.add_argument("--tag", default="", help="Suffix for the log directories of this run.")
     parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -75,18 +89,21 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    data = load_transitions(args.data)
+    paths = args.data or [REPO_ROOT / "g1/rollouts/teacher_dart.npz"]
+    data = load_transitions(paths[0])
     gait = load_transitions(args.gait)
     envs = int(data.env.max()) + 1
     held_out = data.env >= envs - args.val_envs
     train_set, val_set = data.subset(~held_out), data.subset(held_out)
+    for extra in paths[1:]:
+        train_set = train_set.concat(load_transitions(extra))
 
-    archive = np.load(args.data)
+    archive = np.load(paths[0])
     units = UnitSystem(float(archive["leg_length"]), float(archive["total_mass"]))
 
     report: dict = {
         "data": {
-            "training_capture": _display(args.data),
+            "training_captures": [_display(p) for p in paths],
             "gait_capture": _display(args.gait),
             "train_transitions": len(train_set),
             "validation_transitions": len(val_set),
@@ -104,6 +121,8 @@ def main() -> int:
         "anchored_open": replace(base, weights=LossWeights(kl=1e-3)),
         "free": replace(base, weights=LossWeights(anchored=False, anchor=0.0)),
     }
+    if args.variants:
+        variants = {k: v for k, v in variants.items() if k in args.variants}
     for name, config in variants.items():
         started = time.time()
         model, history = train(train_set, G1_OBSERVATION, config, device=args.device)
@@ -117,7 +136,7 @@ def main() -> int:
             )
         }
 
-        out = args.logdir / name
+        out = args.logdir / f"{name}{args.tag}"
         out.mkdir(parents=True, exist_ok=True)
         torch.save({"state": model.state_dict(), "config": config_dict(config)}, out / "model.pt")
         policy = model.policy(units.velocity, units.time).to("cpu").eval()
@@ -125,6 +144,9 @@ def main() -> int:
         traced = torch.jit.trace(policy, example)
         assert torch.allclose(traced(example), policy(example), atol=1e-5)
         traced.save(str(out / "policy.pt"))
+        mean_action = latents(model, train_set)["action"].mean(dim=0).cpu()
+        frozen = FrozenActionPolicy(model.decoder, model.layout, mean_action).to("cpu").eval()
+        torch.jit.trace(frozen, example).save(str(out / "policy_bypass.pt"))
 
         report["variants"][name] = {
             "config": config_dict(config),
@@ -132,6 +154,7 @@ def main() -> int:
             "final_losses": {k: v for k, v in history[-1].items() if k != "epoch"},
             "metrics": metrics,
             "policy_export": _display(out / "policy.pt"),
+            "bypass_export": _display(out / "policy_bypass.pt"),
         }
 
         val, walk = metrics["validation"], metrics["gait"]

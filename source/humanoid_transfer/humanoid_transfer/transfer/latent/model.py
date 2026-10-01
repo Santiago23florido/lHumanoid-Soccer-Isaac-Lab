@@ -236,8 +236,29 @@ class LatentPolicy(nn.Module):
         return self.decoder(self.latent_action(observation), observation[..., start:stop])
 
 
+class FrozenActionPolicy(nn.Module):
+    """The decoder with the latent action held at a constant: the bypass test, closed-loop.
+
+    If a body still walks like this, its decoder has learned the gait from its
+    own joints and the shared skill is decoration. Exported next to every
+    policy so the test runs in the same harness.
+    """
+
+    def __init__(self, decoder: BodyDecoder, layout: ObservationLayout, action: torch.Tensor):
+        super().__init__()
+        self.decoder = decoder
+        self.context_slice = layout.context
+        self.register_buffer("action", action.detach().reshape(1, -1).clone())
+
+    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+        start, stop = self.context_slice
+        context = observation[..., start:stop]
+        return self.decoder(self.action.expand(context.shape[0], -1), context)
+
+
 __all__ = [
     "BodyDecoder",
+    "FrozenActionPolicy",
     "BodyEncoder",
     "G1_OBSERVATION",
     "LatentDims",

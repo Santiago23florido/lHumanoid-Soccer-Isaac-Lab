@@ -317,6 +317,7 @@ def main() -> int:
         teacher_sha256=np.array(digest),
         teacher_is_pinned=np.bool_(teacher_is_pinned),
         seed=np.int64(args_cli.seed),
+        settle_steps=np.int64(args_cli.settle_steps),
         **arrays,
     )
 

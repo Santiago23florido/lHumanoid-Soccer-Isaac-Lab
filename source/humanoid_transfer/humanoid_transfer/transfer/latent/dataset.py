@@ -42,6 +42,15 @@ class Transitions:
     def subset(self, mask: torch.Tensor) -> Transitions:
         return Transitions(**{k: getattr(self, k)[mask] for k in self.__dataclass_fields__})
 
+    def concat(self, other: Transitions) -> Transitions:
+        """Both sets, with ``other``'s environments renumbered after this one's."""
+        offset = int(self.env.max()) + 1 if len(self) else 0
+        fields = {
+            k: torch.cat([getattr(self, k), getattr(other, k)]) for k in self.__dataclass_fields__
+        }
+        fields["env"] = torch.cat([self.env, other.env + offset])
+        return Transitions(**fields)
+
     def to(self, device: torch.device | str) -> Transitions:
         return Transitions(**{k: getattr(self, k).to(device) for k in self.__dataclass_fields__})
 

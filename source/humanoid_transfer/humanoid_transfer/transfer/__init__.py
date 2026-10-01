@@ -28,6 +28,9 @@ Contents:
     Whether the target's joints can reach a configuration at all, so the
     teacher signal can be ignored where it asks for the impossible. Also
     reports the zero-step margin a gait keeps, as a measurement.
+``embodiment``
+    Each body as its dimensionless groups, and the similarity defect between
+    two of them: which aspects of the student's body the skill will strain.
 ``distillation``
     The student objective.
 

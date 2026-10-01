@@ -108,7 +108,8 @@ parser.add_argument(
     type=Path,
     default=None,
     help="TorchScript policy that drives the robot instead of the teacher (DAgger). "
-    "The teacher still labels every step.",
+    "The teacher still labels every step. A driver with a reset(done) method (a memory) "
+    "is told which environments were reset after every step.",
 )
 parser.add_argument(
     "--raw-envs", type=int, default=4, help="Environments whose per-body state is kept raw."
@@ -223,10 +224,17 @@ def main() -> int:
             executed = executed + args_cli.action_noise * torch.randn_like(executed)
         return label, executed
 
+    def episodes_ended(done: torch.Tensor) -> None:
+        """A driver with a memory forgets the environments that were just reset."""
+        if driver is not None and hasattr(driver, "reset"):
+            with torch.inference_mode():
+                driver.reset(done)
+
     obs, _ = env.reset()
     for _ in range(args_cli.settle_steps):
         _, executed = act(obs["policy"])
-        obs, _, _, _, _ = env.step(executed)
+        obs, _, terminated, truncated, _ = env.step(executed)
+        episodes_ended(terminated | truncated)
 
     keys = (
         "obs", "action_teacher", "action_executed", "command", "done", "terminated",
@@ -286,6 +294,7 @@ def main() -> int:
         record["raw_ang_vel"].append(state["ang_vel"][:raw])
 
         obs, _, terminated, truncated, _ = env.step(executed)
+        episodes_ended(terminated | truncated)
         record["done"].append((terminated | truncated).cpu().numpy())
         record["terminated"].append(terminated.cpu().numpy())
 

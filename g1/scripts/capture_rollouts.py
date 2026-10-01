@@ -229,7 +229,8 @@ def main() -> int:
         obs, _, _, _, _ = env.step(executed)
 
     keys = (
-        "obs", "action_teacher", "action_executed", "command", "done", "skill_state",
+        "obs", "action_teacher", "action_executed", "command", "done", "terminated",
+        "skill_state",
         "joint_pos", "joint_vel", "com", "com_vel", "com_acc", "angular_momentum",
         "angular_momentum_spin", "foot_force", "foot_pos", "base_quat", "base_lin_vel",
         "raw_link_quat", "raw_com_pos", "raw_com_lin_vel", "raw_ang_vel",
@@ -286,9 +287,11 @@ def main() -> int:
 
         obs, _, terminated, truncated, _ = env.step(executed)
         record["done"].append((terminated | truncated).cpu().numpy())
+        record["terminated"].append(terminated.cpu().numpy())
 
     arrays = {
-        k: np.stack(v).astype(np.bool_ if k == "done" else np.float32) for k, v in record.items()
+        k: np.stack(v).astype(np.bool_ if k in ("done", "terminated") else np.float32)
+        for k, v in record.items()
     }
 
     args_cli.output.parent.mkdir(parents=True, exist_ok=True)
@@ -337,7 +340,10 @@ def main() -> int:
     print(f"  mean |v_xy|           : {speed:.3f} m/s")
     print(f"  mean foot load / mg   : {load.mean():.4f}   (1.0 if the forces are real)")
     print(f"  median |k_spin|/|k|   : {np.median(spin / np.maximum(total, 1e-9)):.3f}")
-    print(f"  episode ends          : {int(arrays['done'].sum())}")
+    print(
+        f"  episode ends          : {int(arrays['done'].sum())} "
+        f"({int(arrays['terminated'].sum())} terminated, the rest timed out)"
+    )
     print("=" * 78 + "\n")
 
     env.close()

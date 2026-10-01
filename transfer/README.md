@@ -112,9 +112,23 @@ without error for weeks.
 
 Code lives in `source/humanoid_transfer/humanoid_transfer/transfer/`.
 
+## What this starts from
+
+| | |
+| --- | --- |
+| Teacher | **Fixed.** `g1/policy/teacher_policy.pt`, hashed and pinned. Every comparison runs against this one gait, or it measures the teacher instead of the transfer. |
+| Student | **Its body only.** `nao/assets` and `common/` are shared; `nao/tasks/nao_stand` and `nao/controllers` are frozen out and enforced by a test. |
+
+The NAO's balance task is finished, kept and registered. It is not the starting
+point for a gait: its zero-step termination defines a problem whose objective is
+the opposite. The same criterion has leaked into the walking work twice — once as
+the imitation weight here, once as the justification for the teacher's command
+speed — and both times nothing raised. See
+[`../ARCHITECTURE.md`](../ARCHITECTURE.md#boundaries).
+
 ## Order of work
 
-1. **Teacher.** Train `G1Walk-Teacher-v0` to a stable gait. Unblocked.
+1. **Teacher.** Trained, verified walking, pinned. Done.
 2. **Rollout capture.** Record joint states, CoM, centroidal momentum, contacts.
 3. **Student task.** A NAO *walking* environment. Does not exist. It must be a
    new task rather than a variant of the balance one, whose zero-step

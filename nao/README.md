@@ -8,6 +8,20 @@ physical rather than algorithmic reasons.
 
 ![NAO in its nominal standing posture](img/nao_stand.png)
 
+> **Status: the body is the active part; the balance task is kept, not built on.**
+>
+> Everything under `assets/` — URDF, USD pipeline, kinematics, actuator model —
+> is what the walking work uses, because it describes the robot and would read
+> the same if the balance study had never happened.
+>
+> The balance task itself (`NaoStand-Direct-v0`, `controllers/`, `results/`, the
+> `baseline_*` and `task_balance` documents) is **finished and kept**: still
+> registered, still reproducible, still the measured result this track reports.
+> It is **not an input** to the NAO walking work, because its zero-step
+> termination *defines* a task whose objective is the opposite of a gait's. The
+> boundary is enforced by `tests/test_development_baseline.py` and explained in
+> [`../ARCHITECTURE.md`](../ARCHITECTURE.md#boundaries).
+
 ## What is here
 
 | Path | Contents |

@@ -30,7 +30,7 @@ produced here by running it.
 | Environment: rewards, observations, terminations, randomisation | `isaaclab_tasks…config.g1.flat_env_cfg:G1FlatEnvCfg` | Inherited; **one field changed** |
 | PPO hyperparameters | `…config.g1.agents.rsl_rl_ppo_cfg:G1FlatPPORunnerCfg` | No |
 | Command velocity range | — | **Ours. See §2.** |
-| Trained weights | — | **Ours. Produced by the run in §3.** |
+| Trained weights | — | **Ours. Produced by the run in §3, pinned in [`policy/`](policy/README.md).** |
 
 Nothing about making a 29-DOF humanoid walk is a contribution of this project.
 It is a solved problem with a public, validated implementation, and reproducing
@@ -77,10 +77,51 @@ student's gait stops being recoverable between steps.
 | **Student target speed** | **0.15 m/s** | Chosen — see below |
 | **Teacher command speed** | **0.249 m/s** | Computed from the above |
 
-Why 0.15 m/s for the student? Its weakest zero-step capturable direction is
-**0.443 m/s** (backward). A walking gait has to stay recoverable *between*
-steps, not merely at the boundary, so the target is set at about a third of that
-limit rather than approaching it.
+Why 0.15 m/s for the student? **Because it was chosen**, and that is the honest
+answer. Froude matching relates the two speeds; it picks neither. Once the
+student's target is fixed the teacher's follows, and that is the entire content
+of the relation.
+
+The dimensionless consequence is the number both robots share:
+
+```
+Fr = 0.15² / (9.81 · 0.2689) = 0.00853 = 0.2488² / (9.81 · 0.74)
+```
+
+Terrestrial animals walk across roughly Fr = 0.1 to 0.5. This is two orders of
+magnitude slower — a deliberately easy first experiment, not a limit read off
+the robot.
+
+### A justification that was withdrawn
+
+An earlier version of this section answered the same question differently: the
+NAO's weakest zero-step capturable direction is 0.443 m/s backward, a gait has
+to stay recoverable *between* steps, so set the target near a third of that
+bound.
+
+That is wrong in the same way the transfer package's first feasibility criterion
+was wrong, and it was still here after that one was fixed.
+
+The zero-step envelope is the **standing** task's definition. It measures how
+close to rest a state is — which is exactly what `nao_stand` poses, and why that
+task keeps its termination. Walking is the DCM diverging from the current
+support polygon, `ξ̇ = ω₀(ξ − p)`, with the next footstep moving `p`. Deriving
+the walking speed from how recoverable a motionless robot would be imports a
+standing criterion into a task whose objective is the opposite: it is a
+condition on *how* the student may walk, dressed as a fact about the robot.
+
+It also makes the finding circular. How much margin a learned gait keeps against
+that envelope is a **result** — `transfer.feasibility.standing_margin` reports
+it — so it cannot also be the reason the speed was picked.
+
+The number is unchanged, so the trained teacher is unaffected. Only the reason
+is, and the reason is what the next decision gets made from.
+
+**What would falsify 0.15 m/s:** a student that cannot walk at it with
+`λ_im = 0`. That is step 4 of [`../transfer/docs/plan.md`](../transfer/docs/plan.md),
+and if it fails the teacher has to be retrained — which is why the teacher is
+pinned and hashed rather than silently regenerated. See
+[`policy/README.md`](policy/README.md).
 
 ### What was actually changed
 
@@ -166,6 +207,41 @@ trade.
 Same algorithm, same shipped hyperparameters, healthy behaviour — because the
 task has a large return. That the G1 does this without any tuning is the
 confirmation the NAO diagnosis was missing.
+
+---
+
+## 3b. The weights are pinned, not regenerated
+
+`logs/` is gitignored, so for a while this document described a teacher that
+existed on one laptop. A fresh clone had no teacher and nothing said so.
+
+The export now lives in [`policy/`](policy/README.md) and is tracked — the only
+derived binary in the repository, against the rule that keeps the meshes, the
+USD and the rollouts out. The exception is narrow and the reason is specific:
+
+**the teacher is not reproducible.** Not merely expensive — 1 h 58 m of GPU time
+would be payable — but a rerun under a different seed is a *different gait*. The
+transfer study's comparisons are three signals × masked/unmasked × 3 seeds, all
+of them against this teacher. A teacher that drifts between them turns the study
+into a measurement of the teacher, silently, because a different `.pt` loads and
+runs and returns plausible numbers.
+
+| | |
+| --- | --- |
+| File | `policy/teacher_policy.pt` |
+| Format | TorchScript — loads with `torch` alone, no Isaac Lab, no Nucleus |
+| Size | 357 KB, 85 925 parameters |
+| Shape | 123 observations → 37 joint targets |
+| SHA-256 | `fdcbe88c…d95dcb3`, checked by `tests/test_teacher_policy.py` |
+
+The manifest beside it carries the seed, the iteration count, the command range
+and the measured gait, and the tests check it against both the bytes and the
+environment configuration in `source/` — so a stale teacher, a swapped teacher
+or a changed `STUDENT_TARGET_SPEED` fails loudly instead of quietly.
+
+The 37 outputs are every joint of the loaded articulation, hands included,
+because that is what Isaac Lab's shipped action term commands. Only the 23 body
+joints matter for a gait; see §5.
 
 ---
 

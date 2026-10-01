@@ -58,12 +58,30 @@ variable that was chosen, the learning curve, and how the gait was verified.
 Note that Isaac Lab ships **no pretrained weights** for this robot. It ships a
 recipe; the weights were produced by running it.
 
+The weights are **pinned in the repository**, in
+[`policy/`](policy/README.md) — 357 KB of TorchScript, hashed, with the seed,
+the command range and the measured gait beside them. They are the only derived
+binary this project tracks, because they are the only artifact it cannot
+regenerate: a rerun under a different seed is a different gait, and every
+transfer comparison is a comparison against *this* teacher.
+
+```python
+import torch
+
+policy = torch.jit.load("g1/policy/teacher_policy.pt", map_location="cpu")
+```
+
+No Isaac Lab, no Isaac Sim, no Nucleus access needed to load it.
+
 ## What is here
 
 | Path | Contents |
 | --- | --- |
+| `policy/` | **The pinned teacher**: weights, manifest, the configs the run dumped. Tracked. |
 | `docs/` | Teacher task documentation. |
 | `scripts/` | G1-specific entry points. |
+| `rollouts/` | Captured teacher behaviour. **Untracked** — regenerable from `policy/`. |
 
-Code lives in `source/humanoid_transfer/humanoid_transfer/g1/`. There are no
-assets: the model is Isaac Lab's.
+Code lives in `source/humanoid_transfer/humanoid_transfer/g1/`. The robot model
+is Isaac Lab's and is not vendored here; the trained policy is this project's
+and is.

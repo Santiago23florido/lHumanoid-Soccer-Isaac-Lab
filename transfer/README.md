@@ -103,6 +103,9 @@ number an assumption.
 | `feasibility.py` | Reachability done and tested. Torque feasibility not implemented. |
 | `scripts/check_reachability.py` | Done. Caught a sign error that affected 100% of samples. |
 | `distillation.py` | Configuration only. The loss terms need the student environment first. |
+| `embodiment.py` | Each body as dimensionless groups and the defect between them. |
+| `latent/` | The shared latent space, G1 side: anchored to the skill state, distilled, walks closed-loop. Not pinned: stride timing misses its criterion. |
+| `scripts/encode_skill.py`, `train_latent.py`, `evaluate_latent.py` | Certify the skill state, train the latent model, compare policies closed-loop. |
 | Student walking task | **Not started.** The critical path. |
 
 The losses are unwritten on purpose. Writing a reward term against an
@@ -125,6 +128,13 @@ the opposite. The same criterion has leaked into the walking work twice — once
 the imitation weight here, once as the justification for the teacher's command
 speed — and both times nothing raised. See
 [`../ARCHITECTURE.md`](../ARCHITECTURE.md#boundaries).
+
+## The shared skill space
+
+The centroidal signal, made exact: a 27-number state in each body's own units
+that every humanoid shares by construction, and a learned latent space
+anchored to it, with a per-body encoder and decoder around a skill every body
+shares. Full account and results: [`docs/skill_space.md`](docs/skill_space.md).
 
 ## Order of work
 

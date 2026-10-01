@@ -16,7 +16,7 @@ The name map is implemented and tested. The value map is deliberately not: a
 joint angle does not transfer as a number, and the three candidate treatments
 (direct copy, range-normalised, end-effector retargeted) are alternatives to be
 measured against each other rather than a decision to make in advance. See
-``docs/transfer.md``.
+``transfer/docs/plan.md``.
 """
 
 from __future__ import annotations

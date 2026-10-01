@@ -16,6 +16,7 @@ humanoid_transfer/
 ├── nao/         the constrained target embodiment
 ├── g1/          the capable source embodiment
 ├── transfer/    teaching one through the other
+│   └── latent/  the learned shared space (torch, never Isaac Lab)
 ├── soccer/      the long-horizon target, inactive
 └── tasks.py     registers every gym id
 ```
@@ -30,6 +31,13 @@ Anything true of legged robots in general: the linear inverted pendulum, the
 divergent component of motion, zero-step capturability. Expressed in terms of a
 centre-of-mass height, a support polygon and a point inside it — never in terms
 of a particular robot.
+
+It also holds the **skill state** the transfer is built on: `centroidal.py`
+aggregates any tree of rigid bodies into CoM and centroidal momentum,
+`similarity.py` turns a body's leg length, mass and gravity into a system of
+units, `skill_state.py` expresses a walking body's state in those units (27
+numbers that mean the same thing on any humanoid), and `gait.py` reads a
+gait's dimensionless signature off a sequence of them.
 
 Pure NumPy, no Isaac Lab. That constraint is what lets the tests check the
 theory directly rather than through a simulator, and it is the same reason the
@@ -59,10 +67,17 @@ transfer study most wants to vary.
 
 ### `transfer/` — the research
 
-Joint correspondence, feasibility masking and the student objective. Depends on
-`common/` for the theory and on neither robot's URDF: the correspondence is
-stated at the level of kinematic roles, and the student's envelope is passed in
-as geometry.
+Joint correspondence, feasibility masking, the dimensionless description of
+each body (`embodiment.py`) and the student objective. Depends on `common/` for
+the theory and on neither robot's URDF: the correspondence is stated at the
+level of kinematic roles, the student's envelope is passed in as geometry, and
+each body's physical facts are restated with their source named and a test that
+re-derives them.
+
+`transfer/latent/` is the learned shared space: a per-body encoder and decoder
+around a skill policy and latent dynamics every body shares, with part of the
+latent anchored to the skill state. See
+[`transfer/docs/skill_space.md`](transfer/docs/skill_space.md).
 
 See [`transfer.md`](transfer/docs/plan.md) for the plan and the open questions.
 
@@ -85,6 +100,13 @@ which is the whole reason it exists.
 robots meet. Where it needs a constant from the other side — the NAO's
 centre-of-mass height, the G1's leg length — it restates it with a comment
 naming the source, rather than reaching across.
+
+**Torch stops at `transfer/latent`.** `common/` and the rest of `transfer/`
+are NumPy-only, so the theory is checked without a GPU stack; the latent model
+uses torch but never Isaac Lab, so it trains and is tested on recorded
+rollouts. The simulator appears only in the scripts that capture those
+rollouts and run the result closed-loop. A test enforces both lines
+(`tests/test_import_boundaries.py`).
 
 **Tasks live with their robot.** `tasks.py` at the package root imports them so
 the gym ids register; it owns nothing.

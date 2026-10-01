@@ -273,12 +273,116 @@ Whether to pin DAgger 3 as the frozen skill for the NAO stage — accepting the
 timing gap as measured — or to work on timing first is an open decision, not
 something this stage settles.
 
+## 6. A memory without a back door
+
+The timing gap was attacked first. `z*` is instantaneous, and with a duty
+factor of 0.92 the present says little about where in the stride the body is,
+so the skill was given a memory. A memory is also the easiest way for a body
+to leak back into the shared space: a history of observations carries the
+G1's own joint trajectories, which no NAO encoder could reproduce. So the
+leak is ruled out by construction, not discouraged by a penalty
+(`transfer/latent/memory.py`):
+
+1. **The memory `Φ` is shared and reads only the history of `ẑ*`**, on a grid
+   in body time (`Δ* = 0.077 T`, 26 samples ≈ 2 `T`), never an observation.
+   `φ` is then a function of the physical trajectory, so it cannot carry
+   anything about the body that the trajectory does not. Each body resamples
+   its own history onto the grid: at 50 Hz the NAO steps 0.126 `T`, and a
+   window counted in control steps would mean 1.6 times more physical time.
+2. **The encoder learns only the anchor.** No imitation gradient reaches it,
+   so it has no reason to hide facts about the G1 in its errors — the route
+   the open `ζ` of §4 took.
+3. **The shared modules and the decoder train on the true `z*` plus noise**
+   of the encoder's measured held-out error, so `π` never learns to read the
+   G1 encoder's residuals. `T` is rolled out 8 steps.
+
+The run-time policy is a scripted module with a per-environment buffer that
+`capture_rollouts.py` resets at episode ends. The per-limb decoder of
+`transfer/latent/limbs.py` was trained as a second variant: `u` split into a
+part every head reads and one share per limb (trunk, legs, arms; still 16
+wide), each head seeing only its own joints.
+
+**The gate.** Before training, probes on held-out DART environments checked
+whether the restriction costs anything (`phase_probe.json`, rule fixed in
+advance: physical history ≥ observation history − 0.05). It passes:
+
+| MLP probe R² | `z*` now | `z*` history | observation history |
+| --- | ---: | ---: | ---: |
+| `z*` 8 steps ahead | 0.521 | 0.518 | 0.465 |
+| steps to each foot's next landing | 0.590 | 0.541 | 0.312 |
+
+It also says something the rule did not ask: **the history predicts no better
+than the present.** The teacher's next landing is about as foreseeable from
+now as from the last two strides — consistent with the broadband shuffle of
+§5.
+
+**Offline** (`latent_g1_memory.json`; DART plus the three DAgger captures,
+held-out walking):
+
+| | memory | memory, per limb |
+| --- | ---: | ---: |
+| imitation R², deployed path | 0.921 | 0.869 |
+| … with `u` frozen | 0.626 | 0.270 |
+| … with `φ` frozen | 0.833 | 0.703 |
+| joints from `π`'s input, MLP R² | 0.588 | 0.603 |
+| joints from the true `z*` history, MLP R² | 0.665 | 0.665 |
+
+The memory is used, and **nothing leaked past the physical history**: the
+skill policy's input knows less about the G1's joints than the true physical
+trajectory does. The single decoder still imitates at 0.63 with `u` frozen —
+it leans on the joints it sees — where the per-limb decoder drops to 0.27.
+
+**Closed loop** (`latent_g1_closed_loop_memory.json`; same harness and
+criteria as §5, DAgger rounds driven by each variant's own policy):
+
+| run | falls | speed (m/s) | stride (`L`) | period (`T`) | duty L / R | rhythm (`T`) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| teacher | 0 / 32 | 0.213 | 0.159 | 1.87 | 0.92 / 0.86 | 0.97 |
+| anchored, DAgger 3 (§5) | 0 / 32 | 0.213 | 0.186 | 2.16 | 0.93 / 0.85 | 0.85 |
+| memory | 46 / 78 | 0.327 | 0.194 | 1.44 | 0.87 / 0.77 | 1.41 |
+| memory, DAgger 1 | 0 / 32 | 0.223 | 0.113 | 1.26 | 0.90 / 0.81 | 1.05 |
+| memory, DAgger 2 | 4 / 36 | 0.206 | 0.116 | 1.39 | 0.90 / 0.83 | 1.38 |
+| per limb | 33 / 65 | 0.538 | 0.270 | 1.35 | 0.86 / 0.76 | 0.92 |
+| per limb, DAgger 1 | 1 / 33 | 0.241 | 0.117 | 1.21 | 0.90 / 0.79 | 1.07 |
+| per limb, DAgger 2 | 16 / 48 | 0.271 | 0.148 | 1.34 | 0.90 / 0.76 | 1.44 |
+| memory, DAgger 1, `φ` frozen | 130 / 162 | — | — | — | — | — |
+| per limb, DAgger 1, `φ` frozen | 125 / 157 | — | — | — | — | — |
+| memory, DAgger 1, `u` frozen | 256 / 288 | — | — | — | — | — |
+| per limb, DAgger 1, `u` frozen | 288 / 320 | — | — | — | — | — |
+
+What it says:
+
+1. **Training on noise is not the same as running on an encoder.** Before
+   DAgger both variants run too fast and fall: off the teacher's
+   distribution the encoder under-reads forward speed, the policy
+   accelerates, and the encoder falls further behind — a loop the
+   independent noise of training never showed it. One DAgger round removes
+   it; a second does not help and lets falls back in.
+2. **The memory carries balance, not only timing.** With `φ` frozen the
+   round-1 models fall in 130 and 125 episodes; with `u` frozen they collapse.
+3. **The timing gap changed sign, it did not close.** The memoryless model
+   took strides 16 % too long; the memory model takes them about 29 % too
+   short, at every contact threshold. The threshold-free rhythm of DAgger 1 is
+   within 10 % of the teacher's (1.05 and 1.07 against 0.97), but it is the
+   supplementary measure, and on the pre-registered criteria **no variant
+   passes**.
+
+Together with the gate, this points at the teacher rather than the student:
+a gait whose next landing the past does not predict gives a memory little to
+learn, and the stride length the student settles on moves with whatever
+else changes. Whether to pin a policy with the gap as measured, or to replace
+the stride criterion with the threshold-free rhythm (a change to criteria
+fixed in advance, and to be justified as such), remains the open decision of
+§5.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates
   and the NAO's place in them, both NumPy and tested.
 - The G1 side of the latent space and the shared `π` and `T` — walking
-  closed-loop, not yet pinned (stride timing, §5).
+  closed-loop, not yet pinned (stride timing, §5) — and a memory variant
+  whose shared part provably reads only the physical history (§6), with a
+  grid in body time a second body resamples onto.
 - For the NAO: an encoder trained against its own analytic `z*`, a decoder
   trained by RL with `π` and `T` frozen and the anchored dynamics term holding
   `u` to its physical meaning, and the defect table saying where the frozen

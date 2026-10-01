@@ -196,7 +196,10 @@ a strategy for a different one.**
    anchored to that state so the NAO's encoder can be aligned from its own
    simulation. Closed-loop the anchored policy walks without falling at the
    teacher's speed, but no run reproduces the stride timing to the 10 % the
-   criteria ask, so it is not pinned yet. See [`skill_space.md`](skill_space.md).
+   criteria ask, so it is not pinned yet. A shared memory that reads only the
+   physical history (so the body cannot leak in through it) walks too after
+   one DAgger round, but flips the stride error from 16 % too long to 29 %
+   too short. See [`skill_space.md`](skill_space.md) §5–6.
 3. **Student task.** A NAO walking environment. This does not exist yet and is
    the largest single piece of work. It must be built as a new task, not as a
    variant of `nao_stand`: that task terminates on a step, which defines it and

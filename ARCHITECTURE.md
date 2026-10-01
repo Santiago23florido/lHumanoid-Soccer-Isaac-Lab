@@ -76,7 +76,9 @@ re-derives them.
 
 `transfer/latent/` is the learned shared space: a per-body encoder and decoder
 around a skill policy and latent dynamics every body shares, with part of the
-latent anchored to the skill state. See
+latent anchored to the skill state; a shared memory over the history of that
+state alone, on a grid in body time (`memory.py`); a decoder split by limb
+(`limbs.py`). See
 [`transfer/docs/skill_space.md`](transfer/docs/skill_space.md).
 
 See [`transfer.md`](transfer/docs/plan.md) for the plan and the open questions.

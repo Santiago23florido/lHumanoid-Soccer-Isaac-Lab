@@ -3,10 +3,16 @@
 #
 #   transfer/scripts/close_loop_contract.sh <run dir> <checkpoint> <contract> <tag>
 #
-# Exports the actor, captures 32 environments x 900 steps at the teacher's play
-# command twice -- the contract fed by the true state, and by the body's encoder
-# (the deployed path) -- and applies the pre-registered gates with
-# evaluate_contract.py, writing transfer/results/contract_g1_closed_loop_<tag>.json.
+# Exports the actor and captures 32 environments x 900 steps at the teacher's
+# play command three times:
+#
+#   _encoder  the deployed path: the generator reads the body's history, as the
+#             body's encoder estimates it (ancestral sampling of the task);
+#   _truth    the same, from the true state: separates the tracker from the estimate;
+#   _auto     the generator reading its own committed plans, as in training.
+#
+# The pre-registered gates are applied by evaluate_contract.py, which writes
+# transfer/results/contract_g1_closed_loop_<tag>.json.
 set -euo pipefail
 
 run="$1"
@@ -25,13 +31,18 @@ capture() {
   "$python" -u g1/scripts/capture_rollouts.py --headless --task-id G1Track-Play-v0 \
     --driver-policy "$policy" --num-envs 32 --steps 900 --settle-steps 100 "$@"
 }
-capture --contract-from-truth --output "g1/rollouts/closed_loop_track_${tag}_truth.npz" \
+capture --reference physical --output "g1/rollouts/closed_loop_track_${tag}_encoder.npz" \
+  > "logs/contract/capture_${tag}_encoder.log" 2>&1
+capture --reference physical --contract-from-truth \
+  --output "g1/rollouts/closed_loop_track_${tag}_truth.npz" \
   > "logs/contract/capture_${tag}_truth.log" 2>&1
-capture --output "g1/rollouts/closed_loop_track_${tag}.npz" \
-  > "logs/contract/capture_${tag}.log" 2>&1
+capture --reference autonomous --contract-from-truth \
+  --output "g1/rollouts/closed_loop_track_${tag}_auto.npz" \
+  > "logs/contract/capture_${tag}_auto.log" 2>&1
 
 "$python" transfer/scripts/evaluate_contract.py \
   --run teacher=g1/rollouts/closed_loop_teacher.npz \
+  --run "track_${tag}_encoder=g1/rollouts/closed_loop_track_${tag}_encoder.npz" \
   --run "track_${tag}_truth=g1/rollouts/closed_loop_track_${tag}_truth.npz" \
-  --run "track_${tag}_encoder=g1/rollouts/closed_loop_track_${tag}.npz" \
+  --run "track_${tag}_auto=g1/rollouts/closed_loop_track_${tag}_auto.npz" \
   --output "transfer/results/contract_g1_closed_loop_${tag}.json"

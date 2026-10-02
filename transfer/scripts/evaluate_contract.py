@@ -15,6 +15,11 @@ was held to, from ``evaluate_latent.py``: speed at least 0.90 of the
 teacher's, fall rate at most 2 points above it, and stride length, stride
 period and both duty factors within 10 %.
 
+**Where a miss comes from** (captures that record the plan). The plans' own
+due states, stitched in time, are the motion the body was asked for: its gait
+against the teacher's is the generator's share of a miss, the body's gait
+against it the tracker's. The error is also given per field of ``z*``.
+
 Usage::
 
     python transfer/scripts/evaluate_contract.py --run teacher=g1/rollouts/closed_loop_teacher.npz \
@@ -35,6 +40,9 @@ sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from evaluate_latent import CRITERIA, SETTLE_STEPS, summarise, verdict  # noqa: E402
+from humanoid_transfer.common.gait import gait_signature  # noqa: E402
+from humanoid_transfer.common.similarity import UnitSystem  # noqa: E402
+from humanoid_transfer.common.skill_state import SKILL_LAYOUT  # noqa: E402
 
 USE_RATIO_MAX = 0.5
 
@@ -64,6 +72,36 @@ def contract_use(path: Path) -> dict | None:
     }
 
 
+def asked(path: Path) -> dict | None:
+    """The motion the plans asked for, and the error per field of ``z*``."""
+    data = np.load(path)
+    if "contract_due" not in data.files:
+        return None
+    units = UnitSystem(float(data["leg_length"]), float(data["total_mass"]))
+    done = data["done"]
+    # The due state of step t is the target of the state recorded at t + 1.
+    due = data["contract_due"][:-1].astype(float)
+    after = done[:-1]
+    # A reset's first step holds no plan: cut the stream there, as an episode end.
+    cut = after.copy()
+    cut[:-1] |= done[1:-1]
+    dt_star = float(data["control_dt"]) / units.time
+    signature = gait_signature(due, cut, dt_star).as_dict()
+    forward = SKILL_LAYOUT.unpack(due)["com_velocity"][..., 0] * units.velocity
+    first = np.zeros_like(done)
+    first[1:] = done[:-1]
+    fields = data["contract_fields"]
+    valid = ~first & (fields.sum(-1) > 0)
+    names = [f.name for f in SKILL_LAYOUT.fields] + ["progress"]
+    return {
+        "forward_speed": float(forward[SETTLE_STEPS:].mean()),
+        "signature": signature,
+        "median_error_by_field": {
+            n: float(np.median(fields[..., i][valid])) for i, n in enumerate(names)
+        },
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--run", action="append", required=True, help="name=path/to/capture.npz")
@@ -77,12 +115,21 @@ def main() -> int:
         use = contract_use(REPO_ROOT / path)
         if use is not None:
             runs[name]["contract_use"] = use
+        plan = asked(REPO_ROOT / path)
+        if plan is not None:
+            runs[name]["asked"] = plan
     if "teacher" not in runs:
         print("a run named 'teacher' is needed as the reference")
         return 2
     for name, run in runs.items():
         if name != "teacher":
             run["verdict"] = verdict(run, runs["teacher"])
+        if "asked" in run:
+            plan = run["asked"]
+            plan["generator_share"] = verdict(
+                {**run, "forward_speed": plan["forward_speed"], "signature": plan["signature"]},
+                runs["teacher"],
+            )["signature_deviation"]
 
     report = {
         "criteria": CRITERIA,
@@ -111,6 +158,16 @@ def main() -> int:
             u = run["contract_use"]
             line += f"  use {u['ratio']:.3f} ({'PASS' if u['passes'] else 'fail'})"
         print(line)
+        if "asked" in run:
+            a = run["asked"]
+            sig = a["signature"]
+            print(
+                f"{'  asked by the plans':<22} speed {a['forward_speed']:.3f}  "
+                f"stride {sig['stride_length']:.3f}  period {sig['stride_period']:.3f}  "
+                f"duty {np.round(sig['duty_factor'], 3)}"
+            )
+            fields = {k: round(v, 2) for k, v in a["median_error_by_field"].items()}
+            print(f"{'  error by field':<22} {fields}")
     print(f"written {args.output}")
     return 0
 

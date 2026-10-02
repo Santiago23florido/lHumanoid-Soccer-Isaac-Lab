@@ -134,6 +134,13 @@ parser.add_argument(
     default=None,
     help="On a contract task, the share of resets started inside the task's demonstrations.",
 )
+parser.add_argument(
+    "--reference",
+    choices=("autonomous", "physical"),
+    default=None,
+    help="On a contract task, what the generator reads (the task default otherwise): its own "
+    "committed plans, or the body's history -- the ancestral sampling a deployment runs.",
+)
 parser.add_argument("--num-envs", type=int, default=32, help="Parallel rollouts.")
 parser.add_argument("--steps", type=int, default=600, help="Control steps to record.")
 parser.add_argument(
@@ -208,6 +215,8 @@ def main() -> int:
         cfg.commands.base_velocity.start_fraction = args_cli.start_fraction
     if args_cli.contract_from_truth:
         cfg.commands.base_velocity.use_encoder = False
+    if args_cli.reference is not None:
+        cfg.commands.base_velocity.autonomous = args_cli.reference == "autonomous"
     if args_cli.command is not None:
         command = cfg.commands.base_velocity
         vx, vy, wz = args_cli.command
@@ -314,6 +323,8 @@ def main() -> int:
             "contract_error_other",
             "contract_error_state",
             "contract_age",
+            "contract_due",
+            "contract_fields",
         )
     record: dict[str, list] = {k: [] for k in keys}
 
@@ -367,9 +378,14 @@ def main() -> int:
         record["raw_com_lin_vel"].append(state["com_lin_vel"][:raw])
         record["raw_ang_vel"].append(state["ang_vel"][:raw])
 
+        if contract is not None:
+            # The plan's z* for the state this step reaches (skill_state one row on).
+            due = contract.generator.skill_norm.inverse(contract.due())
+            record["contract_due"].append(due.cpu().numpy())
         obs, _, terminated, truncated, _ = env.step(executed)
         episodes_ended(terminated | truncated)
         if contract is not None:
+            record["contract_fields"].append(contract.field_error.cpu().numpy())
             record["contract_error"].append(contract.last_error.cpu().numpy())
             record["contract_error_other"].append(contract.last_error_other.cpu().numpy())
             record["contract_error_state"].append(contract.last_error_state.cpu().numpy())

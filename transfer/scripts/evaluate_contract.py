@@ -112,6 +112,9 @@ def main() -> int:
     for item in args.run:
         name, _, path = item.partition("=")
         runs[name] = summarise(REPO_ROOT / path)
+        capture = np.load(REPO_ROOT / path)
+        units = UnitSystem(float(capture["leg_length"]), float(capture["total_mass"]))
+        runs[name]["velocity_unit"] = units.velocity
         use = contract_use(REPO_ROOT / path)
         if use is not None:
             runs[name]["contract_use"] = use
@@ -121,15 +124,23 @@ def main() -> int:
     if "teacher" not in runs:
         print("a run named 'teacher' is needed as the reference")
         return 2
+
+    # Speeds compare in V = sqrt(g L), the unit every body shares; on one body the
+    # ratio is the same as in m/s.
+    def in_v(run: dict) -> dict:
+        speed = run["forward_speed"]
+        return {**run, "forward_speed": None if speed is None else speed / run["velocity_unit"]}
+
     for name, run in runs.items():
         if name != "teacher":
-            run["verdict"] = verdict(run, runs["teacher"])
+            run["verdict"] = verdict(in_v(run), in_v(runs["teacher"]))
         if "asked" in run:
             plan = run["asked"]
-            plan["generator_share"] = verdict(
-                {**run, "forward_speed": plan["forward_speed"], "signature": plan["signature"]},
-                runs["teacher"],
-            )["signature_deviation"]
+            asked_run = {**run, "forward_speed": plan["forward_speed"]}
+            asked_run["signature"] = plan["signature"]
+            plan["generator_share"] = verdict(in_v(asked_run), in_v(runs["teacher"]))[
+                "signature_deviation"
+            ]
 
     report = {
         "criteria": CRITERIA,

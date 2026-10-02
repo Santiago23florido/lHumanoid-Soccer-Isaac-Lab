@@ -200,7 +200,23 @@ a strategy for a different one.**
    physical history (so the body cannot leak in through it) walks too after
    one DAgger round, but flips the stride error from 16 % too long to 29 %
    too short. See [`skill_space.md`](skill_space.md) §5–6.
-3. **Student task.** A NAO walking environment. This does not exist yet and is
+2c. **The contract.** **G1 round trip walks; gate C fails on stride; NAO
+   training.** The learned action code was replaced by a physical interface:
+   the next values of `z*`.
+   - **Per task:** a generator, the walk's and the published
+     `Isaac-Velocity-Flat-G1-v0` policy's.
+   - **Per body:** a tracker trained by RL. It never sees the task and has
+     the reference's path in view.
+   - **G1 status:** it walks the round trip at the teacher's speed, with no
+     falls on any path, and follows its plans (use gate). Stride is +20–30 %
+     because the left foot drags.
+   - **The published task does not transfer zero-shot** to a tracker
+     trained on the walk alone, not even on the G1: a coverage limit.
+   - **Open decision:** whether trackers train on every available skill.
+   See [`skill_space.md`](skill_space.md) §7.
+3. **Student task.** `NaoTrack-v0`: the NAO following the walk's contract,
+   training by RL; `transfer/scripts/nao_contract.sh` evaluates it against the
+   G1's policies. The paragraph below predates it. A NAO walking environment. This did not exist and was
    the largest single piece of work. It must be built as a new task, not as a
    variant of `nao_stand`: that task terminates on a step, which defines it and
    is exactly wrong here. The student's objective is open — track the commanded
@@ -233,9 +249,13 @@ that, and if the answer is no, the comparison in step 5 has no content and the
 | `transfer/distillation.py` | Configuration only. The loss terms need the student environment first. |
 | `common/skill_state.py`, `centroidal.py`, `similarity.py`, `gait.py` | Done, tested. The skill state in body units, its invariances, the gait signature. |
 | `transfer/embodiment.py` | Done, tested. Each body as dimensionless groups; the similarity defect. |
-| `transfer/latent/` | G1 side: anchored shared latent space, distilled (DART + 3 DAgger rounds) and run closed-loop. Walks; stride timing off by 12–20 %; not pinned. NAO side is the next stage. |
+| `transfer/latent/` | G1 side: anchored shared latent space, distilled (DART + 3 DAgger rounds) and run closed-loop. Walks; stride timing off by 12–20 %; not pinned. Superseded by the contract (below). |
+| `transfer/latent/contract.py`, `skill_torch.py` | Done. The task side of the contract: a flow-matching generator of the next `z*`, trained offline on a teacher's states, DAgger rounds on closed-loop states; `z*` on the GPU. |
+| `transfer/tasks/tracking/` | Done. The body side: references, plan view and path, joint-likelihood reward. |
+| `g1/tasks/g1_track/`, `nao/tasks/nao_track/` | G1: round 11 walks the round trip, gate C fails on stride. NAO: training. |
+| `transfer/scripts/*contract*.sh`, `capture_contract.py`, `train_body_encoder.py`, `body_encoder.py`, `widen_inputs.py` | Done. Closed loop, DAgger, new task, NAO evaluation; encoders per body; network widening. |
 | `g1/body/body_card.json` | Measured from the simulator by `g1/scripts/measure_body.py`. |
-| Student walking task | **Not started.** The critical path. |
+| Student walking task | `NaoTrack-v0` (the contract tracker); training. |
 
 The distillation losses are unwritten on purpose. Writing a reward term against
 an environment that does not exist is how the standing task acquired a

@@ -157,3 +157,47 @@ def test_a_saved_contract_samples_the_same_plans(tmp_path, kind: str) -> None:
     assert torch.equal(loaded.sigma, sigma) and loaded.meta["name"] == "test"
     assert torch.equal(loaded.generator.tolerance, generator.tolerance)
     assert loaded.encoder is None
+
+
+def test_a_plans_integrals_are_its_distance_and_turn() -> None:
+    from humanoid_transfer.transfer.latent.contract import plan_integrals
+
+    plan = torch.zeros(13, 27)
+    plan[:, 1] = 0.1  # forward, in V
+    integrals = plan_integrals(plan, step=0.08)
+    assert torch.allclose(integrals[:, 0], 0.1 * 0.08 * torch.arange(1, 14))
+    assert torch.allclose(integrals[:, 1:], torch.zeros(13, 2))
+
+    # Turning on the spot at a constant rate: no displacement, a linear turn.
+    plan = torch.zeros(10, 27)
+    plan[:, 9] = 0.5  # yaw rate, in 1/T
+    integrals = plan_integrals(plan, step=0.1)
+    assert torch.allclose(integrals[:, 2], 0.05 * torch.arange(1, 11))
+    assert torch.allclose(integrals[:, :2], torch.zeros(10, 2))
+
+    # Walking while turning a quarter circle bends the path to the left.
+    plan = torch.zeros(100, 27)
+    plan[:, 1], plan[:, 9] = 1.0, torch.pi / 2
+    end = plan_integrals(plan, step=0.01)[-1]
+    assert end[2] == pytest.approx(torch.pi / 2)
+    assert float(end[0]) == pytest.approx(2 / torch.pi, abs=0.01)
+    assert float(end[1]) == pytest.approx(2 / torch.pi, abs=0.01)
+
+
+def test_a_warped_generator_never_asks_for_a_negative_load() -> None:
+    torch.manual_seed(0)
+    generator = ContractGenerator(replace(SMALL, warp_loads=True), CLOCK)
+    skill = torch.rand(500, 27)
+    skill[:, LOAD] = torch.where(torch.rand(500, 2) < 0.2, 0.0, torch.rand(500, 2))
+    generator.skill_norm.fit(skill)
+    generator.fit_warp(skill)
+    z = generator.skill_norm(skill)
+    assert torch.allclose(generator.unwarp(generator.warp(z)), z, atol=1e-5)
+    # Whatever the flow produces, a plan's loads map back to zero or more.
+    window = generator.skill_norm(skill[:13])[None].expand(64, -1, -1)
+    with torch.no_grad():
+        plan = generator.sample(
+            window, torch.zeros(64, 3), 5 * torch.randn(64, generator.noise_size)
+        )
+    loads = generator.skill_norm.inverse(plan)[..., LOAD]
+    assert float(loads.min()) >= -1e-5

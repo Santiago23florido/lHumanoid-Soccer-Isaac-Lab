@@ -18,10 +18,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
 import torch
 
+from ...common.gait import dominant_rhythm, gait_signature
 from ...common.skill_state import DEFAULT_CONTACT_THRESHOLD, SKILL_LAYOUT
-from .contract import ContractClock, ContractDims, ContractGenerator, contract_loss, gaussian_kl
+from .contract import (
+    ContractClock,
+    ContractDims,
+    ContractGenerator,
+    contract_loss,
+    gaussian_kl,
+    plan_integrals,
+)
 from .events import ContactEvents
 from .model import Normaliser
 from .sequences import Streams
@@ -73,8 +82,10 @@ def new_generator(
     else:
         generator.skill_norm.load_state_dict(skill_norm.state_dict())
     generator.command_norm.fit(streams.command[steps])
-    residual = futures(generator, streams, steps) - generator.skill_norm(streams.skill[steps, None])
-    generator.residual_norm.fit(residual.flatten(1))
+    generator.fit_warp(streams.skill[steps])
+    future = generator.warp(futures(generator, streams, steps))
+    now = generator.warp(generator.skill_norm(streams.skill[steps, None]))
+    generator.residual_norm.fit((future - now).flatten(1))
     return generator
 
 
@@ -142,7 +153,9 @@ def fit_tolerance(
     sample and dimension, averaged over held-out states: a body that lands on
     another plausible future instead of the drawn one is off by about this
     much. The encoder's error is the floor -- a plan cannot be checked more
-    finely than the state can be estimated.
+    finely than the state can be estimated. The same spread of the plans'
+    integrals (:func:`~.contract.plan_integrals`) goes to
+    ``generator.integral_tolerance``, floored at a thousandth of a leg length.
     """
     torch.manual_seed(seed)
     chosen = steps[torch.randperm(len(steps), device=steps.device)[:limit]]
@@ -156,6 +169,9 @@ def fit_tolerance(
         variance = variance + torch.exp(2 * generator.log_scale)
     tolerance = torch.sqrt(variance + sigma**2)
     generator.tolerance.copy_(tolerance)
+    integrals = plan_integrals(generator.skill_norm.inverse(plans), float(generator.grid_step))
+    floor = 1e-3
+    generator.integral_tolerance.copy_(torch.sqrt(integrals.var(dim=1).mean(dim=0) + floor**2))
     return tolerance
 
 
@@ -283,8 +299,92 @@ def evaluate_generator(
     }
 
 
+def _segments(contact: np.ndarray) -> dict[str, np.ndarray]:
+    """Lengths of complete stance and swing segments, ``contact`` ``(T, N, P)``."""
+    out: dict[str, list[int]] = {"stance": [], "swing": []}
+    for n in range(contact.shape[1]):
+        for p in range(contact.shape[2]):
+            x = contact[:, n, p].astype(int)
+            bounds = np.concatenate([[0], np.flatnonzero(np.diff(x)) + 1, [len(x)]])
+            for a, b in zip(bounds[1:-2], bounds[2:-1], strict=True):
+                out["stance" if x[a] else "swing"].append(int(b - a))
+    return {k: np.array(v) for k, v in out.items()}
+
+
+def _describe(contact: np.ndarray) -> dict:
+    segments = _segments(contact)
+    return {
+        k: {
+            "count": int(len(v)),
+            "median": float(np.median(v)) if len(v) else None,
+            "mean": float(v.mean()) if len(v) else None,
+            "share_one_step": float(np.mean(v == 1)) if len(v) else None,
+        }
+        for k, v in segments.items()
+    }
+
+
+@torch.no_grad()
+def chained_gait(
+    generator: ContractGenerator,
+    start: torch.Tensor,
+    command: torch.Tensor,
+    sigma: torch.Tensor,
+    steps: int,
+    commit: int,
+    dt_star: float,
+    seed: int = 0,
+    threshold: float = DEFAULT_CONTACT_THRESHOLD,
+) -> dict:
+    """The gait of the generator run on its own plans: what a perfect tracker would walk.
+
+    From ``start`` -- ``(N, history, skill)`` normalised windows of real ``z*`` -- a
+    plan is drawn, its first ``commit`` samples appended to the history (with the
+    training noise ``sigma``, which is what the generator reads in a closed loop),
+    and so on for ``steps``. Each plan is calibrated on its own; this asks whether
+    their chain keeps the teacher's gait, which no single plan can show.
+    """
+    torch.manual_seed(seed)
+    clean, out = start, []
+    while len(out) * commit < steps:
+        window = clean + sigma * torch.randn_like(clean)
+        noise = torch.randn(len(window), generator.noise_size, device=window.device)
+        chunk = generator.sample(window, command, noise)[:, :commit]
+        out.append(chunk)
+        clean = torch.cat([clean[:, commit:], chunk], dim=1)
+    z = generator.skill_norm.inverse(torch.cat(out, dim=1)[:, :steps]).transpose(0, 1)
+    z = z.cpu().numpy().astype(float)
+    finite = np.isfinite(z).all(axis=(0, 2)) & (np.abs(z).max(axis=(0, 2)) < 10.0)
+    z = z[:, finite]
+    done = np.zeros(z.shape[:2], dtype=bool)
+    signature = gait_signature(z, done, dt_star).as_dict()
+    return {
+        "environments_stable": int(finite.sum()),
+        "environments": int(len(finite)),
+        "signature": signature,
+        "rhythm_period": float(dominant_rhythm(z, dt_star).period),
+        "segments": _describe(z[..., LOAD] > threshold),
+        "min_load": float(z[..., LOAD].min()),
+    }
+
+
+def gait_reference(
+    z: np.ndarray, dt_star: float, threshold: float = DEFAULT_CONTACT_THRESHOLD
+) -> dict:
+    """The same summary for a recorded gait ``(T, N, skill)``, to compare with."""
+    done = np.zeros(z.shape[:2], dtype=bool)
+    return {
+        "signature": gait_signature(z, done, dt_star).as_dict(),
+        "rhythm_period": float(dominant_rhythm(z, dt_star).period),
+        "segments": _describe(z[..., LOAD] > threshold),
+        "min_load": float(z[..., LOAD].min()),
+    }
+
+
 __all__ = [
     "ContractConfig",
+    "chained_gait",
+    "gait_reference",
     "change_times",
     "contract_steps",
     "evaluate_generator",

@@ -48,10 +48,12 @@ from humanoid_transfer.transfer.latent.model import G1_OBSERVATION  # noqa: E402
 from humanoid_transfer.transfer.latent.sequences import load_streams  # noqa: E402
 from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
     ContractConfig,
+    chained_gait,
     contract_steps,
     evaluate_generator,
     event_categories,
     fit_tolerance,
+    gait_reference,
     new_generator,
     population_scores,
     train_generator,
@@ -96,6 +98,15 @@ def main() -> int:
     parser.add_argument("--free-bits", type=float, default=0.1)
     parser.add_argument("--kind", choices=("flow", "cvae"), default="flow")
     parser.add_argument("--flow-steps", type=int, default=32)
+    parser.add_argument("--horizon", type=int, default=13, help="Samples of future per plan.")
+    parser.add_argument("--commit", type=int, default=6, help="Samples a plan is held.")
+    parser.add_argument("--view", type=int, default=8, help="Samples a tracker sees ahead.")
+    parser.add_argument("--solver", choices=("euler", "midpoint"), default="euler")
+    parser.add_argument(
+        "--warp-loads",
+        action="store_true",
+        help="Model foot loads as log(load + 0.01): forces are never negative.",
+    )
     parser.add_argument("--memory", type=int, default=64, help="Width of the history summary.")
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--flow-hidden", type=int, default=1024)
@@ -133,13 +144,15 @@ def main() -> int:
         dims=ContractDims(
             kind=args.kind,
             flow_steps=args.flow_steps,
+            flow_solver=args.solver,
+            warp_loads=args.warp_loads,
             memory=args.memory,
             channels=args.channels,
             flow_hidden=args.flow_hidden,
         ),
         seed=args.seed,
     )
-    clock = ContractClock(step=dt_star)
+    clock = ContractClock(step=dt_star, horizon=args.horizon, commit=args.commit, view=args.view)
     planned = contract_steps(streams, clock.horizon)
     train_steps = planned[~held_out[planned]]
     val_steps = planned[held_out[planned]]
@@ -195,6 +208,26 @@ def main() -> int:
         "gait": measure(gait, gait_steps, gait_events, None),
         "gait_noisy_history": measure(gait, gait_steps, gait_events, sigma),
     }
+    # What a perfect tracker would walk: the generator chained on its own plans
+    # from 32 of the teacher's histories, at the teacher's command. Added after
+    # the first closed loop showed that calibrated plans can chain into a gait
+    # that steps a quarter faster than the teacher's.
+    gait_z = np.load(args.gait)["skill_state"].astype(np.float32)
+    start = torch.as_tensor(gait_z[100 : 100 + clock.history], device=args.device)
+    start = generator.skill_norm(start.transpose(0, 1))
+    command = gait.command[: start.shape[0]].mean(dim=0, keepdim=True).expand(len(start), 3)
+    chained = chained_gait(
+        generator, start, command, sigma, 900, clock.commit, dt_star, seed=args.seed
+    )
+    reference = gait_reference(gait_z[100 + clock.history :].astype(float), dt_star)
+    deviation = {
+        key: abs(chained["signature"][key] - reference["signature"][key])
+        / reference["signature"][key]
+        for key in ("stride_period", "stride_length")
+    }
+    deviation["rhythm_period"] = (
+        abs(chained["rhythm_period"] - reference["rhythm_period"]) / reference["rhythm_period"]
+    )
     calibration = evaluation["validation_walking"]["calibration_error"]
     passes = all(value <= CALIBRATION_LIMIT for value in calibration)
 
@@ -249,6 +282,7 @@ def main() -> int:
             "channels": config.dims.channels,
             "flow_hidden": config.dims.flow_hidden,
             "flow_steps": config.dims.flow_steps,
+            "warp_loads": config.dims.warp_loads,
             "seed": config.seed,
         },
         "encoder": {
@@ -266,6 +300,7 @@ def main() -> int:
             "tolerance": tolerance.tolist(),
         },
         "evaluation": evaluation,
+        "chained": {"generator": chained, "teacher": reference, "deviation": deviation},
         "gate": {
             "rule": f"calibration_error <= {CALIBRATION_LIMIT} for each foot, held-out walking, "
             "clean history",
@@ -285,6 +320,13 @@ def main() -> int:
             f"(persistence {block['r2_persistence_by_k'][-1]:.3f})  "
             f"KL {sum(block['kl_per_intent_dim'] or [0.0]):.2f}"
         )
+    print(
+        f"  chained: period {chained['signature']['stride_period']:.3f} "
+        f"(teacher {reference['signature']['stride_period']:.3f}), rhythm "
+        f"{chained['rhythm_period']:.3f} ({reference['rhythm_period']:.3f}), swing median "
+        f"{chained['segments']['swing']['median']} ({reference['segments']['swing']['median']}), "
+        f"stable {chained['environments_stable']}/{chained['environments']}"
+    )
     print(f"gate {'PASSES' if passes else 'FAILS'}; written {_display(results)}")
     return 0
 

@@ -618,6 +618,28 @@ Over an episode a bias then costs in proportion to its duration, while an
 unbiased drift costs nothing extra. With the body's history, where every
 plan starts from the body, the term reduces exactly to the per-plan one.
 
+**Round 10** (that term, resumed from round 9 at 1000, on `walk_dagger2e`)
+made things worse. Over 200 iterations the body's lag behind the
+reference grew from 0.96 to 1.59 leg lengths, and the rewards fell. The
+reward now depended on an accumulated lag that neither actor nor critic
+could see: `z*` says how a body should move, not where it should be. The
+problem the tracker learned on was no longer Markov in what it observed.
+
+**Round 11 lets it see the lag.** Every motion tracker observes the
+target root position relative to its own (Peng et al., 2018), and the
+contract's view now does too.
+- **What it observes:** for each step of the view, where the reference's
+  CoM will be in the body's heading frame, and its heading relative to
+  the body's.
+- **Deployed:** the reference starts at the body, so this is the plan's
+  own path ahead, which a real body integrates from its velocity estimate
+  over one plan.
+- **Warm start:** the new inputs go last in each group. `widen_inputs.py`
+  widens the trained network with zero weights on them, so it starts out
+  computing exactly what it did and learns to use them.
+- **Effect:** over 300 iterations the lag fell from 1.8 to 0.24 leg
+  lengths.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

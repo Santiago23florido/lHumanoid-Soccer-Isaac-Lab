@@ -43,7 +43,10 @@ def contract_use(path: Path) -> dict | None:
     data = np.load(path)
     if "contract_error" not in data.files:
         return None
-    own, other = data["contract_error"], data["contract_error_other"]
+    # Own and other are both scored on the state alone: the other environment's
+    # plan was drawn from another place, so its trajectory term would not compare.
+    own_key = "contract_error_state" if "contract_error_state" in data.files else "contract_error"
+    own, other = data[own_key], data["contract_error_other"]
     done = data["done"]
     # The step after a reset carries no plan and scores zero; leave it out.
     first = np.zeros_like(done)

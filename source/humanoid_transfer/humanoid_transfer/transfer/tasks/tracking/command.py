@@ -36,7 +36,7 @@ from isaaclab.utils import configclass
 
 from ....common.similarity import UnitSystem
 from ....common.skill_state import SKILL_LAYOUT
-from ...latent.contract import load_contract
+from ...latent.contract import load_contract, plan_integrals
 from ...latent.memory import TimeGrid
 from ...latent.skill_torch import BodyConstants, skill_state
 
@@ -133,6 +133,7 @@ class ReferenceCommand(UniformVelocityCommand):
             for j in range(length)
         ]
         self.tolerance = generator.tolerance[nearest].to(self.device)
+        self.integral_tolerance = generator.integral_tolerance[nearest].to(self.device)
 
         n, size = self.num_envs, generator.skill
         steps = self.interpolation.shape[1]
@@ -148,8 +149,15 @@ class ReferenceCommand(UniformVelocityCommand):
         for f, field in enumerate(fields):
             span = SKILL_LAYOUT.slice_of(field.name)
             self.field_mean[span, f] = 1.0 / field.size
-        self.field_error = torch.zeros(n, len(fields), device=self.device)
+        self.field_error = torch.zeros(n, len(fields) + 1, device=self.device)
         self.last_error = torch.zeros(n, device=self.device)
+        self.last_error_state = torch.zeros(n, device=self.device)
+        self.integrals = torch.zeros(n, length, 3, device=self.device)
+        self.start_com = torch.zeros(n, 2, device=self.device)
+        self.start_yaw = torch.zeros(n, device=self.device)
+        zeros = (torch.zeros(n, 2, device=self.device), torch.zeros(n, device=self.device))
+        self._reward_frame = zeros
+        self._frame_now = zeros
         self.last_error_other = torch.zeros(n, device=self.device)
         self.metrics["contract_error"] = torch.zeros(n, device=self.device)
         self._rows = torch.arange(n, device=self.device)
@@ -179,6 +187,15 @@ class ReferenceCommand(UniformVelocityCommand):
             self.sensor.data.net_forces_w[:, self.sensor_ids],
         )
         return self.generator.skill_norm(z)
+
+    def frame(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """The whole-body CoM ``(N, 2)`` in the world plane, metres, and the base yaw ``(N,)``."""
+        data = self.robot.data
+        masses = self.body.masses
+        com = torch.einsum("b,nbi->ni", masses, data.body_com_pos_w[..., :2]) / masses.sum()
+        w, x, y, z = data.body_link_quat_w[:, self.body.base_index].unbind(-1)
+        yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+        return com, yaw
 
     def _estimate(self) -> torch.Tensor:
         if self.encoder is None:
@@ -219,6 +236,7 @@ class ReferenceCommand(UniformVelocityCommand):
         stamp = self._env.common_step_counter
         if stamp != self._reward_stamp:
             self._reward_true = self.true_skill()
+            self._reward_frame = self.frame()
             self._reward_stamp = stamp
         due, tolerance = self.due(), self.tolerance[self.age]
         error = (self._reward_true - due) / tolerance
@@ -226,15 +244,40 @@ class ReferenceCommand(UniformVelocityCommand):
         # ignored its plan, the two errors would be alike.
         other = (self._reward_true - due.roll(1, 0)) / tolerance.roll(1, 0)
         self.last_error_other = (other.pow(2) @ self.field_mean).mean(dim=-1)
-        return error.pow(2) @ self.field_mean
+
+        com, yaw = self._reward_frame
+        c, s = torch.cos(self.start_yaw), torch.sin(self.start_yaw)
+        moved = (com - self.start_com) / self.units.length
+        turned = yaw - self.start_yaw
+        reached = torch.stack(
+            [
+                c * moved[:, 0] + s * moved[:, 1],
+                -s * moved[:, 0] + c * moved[:, 1],
+                torch.atan2(torch.sin(turned), torch.cos(turned)),
+            ],
+            dim=-1,
+        )
+        planned = self.integrals[self._rows, self.age]
+        progress = (reached - planned) / self.integral_tolerance[self.age]
+        progress = progress.pow(2).mean(dim=-1)
+        return torch.cat([error.pow(2) @ self.field_mean, progress[:, None]], dim=-1)
 
     def tracking_reward(self, kernel: float) -> torch.Tensor:
-        """Mean over fields of ``exp(-e_f / (2 kernel^2))``; zero where no plan is held."""
+        """``exp(-e / (2 kernel^2))``, ``e`` the mean of the fields' errors; 0 without a plan.
+
+        One likelihood for the whole state: every field has to be reached at once.
+        Scoring fields apart and averaging the scores let a body give up a field
+        cheaply -- measured, it gave up walking: standing still reached seven
+        fields and paid only in CoM velocity.
+        """
         error = self.tracking_error()
         valid = ~self.needs_refill
         self.field_error = torch.where(valid[:, None], error, self.field_error)
-        self.last_error = torch.where(valid, error.mean(dim=-1), self.last_error)
-        return torch.exp(-0.5 * error / kernel**2).mean(dim=-1) * valid
+        joint = error.mean(dim=-1)
+        self.last_error = torch.where(valid, joint, self.last_error)
+        state = error[:, :-1].mean(dim=-1)
+        self.last_error_state = torch.where(valid, state, self.last_error_state)
+        return torch.exp(-0.5 * joint / kernel**2) * valid
 
     def _draw(self, ids: torch.Tensor) -> None:
         window = torch.einsum("hs,nsd->nhd", self.interpolation, self.history[ids])
@@ -244,6 +287,13 @@ class ReferenceCommand(UniformVelocityCommand):
             plan = self.generator.sample(window, command, noise).float()
         full = torch.cat([window[:, -1:], plan], dim=1)
         self.plan[ids] = torch.einsum("lk,nkd->nld", self.plan_matrix, full)
+        step = float(self.generator.grid_step)
+        integrals = plan_integrals(self.generator.skill_norm.inverse(plan), step)
+        integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
+        self.integrals[ids] = torch.einsum("lk,nkd->nld", self.plan_matrix, integrals)
+        com, yaw = self._frame_now
+        self.start_com[ids] = com[ids]
+        self.start_yaw[ids] = yaw[ids]
         self.age[ids] = 0
 
     # -- command term hooks ------------------------------------------------
@@ -268,6 +318,7 @@ class ReferenceCommand(UniformVelocityCommand):
     def _update_command(self) -> None:
         super()._update_command()
         self._true_now = self.true_skill()
+        self._frame_now = self.frame()
         estimate = self._estimate()
         ready = ~self.just_reset
         refill = ready & self.needs_refill

@@ -107,6 +107,12 @@ parser.add_argument(
     help="Hold one velocity command (m/s, m/s, rad/s) in every environment: no heading "
     "control, no standing environments.",
 )
+parser.add_argument(
+    "--contract-from-truth",
+    action="store_true",
+    help="On a contract task, feed the generator the true z* (plus training noise) instead of "
+    "the body's encoder: a diagnostic that separates the tracker from the estimate.",
+)
 parser.add_argument("--num-envs", type=int, default=32, help="Parallel rollouts.")
 parser.add_argument("--steps", type=int, default=600, help="Control steps to record.")
 parser.add_argument(
@@ -173,6 +179,8 @@ def main() -> int:
     task_id = args_cli.task_id or (PLAY_TASK_ID if args_cli.task == "play" else TASK_ID)
     cfg = parse_env_cfg(task_id, num_envs=args_cli.num_envs)
     cfg.seed = args_cli.seed
+    if args_cli.contract_from_truth:
+        cfg.commands.base_velocity.use_encoder = False
     if args_cli.command is not None:
         command = cfg.commands.base_velocity
         vx, vy, wz = args_cli.command
@@ -273,7 +281,12 @@ def main() -> int:
     if not hasattr(contract, "last_error_other"):
         contract = None
     else:
-        keys = keys + ("contract_error", "contract_error_other", "contract_age")
+        keys = keys + (
+            "contract_error",
+            "contract_error_other",
+            "contract_error_state",
+            "contract_age",
+        )
     record: dict[str, list] = {k: [] for k in keys}
 
     for _ in range(args_cli.steps):
@@ -329,6 +342,7 @@ def main() -> int:
         if contract is not None:
             record["contract_error"].append(contract.last_error.cpu().numpy())
             record["contract_error_other"].append(contract.last_error_other.cpu().numpy())
+            record["contract_error_state"].append(contract.last_error_state.cpu().numpy())
             record["contract_age"].append(contract.age.cpu().numpy())
         record["done"].append((terminated | truncated).cpu().numpy())
         record["terminated"].append(terminated.cpu().numpy())

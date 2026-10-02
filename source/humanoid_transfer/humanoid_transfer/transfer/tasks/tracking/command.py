@@ -44,6 +44,8 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 _TOLERANCE = 1e-6
+_PLAN_LIMIT = 50.0
+"""Normalised units: fifty standard deviations of the teacher's ``z*``."""
 
 
 def plan_interpolation(grid_step: float, horizon: int, dt_star: float) -> torch.Tensor:
@@ -273,6 +275,7 @@ class ReferenceCommand(UniformVelocityCommand):
         error = self.tracking_error()
         valid = ~self.needs_refill
         self.field_error = torch.where(valid[:, None], error, self.field_error)
+        error = torch.nan_to_num(error, nan=1e6, posinf=1e6)
         joint = error.mean(dim=-1)
         self.last_error = torch.where(valid, joint, self.last_error)
         state = error[:, :-1].mean(dim=-1)
@@ -285,6 +288,9 @@ class ReferenceCommand(UniformVelocityCommand):
         noise = torch.randn(len(ids), self.generator.noise_size, device=self.device)
         with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
             plan = self.generator.sample(window, command, noise).float()
+        # A body still learning to stand writes histories no teacher ever did; the
+        # generator's answer to them is meaningless but must stay finite.
+        plan = torch.nan_to_num(plan, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
         full = torch.cat([window[:, -1:], plan], dim=1)
         self.plan[ids] = torch.einsum("lk,nkd->nld", self.plan_matrix, full)
         step = float(self.generator.grid_step)
@@ -347,7 +353,8 @@ class ReferenceCommand(UniformVelocityCommand):
         """``(N, view * 27 + 27)``: the held plan relative to ``ẑ*``, then ``ẑ*``."""
         relative = self.upcoming() - self.estimate[:, None]
         relative = torch.where(self.needs_refill[:, None, None], 0.0, relative)
-        return torch.cat([relative.flatten(1), self.estimate], dim=-1)
+        view = torch.cat([relative.flatten(1), self.estimate], dim=-1)
+        return torch.nan_to_num(view, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
 
     def privileged(self) -> torch.Tensor:
         """``(N, view * 27 + 28)``: the plan relative to the true ``z*``, the true ``z*``, age."""
@@ -355,7 +362,8 @@ class ReferenceCommand(UniformVelocityCommand):
         relative = self.upcoming() - true[:, None]
         relative = torch.where(self.needs_refill[:, None, None], 0.0, relative)
         age = (self.age.float() / self.commit)[:, None]
-        return torch.cat([relative.flatten(1), true, age], dim=-1)
+        view = torch.cat([relative.flatten(1), true, age], dim=-1)
+        return torch.nan_to_num(view, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
 
 
 @configclass

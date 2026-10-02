@@ -1,6 +1,6 @@
 """The G1 following a contract: ``G1Track-v0``.
 
-The walk's contract generator (``logs/contract/walk_big/generator.pt``, or the
+The walk's contract generator (``logs/contract/walk_warp/generator.pt``, or the
 path in ``HUMANOID_CONTRACT``) draws plans of ``z*``; the G1 is rewarded for
 reaching them and never sees the command. ``G1Track-Play-v0`` replays on the
 deployed path, with the body's encoder feeding the contract, and exposes the

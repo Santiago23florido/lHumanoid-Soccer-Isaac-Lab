@@ -113,6 +113,7 @@ class ContractDims:
 
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
 _LOAD_EPS = 0.01
+_LOG_MAX_LOAD = 2.303
 """One percent of body weight: the scale below which a load is a foot in the air."""
 
 _FREQUENCIES = (1.0, 2.0, 4.0, 8.0)
@@ -212,7 +213,10 @@ class ContractGenerator(nn.Module):
         """The inverse of :meth:`warp`: loads come back at least zero."""
         if not self.warp_loads:
             return w
-        load = torch.exp(w[..., _LOAD] * self.warp_std + self.warp_mean) - _LOAD_EPS
+        # Ten body weights is beyond any load a foot carries; it keeps exp finite on
+        # the wild histories of a body that is still learning to stand.
+        logged = (w[..., _LOAD] * self.warp_std + self.warp_mean).clamp(max=_LOG_MAX_LOAD)
+        load = torch.exp(logged) - _LOAD_EPS
         mean, std = self.skill_norm.mean[_LOAD], self.skill_norm.std[_LOAD]
         loads = (load.clamp(min=0.0) - mean) / std
         return torch.cat([w[..., : _LOAD.start], loads, w[..., _LOAD.stop :]], dim=-1)

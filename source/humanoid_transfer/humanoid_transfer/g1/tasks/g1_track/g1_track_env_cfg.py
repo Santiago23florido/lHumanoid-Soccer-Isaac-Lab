@@ -47,7 +47,7 @@ from ..g1_walk.g1_walk_env_cfg import FROUDE_MATCHED_SPEED, G1WalkTeacherEnvCfg
 
 REPO_ROOT = Path(__file__).resolve().parents[6]
 BODY_CARD = REPO_ROOT / "g1" / "body" / "body_card.json"
-DEFAULT_CONTRACT = REPO_ROOT / "logs" / "contract" / "walk_big" / "generator.pt"
+DEFAULT_CONTRACT = REPO_ROOT / "logs" / "contract" / "walk_warp" / "generator.pt"
 CONTRACT = os.environ.get("HUMANOID_CONTRACT", str(DEFAULT_CONTRACT))
 """The task's generator; ``HUMANOID_CONTRACT`` points the same body at another task's."""
 

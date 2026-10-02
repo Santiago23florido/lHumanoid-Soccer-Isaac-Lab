@@ -449,8 +449,12 @@ generator still steps fast: stance 15 against 23 steps, stride period −22 %,
 rhythm −16 %, stable in every environment. Its single plans are calibrated
 by stance age too (lift-off within 13 steps at ages 10–15: 0.41 forecast,
 0.50 data), so the shortening comes from reading its own plans back as
-history. A closed loop does not: its history is the physical state a body
-reached. The chain is reported as a pessimistic bound.
+history. This was first reported as a pessimistic bound, on the grounds
+that a closed loop's history is the physical state a body reached. That
+was wrong: a body that tracks perfectly reaches exactly its plans, so its
+physical history *is* the chain. The chain is the perfect-tracking limit
+of the deployed loop, and its bias has to be removed in the generator
+(§7.2, round 10).
 
 ### 7.2 The body side, iterated
 
@@ -535,6 +539,42 @@ following an acceleration then costs quadratically more by the plan's end,
 and nothing is lost in fidelity, since every plan still starts from a
 physical history.
 
+**Round 7** stood as well (`_r7_900.json`): −0.003 m/s, both feet down
+100 % of the time, own/other plan error 1.97 / 5.82. A longer commitment
+only changes the price of the veto, not who holds it. As long as a plan
+restarts from the body's state, the body chooses what it is asked to do,
+and a precision reward makes the easiest regime the best one.
+
+**The structural correction: a reference the body cannot steer.** Motion
+trackers avoid this by construction. In DeepMimic (Peng et al., 2018) the
+reference clip plays on whatever the character does, and only a fall ends
+it. The contract can do the same.
+- **Autonomous history** (`ReferenceCommand.autonomous`): during training
+  the generator reads the plan it committed to (plus its noise), not the
+  body. The task's trajectory is the generator's own chain, conditioned on
+  the command, and the body has to follow it.
+- **Round 8** kept a way back: a resync to the body's history after 6 steps
+  more than 25 tolerances away. It stood again (`_r8_500.json`: 0.023 m/s,
+  error 2.08 / 16.97), because the resync handed back the veto: drift far
+  enough and the task restarts from you.
+- **Round 9** removes the resync (`resync_error = inf`), resumed from round
+  8 at 500. It is the first tracker that walks (`_r9_700.json`, from
+  standing at the play command): 0.13 m/s against the teacher's 0.21, use
+  ratio 0.19. The stride is still −27 % and the period +16 %, with both feet
+  down 97 % of the time, a shuffle. At 700 iterations it was still
+  improving (0.03 → 0.13 m/s in 200).
+
+**Training and deployment read different histories, on purpose.** The
+autonomous reference serves training: it removes the incentive to steer.
+A deployed body draws its plans from its own history, the ancestral
+sampling the theory covers, which also keeps the task's feedback (a pushed
+body gets a plan from where it is). The tracker it uses is the same, since
+it learned to reach plans and not to choose them. `close_loop_contract.sh`
+captures both. The capture also records each plan's due state, so the
+evaluator can split a miss into the generator's share (the motion asked
+for against the teacher's) and the tracker's (the body against what was
+asked).
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates
@@ -573,6 +613,10 @@ physical history.
   humanoid robot. *Autonomous Robots*.
 - Pascoa, F., Lalonde, I. and Girard, A. (2025). Zero-shot policy transfer in
   reinforcement learning using Buckingham's π theorem. arXiv:2510.08768.
+- Lipman, Y. et al. (2023). Flow matching for generative modeling. *ICLR*.
+- Peng, X. B., Abbeel, P., Levine, S. and van de Panne, M. (2018).
+  DeepMimic: example-guided deep reinforcement learning of physics-based
+  character skills. *ACM TOG*.
 - Ross, S., Gordon, G. and Bagnell, D. (2011). A reduction of imitation
   learning and structured prediction to no-regret online learning (DAgger).
   *AISTATS*.

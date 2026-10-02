@@ -657,6 +657,20 @@ command:
   teacher (period 1.37–1.45, the chain's bias of §7.1). The body takes
   fewer, longer steps at the right speed: it reaches the CoM's motion
   (0.55–0.78 tolerances) better than the feet's (2.2–4.2).
+- **The feet, per side:** the body drags its left foot. When the plan
+  asks for a left swing, the left foot leaves the ground 3 % of the time;
+  for the right foot it is 54–63 %. Share of time each foot is in swing:
+
+  | | left | right |
+  | --- | ---: | ---: |
+  | teacher | 0.08 | 0.15 |
+  | plans | 0.10 | 0.15 |
+  | body | 0.02 | 0.11 |
+
+  This is the familiar local optimum of legged RL, here without the
+  air-time term that usually keeps a robot out of it. The contract asks
+  for the lift, with a tolerance on foot height below a millimetre, and
+  the tracker settled for the slide.
 
 ### 7.3 A new task on the same body, zero-shot
 
@@ -699,16 +713,28 @@ left to the user.
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates
-  and the NAO's place in them, both NumPy and tested.
-- The G1 side of the latent space and the shared `π` and `T` — walking
-  closed-loop, not yet pinned (stride timing, §5) — and a memory variant
-  whose shared part provably reads only the physical history (§6), with a
-  grid in body time a second body resamples onto.
-- For the NAO: an encoder trained against its own analytic `z*`, a decoder
-  trained by RL with `π` and `T` frozen and the anchored dynamics term holding
-  `u` to its physical meaning, and the defect table saying where the frozen
-  skill will ask for more than the body has (hip and knee torque, joint speed)
-  and where it will leave capacity unused (ankle torque, foot size).
+  and the NAO's place in them, both NumPy and tested; `latent/skill_torch.py`,
+  the same on the GPU.
+- **The contract (§7), the interface that replaced the learned action code.**
+  - *Task side:* a generator per task (`latent/contract.py`, `train_contract.py`,
+    DAgger rounds with `dagger_contract.sh`). The walk's is `walk_dagger2e`; the
+    published task's is `flat_h20e`.
+  - *Body side:* the shared tracking task (`transfer/tasks/tracking`): autonomous
+    references in training, the body's own history when deployed, and the
+    reference's path in view.
+  - *Per body:* an encoder refitted on the body's own states (`train_encoder.py`,
+    `train_body_encoder.py`), moved between a body's contracts with
+    `body_encoder.py`.
+- **G1:** round 11's tracker walks the round trip at the teacher's speed
+  without falls, and every path passes the use gate. Gate C fails on stride
+  (+20–30 %): the left foot drags, and the generator's chain steps fast.
+- **The published task, zero-shot on the G1, fails** (§7.3). A tracker
+  practised on one gait does not follow another. The open decision is
+  whether each body's tracker trains once on every available skill, tested
+  on a held-out one such as Isaac Lab's `Isaac-Velocity-Rough-G1-v0`.
+- **NAO:** `NaoTrack-v0` trains on the walk's contract with the same recipe.
+  `nao_contract.sh` evaluates it end to end against the G1's policies, in
+  body units: walk, its own encoder, the published task.
 - The command in body units: the NAO's speed follows from `c*` and its own `V`.
 
 ## References

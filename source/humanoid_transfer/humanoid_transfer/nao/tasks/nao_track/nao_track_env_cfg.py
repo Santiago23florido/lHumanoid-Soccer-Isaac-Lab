@@ -202,6 +202,7 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             # demonstration's command and CoM velocity in the NAO's units).
             start_windows=str(START_WINDOWS),
             start_fraction=0.8,
+            autonomous=True,
         )
 
         self.observations = NaoTrackObservationsCfg()

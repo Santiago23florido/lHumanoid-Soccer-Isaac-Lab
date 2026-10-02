@@ -171,6 +171,7 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             # initialisation); the rest from the default pose, to learn to start.
             start_states=str(START_STATES),
             start_fraction=0.8,
+            autonomous=True,
         )
 
         self.observations = TrackObservationsCfg()

@@ -156,6 +156,9 @@ class ReferenceCommand(UniformVelocityCommand):
         n, size = self.num_envs, generator.skill
         steps = self.interpolation.shape[1]
         self.history = torch.zeros(n, steps, size, device=self.device)
+        self.physical = torch.zeros(n, steps, size, device=self.device)
+        self.far_steps = torch.zeros(n, dtype=torch.long, device=self.device)
+        self.resyncs = torch.zeros(n, device=self.device)
         self.plan = torch.zeros(n, length, size, device=self.device)
         self.age = torch.zeros(n, dtype=torch.long, device=self.device)
         self.estimate = torch.zeros(n, size, device=self.device)
@@ -267,6 +270,7 @@ class ReferenceCommand(UniformVelocityCommand):
         window = windows["skill_state"][t[:, None] - offsets, n[:, None]].float()
         normalised = self.generator.skill_norm(window)
         self.history[ids] = normalised + self.sigma * torch.randn_like(normalised)
+        self.physical[ids] = self.history[ids]
         self.vel_command_b[ids] = windows["command"][t, n] / self.command_scale
         self.is_standing_env[ids] = windows["command"][t, n].norm(dim=-1) == 0
         heading = window[:, -1, _VX : _VX + 2] * self.units.velocity
@@ -308,6 +312,7 @@ class ReferenceCommand(UniformVelocityCommand):
         window = starts["skill_state"][t[:, None] - offsets, n[:, None]]
         window = self.generator.skill_norm(window)
         self.history[ids] = window + self.sigma * torch.randn_like(window)
+        self.physical[ids] = self.history[ids]
         self.needs_refill[ids] = False
         self.replan[ids] = True
 
@@ -449,6 +454,8 @@ class ReferenceCommand(UniformVelocityCommand):
         self.needs_refill[ids] = True
         self.has_plan[ids] = False
         self.age[ids] = 0
+        self.far_steps[ids] = 0
+        self.resyncs[ids] = 0.0
         if self.starts is not None and self.cfg.start_fraction > 0.0:
             every = torch.arange(self.num_envs, device=self.device)[ids]
             chosen = every[torch.rand(len(every), device=self.device) < self.cfg.start_fraction]
@@ -467,6 +474,7 @@ class ReferenceCommand(UniformVelocityCommand):
 
     def _update_metrics(self) -> None:
         super()._update_metrics()
+        self.metrics["resyncs"] = self.resyncs
         metric = self.metrics["contract_error"]
         self.metrics["contract_error"] = 0.98 * metric + 0.02 * self.last_error
 
@@ -479,13 +487,35 @@ class ReferenceCommand(UniformVelocityCommand):
         refill = ready & self.needs_refill
         carried = ready & ~self.needs_refill
 
-        shifted = torch.cat([self.history[:, 1:], estimate[:, None]], dim=1)
         filled = estimate[:, None].expand_as(self.history)
-        self.history = torch.where(
+        shifted = torch.cat([self.physical[:, 1:], estimate[:, None]], dim=1)
+        self.physical = torch.where(
             refill[:, None, None],
             filled,
-            torch.where(carried[:, None, None], shifted, self.history),
+            torch.where(carried[:, None, None], shifted, self.physical),
         )
+        if self.cfg.autonomous:
+            # The task's own trajectory goes on: the generator reads the plan it
+            # committed to (with the noise it was trained under), not the body.
+            due = self.due()
+            due = due + self.sigma * torch.randn_like(due)
+            planned = torch.cat([self.history[:, 1:], due[:, None]], dim=1)
+            following = carried & self.has_plan
+            self.history = torch.where(
+                refill[:, None, None],
+                filled,
+                torch.where(following[:, None, None], planned, self.history),
+            )
+            # Only a body that has left the task altogether is caught up with.
+            far = following & (self.last_error > self.cfg.resync_error)
+            self.far_steps = torch.where(far, self.far_steps + 1, 0)
+            resync = self.far_steps >= self.cfg.resync_steps
+            self.history = torch.where(resync[:, None, None], self.physical, self.history)
+            self.replan = self.replan | resync
+            self.far_steps = torch.where(resync, 0, self.far_steps)
+            self.resyncs = self.resyncs + resync.float()
+        else:
+            self.history = self.physical.clone()
         self.age = torch.where(carried, self.age + 1, self.age)
         draw = refill | (carried & (self.replan | (self.age >= self.commit)))
         ids = draw.nonzero().squeeze(-1)
@@ -553,6 +583,19 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     """``precision``: the encoder's error (a plan is a commitment); ``spread``: the
     generator's spread of plans, which proved too lenient -- where the future is
     uncertain, as at a start, not following the drawn plan cost almost nothing."""
+
+    autonomous: bool = False
+    """Let the task's trajectory run on its own plans instead of restarting each plan
+    from the body's state. Restarting lets a body steer what it is asked to do -- every
+    tracker so trained settled into standing, the easiest regime to follow precisely --
+    while a reference the body cannot steer has to be followed (as in DeepMimic). The
+    price is the generator reading its own plans (see ``chain_contract.py``)."""
+
+    resync_error: float = 25.0
+    """Joint error, in tolerances, beyond which a body counts as having left the task."""
+
+    resync_steps: int = 6
+    """Consecutive such steps before the task restarts from the body's own history."""
 
     start_states: str | None = None
     """A capture of the task's demonstrations (with ``base_pos``) to start episodes from."""

@@ -149,8 +149,10 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
         old = self.commands.base_velocity
         self.commands.base_velocity = ReferenceCommandCfg(
             asset_name=old.asset_name,
-            resampling_time_range=old.resampling_time_range,
-            rel_standing_envs=old.rel_standing_envs,
+            # Starts and stops, as often as the contract's data has them: a body that
+            # only ever sees steady walking plans never learns to begin walking.
+            resampling_time_range=(4.0, 8.0),
+            rel_standing_envs=0.2,
             rel_heading_envs=old.rel_heading_envs,
             heading_command=old.heading_command,
             heading_control_stiffness=old.heading_control_stiffness,
@@ -197,6 +199,9 @@ class G1TrackEnvCfg_PLAY(G1TrackEnvCfg):
         command = self.commands.base_velocity
         command.ranges.lin_vel_x = (FROUDE_MATCHED_SPEED, FROUDE_MATCHED_SPEED)
         command.use_encoder = True
+        # The teacher's own play conditions, so the two captures compare.
+        command.resampling_time_range = (10.0, 10.0)
+        command.rel_standing_envs = 0.02
 
         self.events.base_external_force_torque = None
         self.events.push_robot = None

@@ -45,6 +45,8 @@ if TYPE_CHECKING:
 
 _TOLERANCE = 1e-6
 _PLAN_LIMIT = 50.0
+_VX = SKILL_LAYOUT.slice_of("com_velocity").start
+_YAW_RATE = SKILL_LAYOUT.slice_of("base_angular_velocity").start + 2
 """Normalised units: fifty standard deviations of the teacher's ``z*``."""
 
 
@@ -134,8 +136,20 @@ class ReferenceCommand(UniformVelocityCommand):
             min(max(round((j + 1) * self.dt_star / grid_step) - 1, 0), generator.horizon - 1)
             for j in range(length)
         ]
-        self.tolerance = generator.tolerance[nearest].to(self.device)
-        self.integral_tolerance = generator.integral_tolerance[nearest].to(self.device)
+        if cfg.tolerance == "spread":
+            self.tolerance = generator.tolerance[nearest].to(self.device)
+            self.integral_tolerance = generator.integral_tolerance[nearest].to(self.device)
+        else:
+            # A drawn plan is a commitment: a body is judged against it at the
+            # precision the state is known with -- the encoder's error -- not at
+            # how uncertain the future was before the plan was drawn.
+            sigma = contract.sigma.to(self.device)
+            self.tolerance = sigma.expand(length, -1).clone()
+            physical = sigma * generator.skill_norm.std.to(self.device)
+            rates = torch.stack([physical[_VX], physical[_VX + 1], physical[_YAW_RATE]])
+            elapsed = torch.arange(1, length + 1, device=self.device)[:, None]
+            # Integrating a velocity known to sigma: the error grows like sqrt(time).
+            self.integral_tolerance = rates * self.dt_star * elapsed.sqrt()
 
         n, size = self.num_envs, generator.skill
         steps = self.interpolation.shape[1]
@@ -399,6 +413,11 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     flow_steps: int | None = None
     """Overrides the generator's integration steps; None keeps them."""
+
+    tolerance: str = "precision"
+    """``precision``: the encoder's error (a plan is a commitment); ``spread``: the
+    generator's spread of plans, which proved too lenient -- where the future is
+    uncertain, as at a start, not following the drawn plan cost almost nothing."""
 
     half_precision: bool = False
     """Draw plans under float16 autocast (the state, history and plan stay float32)."""

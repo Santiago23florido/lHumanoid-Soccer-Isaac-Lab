@@ -113,6 +113,21 @@ parser.add_argument(
     help="On a contract task, feed the generator the true z* (plus training noise) instead of "
     "the body's encoder: a diagnostic that separates the tracker from the estimate.",
 )
+parser.add_argument(
+    "--standing-fraction",
+    type=float,
+    default=None,
+    help="Share of environments commanded to stand at each resample (the task default "
+    "otherwise): with frequent resampling, the starts and stops a closed loop goes through.",
+)
+parser.add_argument(
+    "--resample-seconds",
+    type=float,
+    nargs=2,
+    default=None,
+    metavar=("LOW", "HIGH"),
+    help="Range of seconds between command resamples.",
+)
 parser.add_argument("--num-envs", type=int, default=32, help="Parallel rollouts.")
 parser.add_argument("--steps", type=int, default=600, help="Control steps to record.")
 parser.add_argument(
@@ -179,6 +194,10 @@ def main() -> int:
     task_id = args_cli.task_id or (PLAY_TASK_ID if args_cli.task == "play" else TASK_ID)
     cfg = parse_env_cfg(task_id, num_envs=args_cli.num_envs)
     cfg.seed = args_cli.seed
+    if args_cli.standing_fraction is not None:
+        cfg.commands.base_velocity.rel_standing_envs = args_cli.standing_fraction
+    if args_cli.resample_seconds is not None:
+        cfg.commands.base_velocity.resampling_time_range = tuple(args_cli.resample_seconds)
     if args_cli.contract_from_truth:
         cfg.commands.base_velocity.use_encoder = False
     if args_cli.command is not None:

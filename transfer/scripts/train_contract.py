@@ -92,6 +92,14 @@ def main() -> int:
         help="A body's existing contract (generator.pt): reuse its encoder and its units of z* "
         "instead of training an encoder -- a new task on a body that already has one.",
     )
+    parser.add_argument(
+        "--sigma-from-body",
+        action="store_true",
+        help="With --encoder-from: train under the noise of the body's contract (its encoder's "
+        "error on its own task) instead of that encoder's error on this task's states, which "
+        "says how far the encoder is from covering the task, not how precisely a body that "
+        "covers it would read the state. Both are reported.",
+    )
     parser.add_argument("--val-envs", type=int, default=16)
     parser.add_argument("--encoder-epochs", type=int, default=150)
     parser.add_argument("--epochs", type=int, default=1000)
@@ -182,6 +190,9 @@ def main() -> int:
     # Measured on this task's held-out states either way: an encoder is only as
     # good as it is on the states a task visits.
     sigma = residual_sigma(encoder, generator, G1_OBSERVATION, streams, walking)
+    sigma_on_task = sigma
+    if args.encoder_from is not None and args.sigma_from_body:
+        sigma = body.sigma.to(args.device)
     encoder_seconds = time.time() - started
     print(f"[encoder] {encoder_seconds:.0f} s, sigma median {float(sigma.median()):.3f}")
 
@@ -291,6 +302,8 @@ def main() -> int:
             "final_anchor_loss": final_anchor,
             "sigma": sigma.tolist(),
             "sigma_median": float(sigma.median()),
+            "sigma_on_this_task_median": float(sigma_on_task.median()),
+            "sigma_from_body": bool(args.sigma_from_body),
         },
         "generator": {
             "seconds": seconds,

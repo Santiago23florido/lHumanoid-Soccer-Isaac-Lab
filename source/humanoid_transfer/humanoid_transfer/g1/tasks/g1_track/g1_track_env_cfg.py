@@ -32,6 +32,7 @@ from pathlib import Path
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab_tasks.manager_based.locomotion.velocity import mdp
@@ -39,6 +40,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg im
 
 from ....transfer.tasks.tracking import (
     ReferenceCommandCfg,
+    contract_left,
     contract_path,
     contract_privileged,
     contract_tracking,
@@ -195,6 +197,11 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
         ):
             setattr(rewards, prescribed, None)
 
+        # A body that has left the task ends its episode, as a fall does.
+        self.terminations.contract_left = DoneTerm(
+            func=contract_left, params={"command_name": COMMAND, "lag": 0.5}
+        )
+
 
 @configclass
 class G1TrackEnvCfg_PLAY(G1TrackEnvCfg):
@@ -218,3 +225,5 @@ class G1TrackEnvCfg_PLAY(G1TrackEnvCfg):
 
         self.events.base_external_force_torque = None
         self.events.push_robot = None
+        # Captures count falls only.
+        self.terminations.contract_left = None

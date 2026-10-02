@@ -23,11 +23,18 @@ specific to the task whose generator trained it.
 """
 
 from .command import ReferenceCommand, ReferenceCommandCfg
-from .mdp import contract_path, contract_privileged, contract_tracking, contract_view
+from .mdp import (
+    contract_left,
+    contract_path,
+    contract_privileged,
+    contract_tracking,
+    contract_view,
+)
 
 __all__ = [
     "ReferenceCommand",
     "ReferenceCommandCfg",
+    "contract_left",
     "contract_path",
     "contract_privileged",
     "contract_tracking",

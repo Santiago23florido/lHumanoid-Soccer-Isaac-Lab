@@ -46,6 +46,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
 from ....transfer.embodiment import G1, NAO
 from ....transfer.tasks.tracking import (
     ReferenceCommandCfg,
+    contract_left,
     contract_path,
     contract_privileged,
     contract_tracking,
@@ -239,6 +240,10 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             func=mdp.root_height_below_minimum, params={"minimum_height": 0.18}
         )
         self.terminations.tilted = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
+        # A body that has left the task ends its episode, as a fall does.
+        self.terminations.contract_left = DoneTerm(
+            func=contract_left, params={"command_name": COMMAND, "lag": 0.5}
+        )
 
         # Events: the G1 teacher's, on the NAO's base.
         self.events.add_base_mass = None
@@ -263,3 +268,5 @@ class NaoTrackEnvCfg_PLAY(NaoTrackEnvCfg):
         command.resampling_time_range = (10.0, 10.0)
         command.rel_standing_envs = 0.02
         command.start_fraction = 0.0
+        # Captures count falls only.
+        self.terminations.contract_left = None

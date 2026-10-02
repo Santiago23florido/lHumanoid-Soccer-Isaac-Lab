@@ -35,6 +35,21 @@ def contract_privileged(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
     return _term(env, command_name).privileged()
 
 
+def contract_left(env: ManagerBasedRLEnv, command_name: str, lag: float = 0.5) -> torch.Tensor:
+    """The body has left the task: it is more than ``lag`` leg lengths from the reference.
+
+    A reference the body cannot steer walks on whatever the body does; once the
+    body is several steps behind, no next step catches it up, and a reward that
+    measures the reference's displacement has nothing left to teach -- a body
+    that stood still was 3.7 leg lengths behind and earned no gradient to start.
+    Ending the episode there, as motion trackers do (DeepMimic; PHC at half a
+    metre), keeps practice where the reward can teach. The bound is in leg
+    lengths, the same for every body.
+    """
+    term = _term(env, command_name)
+    return term.has_plan & (term.last_lag > lag)
+
+
 def contract_tracking(
     env: ManagerBasedRLEnv, command_name: str, kernel: float = 1.0
 ) -> torch.Tensor:
@@ -57,4 +72,10 @@ def contract_tracking(
     return _term(env, command_name).tracking_reward(kernel)
 
 
-__all__ = ["contract_path", "contract_privileged", "contract_tracking", "contract_view"]
+__all__ = [
+    "contract_left",
+    "contract_path",
+    "contract_privileged",
+    "contract_tracking",
+    "contract_view",
+]

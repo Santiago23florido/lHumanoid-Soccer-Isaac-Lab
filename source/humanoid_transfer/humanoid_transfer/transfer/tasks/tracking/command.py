@@ -416,8 +416,10 @@ class ReferenceCommand(UniformVelocityCommand):
             # integral tells the two apart.
             elapsed = (self.anchored + 1).float()[:, None]
             tolerance = self.integral_rate * elapsed.sqrt()
-        # How far the body is from where the reference has got to, in leg lengths.
-        self.last_lag = (reached[:, :2] - planned[:, :2]).norm(dim=-1)
+        # How far the body is from where the reference has got to, in leg lengths --
+        # nothing while no plan is held (the start pose is the last episode's).
+        lag = (reached[:, :2] - planned[:, :2]).norm(dim=-1)
+        self.last_lag = torch.where(self.has_plan, lag, 0.0)
         progress = (reached - planned) / tolerance
         progress = progress.pow(2).mean(dim=-1)
         return torch.cat([error.pow(2) @ self.field_mean, progress[:, None]], dim=-1)

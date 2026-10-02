@@ -38,6 +38,12 @@ parser.add_argument("--num-envs", type=int, default=16)
 parser.add_argument("--steps", type=int, default=300)
 parser.add_argument("--encoder", action="store_true", help="Feed the contract from the encoder.")
 parser.add_argument("--output", type=Path, default=None)
+parser.add_argument(
+    "--start-fraction",
+    type=float,
+    default=0.0,
+    help="Share of resets from demonstrated states (RSI).",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 app_launcher = AppLauncher(args_cli)
@@ -62,6 +68,7 @@ def main() -> int:
 
     cfg = parse_env_cfg(PLAY_TASK_ID, num_envs=args_cli.num_envs)
     cfg.commands.base_velocity.use_encoder = args_cli.encoder
+    cfg.commands.base_velocity.start_fraction = args_cli.start_fraction
     env = gym.make(PLAY_TASK_ID, cfg=cfg)
     inner = env.unwrapped
     term = inner.command_manager.get_term("base_velocity")
@@ -105,6 +112,7 @@ def main() -> int:
         return encode(snapshot, units)
 
     obs, _ = env.reset()
+    speeds = []
     worst, ages, draws, errors, falls = 0.0, [], 0, [], 0
     previous_plan = term.plan.clone()
     for step in range(args_cli.steps):
@@ -112,6 +120,7 @@ def main() -> int:
             action = teacher(obs["teacher"])
         obs, _, terminated, truncated, _ = env.step(action)
         falls += int(terminated.sum())
+        speeds.append(float(robot.data.root_lin_vel_b[:, 0].mean()))
         if step >= 2:
             gpu = term.generator.skill_norm.inverse(term.true_skill()).cpu().numpy()
             worst = max(worst, float(np.abs(gpu - numpy_skill()).max()))
@@ -141,6 +150,9 @@ def main() -> int:
             for a in range(term.commit)
         ],
         "falls": falls,
+        "start_fraction": args_cli.start_fraction,
+        "forward_speed_first_25_steps": float(np.mean(speeds[:25])),
+        "forward_speed_all": float(np.mean(speeds)),
     }
     print(json.dumps(result, indent=2))
     if args_cli.output is not None:

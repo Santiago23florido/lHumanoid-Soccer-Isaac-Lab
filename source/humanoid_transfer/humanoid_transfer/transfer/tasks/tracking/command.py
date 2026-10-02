@@ -29,10 +29,12 @@ from collections.abc import Sequence
 from dataclasses import MISSING
 from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 from isaaclab.envs import mdp
 from isaaclab.envs.mdp.commands import UniformVelocityCommand, UniformVelocityCommandCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.math import quat_apply
 
 from ....common.similarity import UnitSystem
 from ....common.skill_state import SKILL_LAYOUT
@@ -177,6 +179,8 @@ class ReferenceCommand(UniformVelocityCommand):
         self.last_error_other = torch.zeros(n, device=self.device)
         self.metrics["contract_error"] = torch.zeros(n, device=self.device)
         self._rows = torch.arange(n, device=self.device)
+        self.has_plan = torch.zeros(n, dtype=torch.bool, device=self.device)
+        self.starts = self._load_starts(cfg.start_states) if cfg.start_states else None
         self._reward_stamp = -1
         self._reward_true = torch.zeros(n, size, device=self.device)
         self._true_now = torch.zeros(n, size, device=self.device)
@@ -187,6 +191,69 @@ class ReferenceCommand(UniformVelocityCommand):
             f"commit {self.commit}, view {self.view}, encoder {self.encoder is not None}\n"
             + super().__str__()
         )
+
+    def _load_starts(self, path: str) -> dict[str, torch.Tensor]:
+        """States of the task's own demonstrations, to start episodes from (RSI)."""
+        data = np.load(path)
+        names = [str(n) for n in data["joint_names"]]
+        if names != list(self.robot.data.joint_names):
+            raise ValueError(f"{path}: joints {names} are not this robot's")
+        done = data["done"]
+        steps = self.interpolation.shape[1]
+        # A start needs a full history window inside one episode, away from a fall.
+        clean = ~np.lib.stride_tricks.sliding_window_view(done, steps + 1, axis=0).any(-1)
+        if "terminated" in data.files:
+            near_fall = np.lib.stride_tricks.sliding_window_view(
+                data["terminated"], steps + 60, axis=0
+            ).any(-1)
+            clean = clean[: len(near_fall)] & ~near_fall
+        t, n = np.nonzero(clean)
+        t = t + steps
+        keys = (
+            "joint_pos",
+            "joint_vel",
+            "base_pos",
+            "base_quat",
+            "base_lin_vel",
+            "base_ang_vel",
+            "command",
+            "skill_state",
+        )
+        starts = {
+            k: torch.as_tensor(data[k], device=self.device, dtype=torch.float32) for k in keys
+        }
+        starts["index"] = torch.as_tensor(np.stack([t, n], -1), device=self.device)
+        return starts
+
+    def _start_from_demonstrations(self, ids: torch.Tensor) -> None:
+        """Reference state initialisation (Peng et al., 2018) on the contract.
+
+        The body is put in a state the task's demonstrations visited, the command is
+        the one they were following, and the generator's history is the ``z*`` that
+        led there -- so the first plan is a plan the generator knows, and the body
+        practises following the task's motion, not only starting it.
+        """
+        starts = self.starts
+        pick = starts["index"][torch.randint(len(starts["index"]), (len(ids),), device=self.device)]
+        t, n = pick[:, 0], pick[:, 1]
+        quat = starts["base_quat"][t, n]
+        position = starts["base_pos"][t, n] + self._env.scene.env_origins[ids]
+        linear = quat_apply(quat, starts["base_lin_vel"][t, n])
+        angular = quat_apply(quat, starts["base_ang_vel"][t, n])
+        self.robot.write_root_pose_to_sim(torch.cat([position, quat], -1), env_ids=ids)
+        self.robot.write_root_velocity_to_sim(torch.cat([linear, angular], -1), env_ids=ids)
+        self.robot.write_joint_state_to_sim(
+            starts["joint_pos"][t, n], starts["joint_vel"][t, n], env_ids=ids
+        )
+        self.vel_command_b[ids] = starts["command"][t, n]
+        self.is_standing_env[ids] = starts["command"][t, n].norm(dim=-1) == 0
+        steps = self.interpolation.shape[1]
+        offsets = torch.arange(steps - 1, -1, -1, device=self.device)
+        window = starts["skill_state"][t[:, None] - offsets, n[:, None]]
+        window = self.generator.skill_norm(window)
+        self.history[ids] = window + self.sigma * torch.randn_like(window)
+        self.needs_refill[ids] = False
+        self.replan[ids] = True
 
     # -- state of the body -------------------------------------------------
 
@@ -287,7 +354,7 @@ class ReferenceCommand(UniformVelocityCommand):
         fields and paid only in CoM velocity.
         """
         error = self.tracking_error()
-        valid = ~self.needs_refill
+        valid = self.has_plan
         self.field_error = torch.where(valid[:, None], error, self.field_error)
         error = torch.nan_to_num(error, nan=1e6, posinf=1e6)
         joint = error.mean(dim=-1)
@@ -315,6 +382,7 @@ class ReferenceCommand(UniformVelocityCommand):
         self.start_com[ids] = com[ids]
         self.start_yaw[ids] = yaw[ids]
         self.age[ids] = 0
+        self.has_plan[ids] = True
 
     # -- command term hooks ------------------------------------------------
 
@@ -323,7 +391,13 @@ class ReferenceCommand(UniformVelocityCommand):
         ids = slice(None) if env_ids is None else env_ids
         self.just_reset[ids] = True
         self.needs_refill[ids] = True
+        self.has_plan[ids] = False
         self.age[ids] = 0
+        if self.starts is not None and self.cfg.start_fraction > 0.0:
+            every = torch.arange(self.num_envs, device=self.device)[ids]
+            chosen = every[torch.rand(len(every), device=self.device) < self.cfg.start_fraction]
+            if len(chosen) > 0:
+                self._start_from_demonstrations(chosen)
         return extras
 
     def _resample_command(self, env_ids: Sequence[int]) -> None:
@@ -366,7 +440,7 @@ class ReferenceCommand(UniformVelocityCommand):
     def observation(self) -> torch.Tensor:
         """``(N, view * 27 + 27)``: the held plan relative to ``ẑ*``, then ``ẑ*``."""
         relative = self.upcoming() - self.estimate[:, None]
-        relative = torch.where(self.needs_refill[:, None, None], 0.0, relative)
+        relative = torch.where(~self.has_plan[:, None, None], 0.0, relative)
         view = torch.cat([relative.flatten(1), self.estimate], dim=-1)
         return torch.nan_to_num(view, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
 
@@ -374,7 +448,7 @@ class ReferenceCommand(UniformVelocityCommand):
         """``(N, view * 27 + 28)``: the plan relative to the true ``z*``, the true ``z*``, age."""
         true = self._true_now
         relative = self.upcoming() - true[:, None]
-        relative = torch.where(self.needs_refill[:, None, None], 0.0, relative)
+        relative = torch.where(~self.has_plan[:, None, None], 0.0, relative)
         age = (self.age.float() / self.commit)[:, None]
         view = torch.cat([relative.flatten(1), true, age], dim=-1)
         return torch.nan_to_num(view, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
@@ -418,6 +492,12 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     """``precision``: the encoder's error (a plan is a commitment); ``spread``: the
     generator's spread of plans, which proved too lenient -- where the future is
     uncertain, as at a start, not following the drawn plan cost almost nothing."""
+
+    start_states: str | None = None
+    """A capture of the task's demonstrations (with ``base_pos``) to start episodes from."""
+
+    start_fraction: float = 0.0
+    """Share of resets that start from a demonstrated state instead of the default pose."""
 
     half_precision: bool = False
     """Draw plans under float16 autocast (the state, history and plan stay float32)."""

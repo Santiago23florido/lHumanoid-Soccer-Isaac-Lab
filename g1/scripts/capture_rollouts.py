@@ -294,6 +294,7 @@ def main() -> int:
         "skill_state",
         "joint_pos", "joint_vel", "com", "com_vel", "com_acc", "angular_momentum",
         "angular_momentum_spin", "foot_force", "foot_pos", "base_quat", "base_lin_vel",
+        "base_pos", "base_ang_vel",
         "raw_link_quat", "raw_com_pos", "raw_com_lin_vel", "raw_ang_vel",
     )  # fmt: skip
     contract = inner.command_manager.get_term("base_velocity")
@@ -351,6 +352,8 @@ def main() -> int:
         )
         record["base_quat"].append(robot.data.root_quat_w.cpu().numpy())
         record["base_lin_vel"].append(robot.data.root_lin_vel_b.cpu().numpy())
+        record["base_pos"].append((robot.data.root_pos_w - origins).cpu().numpy())
+        record["base_ang_vel"].append(robot.data.root_ang_vel_b.cpu().numpy())
         record["raw_link_quat"].append(state["link_quat"][:raw])
         record["raw_com_pos"].append(state["com_pos"][:raw])
         record["raw_com_lin_vel"].append(state["com_lin_vel"][:raw])

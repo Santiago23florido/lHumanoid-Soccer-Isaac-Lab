@@ -49,6 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[6]
 BODY_CARD = REPO_ROOT / "g1" / "body" / "body_card.json"
 DEFAULT_CONTRACT = REPO_ROOT / "logs" / "contract" / "walk_warp" / "generator.pt"
 CONTRACT = os.environ.get("HUMANOID_CONTRACT", str(DEFAULT_CONTRACT))
+START_STATES = REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz"
 """The task's generator; ``HUMANOID_CONTRACT`` points the same body at another task's."""
 
 BASE_BODY = "pelvis"
@@ -166,6 +167,10 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             flow_solver="midpoint",
             flow_steps=8,
             half_precision=True,
+            # Most episodes begin inside the teacher's walk (reference state
+            # initialisation); the rest from the default pose, to learn to start.
+            start_states=str(START_STATES),
+            start_fraction=0.8,
         )
 
         self.observations = TrackObservationsCfg()
@@ -199,6 +204,7 @@ class G1TrackEnvCfg_PLAY(G1TrackEnvCfg):
         command = self.commands.base_velocity
         command.ranges.lin_vel_x = (FROUDE_MATCHED_SPEED, FROUDE_MATCHED_SPEED)
         command.use_encoder = True
+        command.start_fraction = 0.0
         # The teacher's own play conditions, so the two captures compare.
         command.resampling_time_range = (10.0, 10.0)
         command.rel_standing_envs = 0.02

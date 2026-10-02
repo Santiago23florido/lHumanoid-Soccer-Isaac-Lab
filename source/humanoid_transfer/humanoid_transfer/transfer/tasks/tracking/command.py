@@ -344,11 +344,10 @@ class ReferenceCommand(UniformVelocityCommand):
         yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
         return com, yaw
 
-    def _estimate(self) -> torch.Tensor:
-        if self.encoder is None:
-            return self._true_now + self.sigma * torch.randn_like(self._true_now)
+    def encoder_input(self) -> torch.Tensor:
+        """What a body's encoder reads: its proprioception and last action, no command."""
         env = self._env
-        observation = torch.cat(
+        return torch.cat(
             [
                 mdp.base_lin_vel(env),
                 mdp.base_ang_vel(env),
@@ -359,8 +358,12 @@ class ReferenceCommand(UniformVelocityCommand):
             ],
             dim=-1,
         )
+
+    def _estimate(self) -> torch.Tensor:
+        if self.encoder is None:
+            return self._true_now + self.sigma * torch.randn_like(self._true_now)
         with torch.no_grad():
-            return self.encoder(observation)
+            return self.encoder(self.encoder_input())
 
     # -- the plan ------------------------------------------------------------
 

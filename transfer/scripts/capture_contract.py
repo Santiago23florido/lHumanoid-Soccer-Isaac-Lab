@@ -9,7 +9,9 @@ step; a second body has no teacher. This capture needs only a contract task
 * ``contract_due``: the plan's ``z*`` for the state each step reaches, and the
   errors the reward scored (``contract_error``, ``_other``, ``_state``,
   ``_fields``, ``contract_age``);
-* the body's units, so speeds compare across bodies in ``V = sqrt(g L)``.
+* the body's units, so speeds compare across bodies in ``V = sqrt(g L)``;
+* ``encoder_input``: what the body's encoder reads, to fit one
+  (``train_body_encoder.py``).
 
 Usage::
 
@@ -51,7 +53,11 @@ parser.add_argument(
     help="Hold one command, in the body's own units (m/s, m/s, rad/s).",
 )
 parser.add_argument("--reference", choices=("autonomous", "physical"), default=None)
-parser.add_argument("--contract-from-truth", action="store_true")
+parser.add_argument(
+    "--contract-from-truth",
+    action="store_true",
+    help="Feed the generator the true z* plus its noise, not the body's encoder.",
+)
 parser.add_argument("--start-fraction", type=float, default=None)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--output", type=Path, required=True)
@@ -78,8 +84,8 @@ def main() -> int:
     command_cfg = getattr(cfg.commands, COMMAND)
     if args_cli.reference is not None:
         command_cfg.autonomous = args_cli.reference == "autonomous"
-    if args_cli.contract_from_truth:
-        command_cfg.use_encoder = False
+    # The deployed path reads the body's encoder; --contract-from-truth the true state.
+    command_cfg.use_encoder = not args_cli.contract_from_truth
     if args_cli.start_fraction is not None:
         command_cfg.start_fraction = args_cli.start_fraction
     if args_cli.command is not None:
@@ -110,6 +116,7 @@ def main() -> int:
         "skill_state", "command", "action_executed", "base_lin_vel", "base_ang_vel",
         "base_quat", "base_pos", "contract_due", "contract_error", "contract_error_other",
         "contract_error_state", "contract_fields", "contract_age", "done", "terminated",
+        "encoder_input",
     )  # fmt: skip
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
@@ -117,6 +124,7 @@ def main() -> int:
         # The state is read before the step; the plan's due state is the target of the
         # state this step reaches (the next row of skill_state).
         record["skill_state"].append(skill_now())
+        record["encoder_input"].append(term.encoder_input().cpu().numpy())
         record["command"].append(inner.command_manager.get_command(COMMAND).cpu().numpy())
         record["base_lin_vel"].append(robot.data.root_lin_vel_b.cpu().numpy())
         record["base_ang_vel"].append(robot.data.root_ang_vel_b.cpu().numpy())

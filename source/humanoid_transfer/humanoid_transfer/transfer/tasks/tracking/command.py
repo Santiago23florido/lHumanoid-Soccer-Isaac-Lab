@@ -149,9 +149,9 @@ class ReferenceCommand(UniformVelocityCommand):
             self.tolerance = sigma.expand(length, -1).clone()
             physical = sigma * generator.skill_norm.std.to(self.device)
             rates = torch.stack([physical[_VX], physical[_VX + 1], physical[_YAW_RATE]])
-            elapsed = torch.arange(1, length + 1, device=self.device)[:, None]
-            # Integrating a velocity known to sigma: the error grows like sqrt(time).
-            self.integral_tolerance = rates * self.dt_star * elapsed.sqrt()
+            # Integrating a velocity known to sigma: the error grows like sqrt(time),
+            # counted from when the reference last started from the body (below).
+            self.integral_rate = rates * self.dt_star
 
         n, size = self.num_envs, generator.skill
         steps = self.interpolation.shape[1]
@@ -176,11 +176,14 @@ class ReferenceCommand(UniformVelocityCommand):
         self.integrals = torch.zeros(n, length, 3, device=self.device)
         self.start_com = torch.zeros(n, 2, device=self.device)
         self.start_yaw = torch.zeros(n, device=self.device)
+        self.anchored = torch.zeros(n, dtype=torch.long, device=self.device)
         zeros = (torch.zeros(n, 2, device=self.device), torch.zeros(n, device=self.device))
         self._reward_frame = zeros
         self._frame_now = zeros
         self.last_error_other = torch.zeros(n, device=self.device)
+        self.last_lag = torch.zeros(n, device=self.device)
         self.metrics["contract_error"] = torch.zeros(n, device=self.device)
+        self.metrics["lag"] = torch.zeros(n, device=self.device)
         self._rows = torch.arange(n, device=self.device)
         self.has_plan = torch.zeros(n, dtype=torch.bool, device=self.device)
         self.starts = self._load_starts(cfg.start_states) if cfg.start_states else None
@@ -402,7 +405,17 @@ class ReferenceCommand(UniformVelocityCommand):
             dim=-1,
         )
         planned = self.integrals[self._rows, self.age]
-        progress = (reached - planned) / self.integral_tolerance[self.age]
+        if self.cfg.tolerance == "spread":
+            tolerance = self.integral_tolerance[self.age]
+        else:
+            # A body that follows without bias drifts from the reference like a random
+            # walk, sqrt(t); a biased one drifts like t, and only a long enough
+            # integral tells the two apart.
+            elapsed = (self.anchored + 1).float()[:, None]
+            tolerance = self.integral_rate * elapsed.sqrt()
+        # How far the body is from where the reference has got to, in leg lengths.
+        self.last_lag = (reached[:, :2] - planned[:, :2]).norm(dim=-1)
+        progress = (reached - planned) / tolerance
         progress = progress.pow(2).mean(dim=-1)
         return torch.cat([error.pow(2) @ self.field_mean, progress[:, None]], dim=-1)
 
@@ -424,7 +437,23 @@ class ReferenceCommand(UniformVelocityCommand):
         self.last_error_state = torch.where(valid, state, self.last_error_state)
         return torch.exp(-0.5 * joint / kernel**2) * valid
 
-    def _draw(self, ids: torch.Tensor) -> None:
+    def _draw(self, ids: torch.Tensor, anchor: torch.Tensor) -> None:
+        """Draw plans for ``ids``; ``anchor`` marks those that start from the body.
+
+        A plan drawn from the body's history starts at the body's CoM and heading.
+        One drawn from the task's own trajectory (autonomous) starts where that
+        trajectory has got to -- the previous plan's start moved by what it
+        integrated over the steps it was held -- so the trajectory's displacement
+        carries across plans, as a reference clip's root does.
+        """
+        held = (self.age[ids] - 1).clamp(min=0)
+        moved = self.integrals[ids, held]
+        c, s = torch.cos(self.start_yaw[ids]), torch.sin(self.start_yaw[ids])
+        length = self.units.length
+        reference_com = self.start_com[ids] + length * torch.stack(
+            [c * moved[:, 0] - s * moved[:, 1], s * moved[:, 0] + c * moved[:, 1]], dim=-1
+        )
+        reference_yaw = self.start_yaw[ids] + moved[:, 2]
         window = torch.einsum("hs,nsd->nhd", self.interpolation, self.history[ids])
         command = self.vel_command_b[ids] * self.command_scale
         noise = torch.randn(len(ids), self.generator.noise_size, device=self.device)
@@ -440,8 +469,9 @@ class ReferenceCommand(UniformVelocityCommand):
         integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
         self.integrals[ids] = torch.einsum("lk,nkd->nld", self.plan_matrix, integrals)
         com, yaw = self._frame_now
-        self.start_com[ids] = com[ids]
-        self.start_yaw[ids] = yaw[ids]
+        self.start_com[ids] = torch.where(anchor[:, None], com[ids], reference_com)
+        self.start_yaw[ids] = torch.where(anchor, yaw[ids], reference_yaw)
+        self.anchored[ids] = torch.where(anchor, 0, self.anchored[ids])
         self.age[ids] = 0
         self.has_plan[ids] = True
 
@@ -454,6 +484,7 @@ class ReferenceCommand(UniformVelocityCommand):
         self.needs_refill[ids] = True
         self.has_plan[ids] = False
         self.age[ids] = 0
+        self.anchored[ids] = 0
         self.far_steps[ids] = 0
         self.resyncs[ids] = 0.0
         if self.starts is not None and self.cfg.start_fraction > 0.0:
@@ -477,6 +508,7 @@ class ReferenceCommand(UniformVelocityCommand):
         self.metrics["resyncs"] = self.resyncs
         metric = self.metrics["contract_error"]
         self.metrics["contract_error"] = 0.98 * metric + 0.02 * self.last_error
+        self.metrics["lag"] = 0.98 * self.metrics["lag"] + 0.02 * self.last_lag
 
     def _update_command(self) -> None:
         super()._update_command()
@@ -511,16 +543,21 @@ class ReferenceCommand(UniformVelocityCommand):
             self.far_steps = torch.where(far, self.far_steps + 1, 0)
             resync = self.far_steps >= self.cfg.resync_steps
             self.history = torch.where(resync[:, None, None], self.physical, self.history)
+            # A plan drawn with none held -- after a reset, or a start inside the
+            # demonstrations -- starts from the body: there is no trajectory yet.
+            anchor = refill | resync | ~self.has_plan
             self.replan = self.replan | resync
             self.far_steps = torch.where(resync, 0, self.far_steps)
             self.resyncs = self.resyncs + resync.float()
         else:
             self.history = self.physical.clone()
+            anchor = torch.ones_like(refill)
         self.age = torch.where(carried, self.age + 1, self.age)
+        self.anchored = torch.where(carried, self.anchored + 1, self.anchored)
         draw = refill | (carried & (self.replan | (self.age >= self.commit)))
         ids = draw.nonzero().squeeze(-1)
         if len(ids) > 0:
-            self._draw(ids)
+            self._draw(ids, anchor[ids])
         self.replan = self.replan & ~draw
         self.needs_refill = self.needs_refill & ~ready
         self.just_reset[:] = False

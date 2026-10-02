@@ -575,6 +575,49 @@ evaluator can split a miss into the generator's share (the motion asked
 for against the teacher's) and the tracker's (the body against what was
 asked).
 
+**Round 9 at 1000 iterations, split this way** (`_r9b_1000.json`, play
+command, teacher 0.213 m/s, stride 0.159, period 1.87, duty 0.92 / 0.86):
+
+| path | falls | body speed | asked speed | asked period | median error by field |
+| --- | ---: | ---: | ---: | ---: | --- |
+| deployed (encoder, body's history) | 50 | 0.239 | 0.179 | 1.30 | foot position 14, progress 17 |
+| true state, body's history | 0 | 0.114 | 0.150 | 1.73 | 0.4–2.6 in every field |
+| true state, autonomous | 0 | 0.161 | 0.219 | 1.45 | foot position 8, progress 6 |
+
+Four findings:
+- **The tracker follows plans to within the precision they are scored at.**
+  On the true state every field sits 0.4–2.6 tolerances from its plan, and
+  the use ratio is 0.067.
+- **It delivers about three quarters of the speed it is asked for, on
+  either reference** (0.114 of 0.150, 0.161 of 0.219). On the body's own
+  history the shortfall compounds: each plan starts from a slower state,
+  and the loop settles at 0.114 m/s.
+- **The body's history keeps the generator near the teacher's timing**
+  (asked period 1.73 against the teacher's 1.87). Its own chain does not
+  (1.45, the −21 % of §7.1).
+- **The encoder misreads the tracker's states**, so the plans it seeds are
+  wrong (period 1.30) and the body falls. The encoder belongs to the body
+  and has to be refitted on the body's own states.
+
+A shortfall that is the same in every plan is a *bias*, and the reward
+could not see it. The plan's integrals were scored only over the steps
+each plan was held (at most 6). Over k steps an unbiased body drifts from
+the reference like a random walk, about σ√k, and a biased one drifts like
+k. At k ≤ 6 the two are barely apart, which is why the shortfall cost
+about 1 in the joint error.
+
+**The correction** carries the reference's displacement across plans,
+which is how a reference clip's root trajectory works in motion tracking
+(Peng et al., 2018):
+- a plan drawn from the task's own trajectory starts where that
+  trajectory has got to, not where the body is;
+- the integrals' tolerance grows as σ√t, counted from when the reference
+  last started from the body.
+
+Over an episode a bias then costs in proportion to its duration, while an
+unbiased drift costs nothing extra. With the body's history, where every
+plan starts from the body, the term reduces exactly to the per-plan one.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

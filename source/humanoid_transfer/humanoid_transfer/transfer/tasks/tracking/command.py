@@ -572,6 +572,41 @@ class ReferenceCommand(UniformVelocityCommand):
         view = torch.cat([relative.flatten(1), self.estimate], dim=-1)
         return torch.nan_to_num(view, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
 
+    def path(self) -> torch.Tensor:
+        """``(N, view * 3)``: where the reference will be over the view, seen from the body.
+
+        For each of the next ``view`` steps, the reference's CoM in the body's
+        heading frame relative to the body's CoM now (leg lengths) and the
+        reference's heading relative to the body's (radians). ``z*`` says how the
+        body should be moving, not where it should be; this is the where -- the
+        target root position every motion tracker observes. Without it a reward
+        on the reference's displacement depends on a lag the tracker cannot see.
+        On the body's own history the reference starts at the body, and this is
+        the plan's own path ahead (a real body integrates it from its velocity
+        estimate over one plan).
+        """
+        index = self.age[:, None] + torch.arange(self.view, device=self.device)
+        planned = self.integrals[self._rows[:, None], index]
+        c, s = torch.cos(self.start_yaw)[:, None], torch.sin(self.start_yaw)[:, None]
+        length = self.units.length
+        com, yaw = self._frame_now
+        dx = self.start_com[:, None, 0] - com[:, None, 0]
+        dx = dx + length * (c * planned[..., 0] - s * planned[..., 1])
+        dy = self.start_com[:, None, 1] - com[:, None, 1]
+        dy = dy + length * (s * planned[..., 0] + c * planned[..., 1])
+        cb, sb = torch.cos(yaw)[:, None], torch.sin(yaw)[:, None]
+        turn = self.start_yaw[:, None] + planned[..., 2] - yaw[:, None]
+        path = torch.stack(
+            [
+                (cb * dx + sb * dy) / length,
+                (-sb * dx + cb * dy) / length,
+                torch.atan2(torch.sin(turn), torch.cos(turn)),
+            ],
+            dim=-1,
+        )
+        path = torch.where(~self.has_plan[:, None, None], 0.0, path)
+        return torch.nan_to_num(path.flatten(1), nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
+
     def privileged(self) -> torch.Tensor:
         """``(N, view * 27 + 28)``: the plan relative to the true ``z*``, the true ``z*``, age."""
         true = self._true_now

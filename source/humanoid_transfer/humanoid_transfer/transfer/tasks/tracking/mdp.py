@@ -25,6 +25,11 @@ def contract_view(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return _term(env, command_name).observation()
 
 
+def contract_path(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Where the reference will be over the view, relative to the body's CoM and heading."""
+    return _term(env, command_name).path()
+
+
 def contract_privileged(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """The critic's view: the plan relative to the true ``z*``, the true ``z*``, the plan's age."""
     return _term(env, command_name).privileged()
@@ -52,4 +57,4 @@ def contract_tracking(
     return _term(env, command_name).tracking_reward(kernel)
 
 
-__all__ = ["contract_privileged", "contract_tracking", "contract_view"]
+__all__ = ["contract_path", "contract_privileged", "contract_tracking", "contract_view"]

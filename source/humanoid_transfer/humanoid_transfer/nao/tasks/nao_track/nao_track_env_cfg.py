@@ -46,6 +46,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
 from ....transfer.embodiment import G1, NAO
 from ....transfer.tasks.tracking import (
     ReferenceCommandCfg,
+    contract_path,
     contract_privileged,
     contract_tracking,
     contract_view,
@@ -100,6 +101,7 @@ class NaoTrackPolicyCfg(ObsGroup):
     )
     actions = ObsTerm(func=mdp.last_action)
     contract = ObsTerm(func=contract_view, params={"command_name": COMMAND})
+    contract_path = ObsTerm(func=contract_path, params={"command_name": COMMAND})
 
     def __post_init__(self) -> None:
         self.enable_corruption = True
@@ -116,6 +118,7 @@ class NaoTrackCriticCfg(ObsGroup):
     actions = ObsTerm(func=mdp.last_action)
     contract = ObsTerm(func=contract_view, params={"command_name": COMMAND})
     privileged = ObsTerm(func=contract_privileged, params={"command_name": COMMAND})
+    contract_path = ObsTerm(func=contract_path, params={"command_name": COMMAND})
 
     def __post_init__(self) -> None:
         self.enable_corruption = False

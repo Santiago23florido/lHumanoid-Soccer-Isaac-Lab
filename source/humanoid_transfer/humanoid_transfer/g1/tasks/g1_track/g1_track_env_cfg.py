@@ -39,6 +39,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg im
 
 from ....transfer.tasks.tracking import (
     ReferenceCommandCfg,
+    contract_path,
     contract_privileged,
     contract_tracking,
     contract_view,
@@ -72,6 +73,7 @@ class TrackPolicyCfg(ObsGroup):
     joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5))
     actions = ObsTerm(func=mdp.last_action)
     contract = ObsTerm(func=contract_view, params={"command_name": COMMAND})
+    contract_path = ObsTerm(func=contract_path, params={"command_name": COMMAND})
 
     def __post_init__(self) -> None:
         self.enable_corruption = True
@@ -90,6 +92,7 @@ class TrackCriticCfg(ObsGroup):
     actions = ObsTerm(func=mdp.last_action)
     contract = ObsTerm(func=contract_view, params={"command_name": COMMAND})
     privileged = ObsTerm(func=contract_privileged, params={"command_name": COMMAND})
+    contract_path = ObsTerm(func=contract_path, params={"command_name": COMMAND})
 
     def __post_init__(self) -> None:
         self.enable_corruption = False

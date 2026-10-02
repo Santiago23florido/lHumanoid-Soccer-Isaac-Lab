@@ -39,6 +39,13 @@ parser.add_argument("--steps", type=int, default=300)
 parser.add_argument("--encoder", action="store_true", help="Feed the contract from the encoder.")
 parser.add_argument("--output", type=Path, default=None)
 parser.add_argument(
+    "--robot",
+    choices=("g1", "nao"),
+    default="g1",
+    help="g1: the pinned teacher drives. nao: zero actions -- the default pose held "
+    "by the PD drives, since the NAO has no teacher.",
+)
+parser.add_argument(
     "--start-fraction",
     type=float,
     default=0.0,
@@ -55,9 +62,9 @@ import torch
 
 import humanoid_transfer.tasks  # noqa: F401
 from humanoid_transfer.common.frames import quat_to_matrix
-from humanoid_transfer.common.similarity import UnitSystem
 from humanoid_transfer.common.skill_state import MultibodySnapshot, encode
-from humanoid_transfer.g1.tasks.g1_track import PLAY_TASK_ID
+from humanoid_transfer.g1.tasks.g1_track import PLAY_TASK_ID as G1_PLAY
+from humanoid_transfer.nao.tasks.nao_track import PLAY_TASK_ID as NAO_PLAY
 
 TEACHER = _REPO_ROOT / "g1" / "policy" / "teacher_policy.pt"
 BODY_CARD = _REPO_ROOT / "g1" / "body" / "body_card.json"
@@ -66,32 +73,31 @@ BODY_CARD = _REPO_ROOT / "g1" / "body" / "body_card.json"
 def main() -> int:
     from isaaclab_tasks.utils import parse_env_cfg
 
-    cfg = parse_env_cfg(PLAY_TASK_ID, num_envs=args_cli.num_envs)
+    task = G1_PLAY if args_cli.robot == "g1" else NAO_PLAY
+    cfg = parse_env_cfg(task, num_envs=args_cli.num_envs)
     cfg.commands.base_velocity.use_encoder = args_cli.encoder
     cfg.commands.base_velocity.start_fraction = args_cli.start_fraction
-    env = gym.make(PLAY_TASK_ID, cfg=cfg)
+    env = gym.make(task, cfg=cfg)
     inner = env.unwrapped
     term = inner.command_manager.get_term("base_velocity")
     robot = inner.scene["robot"]
     sensor = inner.scene["contact_forces"]
-    teacher = torch.jit.load(str(TEACHER), map_location=inner.device).eval()
-
-    card = json.loads(BODY_CARD.read_text(encoding="utf-8"))
-    feet = ["left_ankle_roll_link", "right_ankle_roll_link"]
-    foot_ids, _ = robot.find_bodies(feet, preserve_order=True)
-    sensor_ids, _ = sensor.find_bodies(feet, preserve_order=True)
-    base_ids, _ = robot.find_bodies("pelvis")
-    view = robot.root_physx_view
-    masses = view.get_masses()[0].cpu().numpy().astype(float)
-    inertia = view.get_inertias()[0].cpu().numpy().astype(float).reshape(-1, 3, 3)
-    com_offset = robot.data.body_com_pos_b[0].cpu().numpy().astype(float)
-    sole = np.stack(
-        [
-            np.array(card["foot"][n]["sole_point_link"]) - com_offset[foot_ids[i]]
-            for i, n in enumerate(feet)
-        ]
+    teacher = (
+        torch.jit.load(str(TEACHER), map_location=inner.device).eval()
+        if args_cli.robot == "g1"
+        else None
     )
-    units = UnitSystem(card["leg_length"], float(masses.sum()))
+
+    # The NumPy encoder fed with the constants the task built: this checks the GPU
+    # transcription in place; the G1's constants are checked against its body card
+    # by the rollout capture, the NAO's sole points against its URDF.
+    body = term.body
+    sensor_ids = term.sensor_ids
+    masses = body.masses.cpu().numpy().astype(float)
+    inertia = body.inertia_local.cpu().numpy().astype(float)
+    sole = body.sole_from_com.cpu().numpy().astype(float)
+    base_ids, foot_ids = [body.base_index], list(body.foot_index)
+    units = body.units
     n = inner.num_envs
 
     def numpy_skill() -> np.ndarray:
@@ -112,17 +118,23 @@ def main() -> int:
         return encode(snapshot, units)
 
     obs, _ = env.reset()
-    speeds = []
+    speeds, zs = [], []
     worst, ages, draws, errors, falls = 0.0, [], 0, [], 0
     previous_plan = term.plan.clone()
     for step in range(args_cli.steps):
         with torch.inference_mode():
-            action = teacher(obs["teacher"])
+            if teacher is None:
+                action = torch.zeros(
+                    inner.num_envs, inner.action_manager.total_action_dim, device=inner.device
+                )
+            else:
+                action = teacher(obs["teacher"])
         obs, _, terminated, truncated, _ = env.step(action)
         falls += int(terminated.sum())
         speeds.append(float(robot.data.root_lin_vel_b[:, 0].mean()))
         if step >= 2:
             gpu = term.generator.skill_norm.inverse(term.true_skill()).cpu().numpy()
+            zs.append(gpu)
             worst = max(worst, float(np.abs(gpu - numpy_skill()).max()))
             errors.append(term.last_error.cpu().numpy().copy())
         ages.append(term.age.cpu().numpy().copy())
@@ -132,6 +144,7 @@ def main() -> int:
 
     ages = np.stack(ages)
     errors = np.stack(errors)
+    zs = np.stack(zs)
     settled = errors[50:]
     result = {
         "steps": args_cli.steps,
@@ -150,6 +163,14 @@ def main() -> int:
             for a in range(term.commit)
         ],
         "falls": falls,
+        "robot": args_cli.robot,
+        "mean_skill_state_last_100_steps": dict(
+            zip(
+                ("height", "load_left", "load_right"),
+                [float(v) for v in zs[-100:].mean(axis=(0, 1))[[0, 22, 23]]],
+                strict=True,
+            )
+        ),
         "start_fraction": args_cli.start_fraction,
         "forward_speed_first_25_steps": float(np.mean(speeds[:25])),
         "forward_speed_all": float(np.mean(speeds)),

@@ -478,7 +478,62 @@ corrections followed:
 On the deployed path the encoder, fitted to the teacher's actions, read the
 tracker's out of distribution — the same loop §6 found before DAgger.
 
-**Round 3**: *in progress; results added below when measured.*
+**Round 3** (both corrections, `walk_warp` contract) stood too: checkpoint
+300 on the true state walked at 0.02 m/s with both feet down 99 % of the
+time. Probing the generator explained the rest:
+
+- **The tolerance was the wrong quantity.** It was the generator's spread of
+  plans — how uncertain the future was *before* a plan was drawn. Where the
+  future is uncertain, as at a start, not following the drawn plan cost
+  almost nothing. A drawn plan is a commitment, so the reached state is now
+  scored at the precision the state is known with: the encoder's held-out
+  error per field, and that error on the velocities carried through time
+  (growing as `√t`) for the integrals. The pinned teacher, which follows none
+  of the plans it is scored against, now sits 5–13 tolerances away; a body
+  following its plan should sit near one.
+- **The data had no starts.** The teacher walks off on the step after every
+  reset, so from a standing history the generator jumped to 0.058 m/s on the
+  next step — a request no body meets. `teacher_starts.npz` captures the
+  teacher with 30 % of environments standing at each resample and commands
+  every 2–6 s (36 clean starts, 0 → 0.06 m/s within 13 steps); the
+  generator trained on it with DART passes its gate at 0.004 / 0.004
+  (`contract_walk_starts.json`), and the tracker trains on starts and stops
+  too.
+
+**Rounds 4 to 6** all ended standing, each for a reason a measurement
+pointed at, and each correction general:
+
+| round | change | closed loop (true state) | own / other plan error |
+| --- | --- | --- | --- |
+| 4 | precision tolerance, start-aware contract | 0.000 m/s, both feet down 99.5 % | 1.19 / 15.8 |
+| 5 | + reference state initialisation | 0.000 m/s, even started mid-walk | 1.08 / 25.6 |
+| 6 | + DAgger on the contract (round 5 resumed) | 0.000 m/s | 1.39 / 7.0 |
+
+(`contract_g1_closed_loop_r4_500.json`, `_r5_500.json`, `_r6_700.json`.)
+Every tracker follows its plans — the use gate passes by a wide margin —
+and the plans themselves stop asking for motion:
+
+- From standing the teacher **leans before it steps**: its plans ramp the
+  CoM to 0.08 m/s over 1 `T` with a foot lifting in 1 % of them. Over the
+  6 samples a plan was held, that is 0.04 m/s and a few millimetres — a
+  cost of about 0.2 in the joint error for not moving at all.
+- **Each plan restarts from where the body is.** A body that does not move
+  is handed the start of the ramp again, so the veto never accumulates.
+  Started mid-walk, the tracker does less than asked for one plan, and from
+  then on it is a standing body being asked to start.
+- **DAgger** (`teacher_from_states.py`: the teacher run from 1024 states
+  the round-5 loop visited) removed the generator's artefacts — it had
+  planned an impossible 0.058 m/s jump on the first step from standing; it
+  now plans the teacher's real start — and the loop still stands, because
+  the real start is the slow one.
+
+Re-anchoring on the physical state is what keeps the generator in its own
+distribution (no exposure bias, whatever the chain test says); the veto is
+the price, and its size is set by how long a plan is held. Round 7 holds
+each plan for 1 `T` (13 samples, horizon 20) instead of 0.46 `T`: not
+following an acceleration then costs quadratically more by the plan's end,
+and nothing is lost in fidelity, since every plan still starts from a
+physical history.
 
 ## What this stage hands to the next
 

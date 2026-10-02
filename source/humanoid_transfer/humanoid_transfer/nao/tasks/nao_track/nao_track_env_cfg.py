@@ -177,8 +177,10 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
         speed = TEACHER_DIMENSIONLESS_SPEED * NAO.units.velocity
         self.commands.base_velocity = ReferenceCommandCfg(
             asset_name="robot",
-            resampling_time_range=(10.0, 10.0),
-            rel_standing_envs=0.02,
+            # Starts and stops, as the G1's tracker trains on: the same distribution of
+            # plans on both bodies.
+            resampling_time_range=(4.0, 8.0),
+            rel_standing_envs=0.2,
             rel_heading_envs=1.0,
             heading_command=True,
             heading_control_stiffness=0.5,
@@ -255,4 +257,6 @@ class NaoTrackEnvCfg_PLAY(NaoTrackEnvCfg):
         self.observations.policy.enable_corruption = False
         command = self.commands.base_velocity
         command.ranges.lin_vel_x = (command.ranges.lin_vel_x[1],) * 2
+        command.resampling_time_range = (10.0, 10.0)
+        command.rel_standing_envs = 0.02
         command.start_fraction = 0.0

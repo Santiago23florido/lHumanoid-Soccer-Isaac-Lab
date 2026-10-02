@@ -78,8 +78,13 @@ re-derives them.
 around a skill policy and latent dynamics every body shares, with part of the
 latent anchored to the skill state; a shared memory over the history of that
 state alone, on a grid in body time (`memory.py`); a decoder split by limb
-(`limbs.py`). See
-[`transfer/docs/skill_space.md`](transfer/docs/skill_space.md).
+(`limbs.py`); and the contract that replaced the learned action code: a
+generator per task that samples the next values of the skill state
+(`contract.py`). `transfer/tasks/tracking/` holds the Isaac Lab pieces any
+body's tracking task is built from — the command term that draws and holds
+plans, the observation and the reward — used by `g1/tasks/g1_track/` and
+`nao/tasks/nao_track/`. See
+[`transfer/docs/skill_space.md`](transfer/docs/skill_space.md) §7.
 
 See [`transfer.md`](transfer/docs/plan.md) for the plan and the open questions.
 
@@ -107,8 +112,10 @@ naming the source, rather than reaching across.
 are NumPy-only, so the theory is checked without a GPU stack; the latent model
 uses torch but never Isaac Lab, so it trains and is tested on recorded
 rollouts. The simulator appears only in the scripts that capture those
-rollouts and run the result closed-loop. A test enforces both lines
-(`tests/test_import_boundaries.py`).
+rollouts and run the result closed-loop, and in `transfer/tasks/`, which is
+environment code shared by the robots' tasks and imports neither robot's task
+package. A test enforces these lines (`tests/test_import_boundaries.py`,
+`tests/test_development_baseline.py`).
 
 **Tasks live with their robot.** `tasks.py` at the package root imports them so
 the gym ids register; it owns nothing.

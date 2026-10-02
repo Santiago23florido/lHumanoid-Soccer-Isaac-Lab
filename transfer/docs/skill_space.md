@@ -375,6 +375,111 @@ the stride criterion with the threshold-free rhythm (a change to criteria
 fixed in advance, and to be justified as such), remains the open decision of
 §5.
 
+## 7. A contract instead of an action code
+
+Two further attempts on the timing gap followed §6 and both failed the gate
+fixed for them, in a way that pointed past timing:
+
+- **A contact schedule** (`latent/events.py`, `plan.py`; `latent_g1_plan*.json`):
+  a shared planner for when each contact next changes (a censored
+  discrete-time hazard) and where the foot lands, with the policy committed
+  to a sampled plan. The planner was calibrated (0.020 / 0.005) and
+  informative (+0.45 / +0.74 nats over the population), and the policy did
+  not use it: imitation R² moved by +0.004 and +0.011 when the plan was
+  frozen, against the 0.02 required.
+- **Holding the policy to its plan** through the latent dynamics did not
+  change that (+0.000, +0.002).
+
+The reason is general. A deterministic teacher acts `a = π_T(o)`: once `o` is
+known, nothing computed from the future adds anything about `a`. Imitating
+actions can therefore never make a student use a plan; the plan can only
+explain what the student's input misses of `o` (at R² 0.915, 8.5 %). And a
+latent action `u` means whatever the decoders learned from walking, so a body
+decoder trained on it learns to walk, not to carry out `u` — a second task
+would need new decoders on every body.
+
+So the interface between a skill and a body was fixed by physics instead of
+learned (`transfer/latent/contract.py`): **the next values of `z*` on the
+body-time grid.**
+
+```
+obs ─E_b─► ẑ* ─► G_task(history of ẑ*, c*) ─► plan of z* ─► D_b(obs, ẑ*, plan) ─► joints
+                 └ task side: no body ┘        (contract)     └ body side: no task ┘
+```
+
+- **The task side** is a generator per task: the last 2 `T` of `ẑ*` and the
+  dimensionless command in, a *sampled* 1 `T` of `z*` out. It is trained
+  offline on the teacher's states — never its actions — with noise of the
+  encoder's measured error on the history.
+- **The body side** is an encoder `E_b` (anchor only, as in §6) and a tracker
+  `D_b` trained by RL to reach the plans (`transfer/tasks/tracking`,
+  `G1Track-v0`, `NaoTrack-v0`). It never sees the command: the plan is the
+  only thing that says what to do.
+- **A plan is held** for 6 samples (0.46 `T`) and redrawn from the history
+  that actually happened. With a calibrated generator and exact tracking,
+  that is ancestral sampling of the teacher's trajectory distribution, so
+  every temporal statistic of it carries over without being named.
+- **A new task** is a new generator on the same body's encoder and units
+  (`train_contract.py --encoder-from`); a new body is a new tracker.
+
+### 7.1 The generator, iterated
+
+| generator | calibration (held-out) | timing gain (nats) | note |
+| --- | ---: | ---: | --- |
+| conditional VAE | 0.093 / 0.085 | 0.48 / 0.63 | averaged futures: changes under-forecast |
+| flow matching, 16-wide history | 0.060 / 0.009 | 0.38 / 0.64 | left stance lift-off early |
+| flow, 64-wide history, 1024 flow | 0.012 / 0.027 | 0.43 / 0.66 | gate passes |
+| … sampled by midpoint, 8 steps | 0.005 / 0.017 | 0.42 / 0.65 | the converged sampler, half the cost |
+| … loads modelled as `log(load + 0.01)` | 0.010 / 0.006 | 0.48 / 0.73 | gate passes; current |
+
+(`contract_walk.json`, `contract_walk_big.json`, `contract_walk_warp.json`.)
+Two findings shaped it beyond the gate:
+
+1. **A mean future is not a future.** The VAE decoded the mean given its
+   intent, and an averaged lift-off is a ramp that never crosses the
+   threshold. Flow matching samples whole trajectories.
+2. **Forces are not negative.** In plain units the flow put mass on both
+   sides of zero load: plans asked for −0.48 body weights and their swings
+   collapsed to a single step (median 1 against 2 in the data). Modelling the
+   load share in log units fixes the boundary for any contact of any task.
+
+**Chained on its own plans** — what a perfect tracker would walk
+(`transfer/scripts/chain_contract.py`, `contract_chain_walk_*.json`) — the
+generator still steps fast: stance 15 against 23 steps, stride period −22 %,
+rhythm −16 %, stable in every environment. Its single plans are calibrated
+by stance age too (lift-off within 13 steps at ages 10–15: 0.41 forecast,
+0.50 data), so the shortening comes from reading its own plans back as
+history. A closed loop does not: its history is the physical state a body
+reached. The chain is reported as a pessimistic bound.
+
+### 7.2 The body side, iterated
+
+**Round 2** (`contract_g1_closed_loop_r2.json`): fields scored apart, scores
+averaged, kernels at 1, 10 and 100 tolerances. Trained without falls, and
+then, closed-loop against the teacher:
+
+| path | falls | speed (m/s) | own / other plan error | verdict |
+| --- | ---: | ---: | ---: | --- |
+| contract on the true state | 0 / 64 | 0.005 | 0.35 / 2.17 (use passes) | fail |
+| deployed, through the encoder | 291 / 323 | −0.34 | 0.59 ratio | fail |
+
+On the true state it follows its plans and stands still. From its own
+standing history the generator does ask it to start (0.056 → 0.115 m/s
+within 1 `T`), but each plan restarts from where the body is, so not
+accelerating never accumulates, and an averaged field score lets it give up
+the one field it misses: standing earned 0.87 of the reward. Two general
+corrections followed:
+
+- **One likelihood for the whole state** — every field at once.
+- **The plan's integrals** since it was drawn, CoM displacement and turn,
+  against their spread across plans: the root-trajectory term of every
+  motion tracker, which a state (as opposed to a trajectory) leaves out.
+
+On the deployed path the encoder, fitted to the teacher's actions, read the
+tracker's out of distribution — the same loop §6 found before DAgger.
+
+**Round 3**: *in progress; results added below when measured.*
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

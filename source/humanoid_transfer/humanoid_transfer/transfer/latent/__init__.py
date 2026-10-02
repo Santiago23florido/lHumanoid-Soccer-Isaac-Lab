@@ -27,4 +27,18 @@ capture those rollouts and run the result closed-loop.
     Linear and MLP probes over wide, lazily gathered inputs.
 ``train_memory``
     The memory model's two-stage training and its evaluation.
+``events``
+    Each contact's next change and next landing, read off a rollout's ``z*``.
+``plan`` / ``train_plan``
+    A shared contact planner (hazard and landing) and a policy committed to
+    it -- calibrated, and not used by the policy: the result that led to the
+    contract.
+``skill_torch``
+    ``z*`` in torch, held to the NumPy definition, for environments that
+    reward a body by the state it reaches.
+``contract`` / ``train_contract``
+    The interface fixed by physics instead of learned: a generator per task
+    that samples the next ``z*`` from the history of ``ẑ*`` and the command,
+    and its training, gate and chained-gait measurement. Bodies follow it in
+    :mod:`humanoid_transfer.transfer.tasks.tracking`.
 """

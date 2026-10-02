@@ -640,6 +640,62 @@ contract's view now does too.
 - **Effect:** over 300 iterations the lag fell from 1.8 to 0.24 leg
   lengths.
 
+**Round 11 at 1599** (`_r11_1599.json`), against the teacher at its play
+command:
+
+| path | falls | speed (ratio) | stride | period | duty | use |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| deployed (encoder) | 0 / 64 | 0.262 (1.23) | +30 % | +6 % | 0.98 / 0.90 | 0.111 |
+| true state, own history | 0 / 64 | 0.233 (1.10) | +21 % | +10 % | 0.98 / 0.89 | 0.088 |
+| true state, autonomous | 0 / 64 | 0.222 (1.04) | +20 % | +15 % | 0.98 / 0.90 | 0.075 |
+
+- **What is fixed:** the deployed path no longer falls (50 before the
+  encoder was refitted), and the speed bias is gone. The use gate passes
+  on every path, and period and duty are within 6–15 %.
+- **What fails gate C:** the stride.
+- **Split by source:** the plans ask for shorter, quicker steps than the
+  teacher (period 1.37–1.45, the chain's bias of §7.1). The body takes
+  fewer, longer steps at the right speed: it reaches the CoM's motion
+  (0.55–0.78 tolerances) better than the feet's (2.2–4.2).
+
+### 7.3 A new task on the same body, zero-shot
+
+The published `Isaac-Velocity-Flat-G1-v0` policy is the new task. Its
+contract is `flat_h20e`: its generator, with the G1's refitted encoder
+moved over by `body_encoder.py`. It drives round 11's tracker, unchanged
+(`contract_new_task_r11_*.json`):
+
+| command | path | falls (episodes) | speed ratio | use |
+| --- | --- | ---: | ---: | ---: |
+| forward 0.25 m/s | true state | 120 / 154 | 0.83 | 0.31 |
+| fast 0.6 m/s | true state | 141 / 178 | 0.37 | 0.33 |
+| turning | true state | 144 / 179 | 0.93 | 0.37 |
+| all three | encoder | 191–238 / 224–270 | 0.22–0.38 | 0.49–0.64 |
+
+**It does not transfer, not even on the body that learned the walk.**
+- **Two different gaits:** the published policy walks with duty 0.47 /
+  0.53 and a period of 0.98 `T`. The walk teacher shuffles at duty 0.92
+  and 1.87 `T`.
+- **The tracker:** it learned to reach the walk's plans and cannot make
+  quick alternating steps. It falls, its history leaves anything either
+  generator saw, and the plans drawn from that history are meaningless
+  (period 0.5).
+- **The autonomous reference fails too** (322 falls, forward). The flat
+  generator has had no DAgger round, and its own chain diverges from a
+  standing start.
+
+This is the limit of the scheme as specified, not a defect of one piece.
+A tracker trained by RL is an inverse model over the plans it practised,
+and nothing makes it competent outside them. The contract makes a skill
+*expressible* on any body. It makes it *executable* only on a body whose
+tracker has practised plans like it.
+
+The general correction is to train each body's tracker once on every
+skill available, and to test with a skill held out of that set. It is
+still N + M trainings, but on the union of skills rather than on one.
+That changes the requirement ("trained once, with walking"), so it is
+left to the user.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

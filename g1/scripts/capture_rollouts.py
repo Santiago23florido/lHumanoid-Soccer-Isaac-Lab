@@ -128,6 +128,12 @@ parser.add_argument(
     metavar=("LOW", "HIGH"),
     help="Range of seconds between command resamples.",
 )
+parser.add_argument(
+    "--start-fraction",
+    type=float,
+    default=None,
+    help="On a contract task, the share of resets started inside the task's demonstrations.",
+)
 parser.add_argument("--num-envs", type=int, default=32, help="Parallel rollouts.")
 parser.add_argument("--steps", type=int, default=600, help="Control steps to record.")
 parser.add_argument(
@@ -198,6 +204,8 @@ def main() -> int:
         cfg.commands.base_velocity.rel_standing_envs = args_cli.standing_fraction
     if args_cli.resample_seconds is not None:
         cfg.commands.base_velocity.resampling_time_range = tuple(args_cli.resample_seconds)
+    if args_cli.start_fraction is not None:
+        cfg.commands.base_velocity.start_fraction = args_cli.start_fraction
     if args_cli.contract_from_truth:
         cfg.commands.base_velocity.use_encoder = False
     if args_cli.command is not None:

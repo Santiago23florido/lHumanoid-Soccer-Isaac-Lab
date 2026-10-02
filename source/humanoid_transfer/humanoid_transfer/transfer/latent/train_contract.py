@@ -59,7 +59,10 @@ def contract_steps(streams: Streams, horizon: int) -> torch.Tensor:
     left out of what the generator learns to ask for.
     """
     steps = streams.samples(future=horizon)
-    return steps[~streams.falling[steps] & ~streams.falling[steps + horizon]]
+    keep = ~streams.falling[steps] & ~streams.falling[steps + horizon]
+    if streams.target is not None:
+        keep &= streams.target[steps]
+    return steps[keep]
 
 
 def new_generator(

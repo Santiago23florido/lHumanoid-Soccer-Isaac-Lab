@@ -181,6 +181,7 @@ class ReferenceCommand(UniformVelocityCommand):
         self._rows = torch.arange(n, device=self.device)
         self.has_plan = torch.zeros(n, dtype=torch.bool, device=self.device)
         self.starts = self._load_starts(cfg.start_states) if cfg.start_states else None
+        self.windows = self._load_windows(cfg.start_windows) if cfg.start_windows else None
         self._reward_stamp = -1
         self._reward_true = torch.zeros(n, size, device=self.device)
         self._true_now = torch.zeros(n, size, device=self.device)
@@ -224,6 +225,61 @@ class ReferenceCommand(UniformVelocityCommand):
         }
         starts["index"] = torch.as_tensor(np.stack([t, n], -1), device=self.device)
         return starts
+
+    def _load_windows(self, path: str) -> dict[str, torch.Tensor]:
+        """Dimensionless windows of the task's demonstrations, any body's (see below)."""
+        data = np.load(path)
+        units = UnitSystem(float(data["leg_length"]), float(data["total_mass"]))
+        done = data["done"]
+        steps = self.interpolation.shape[1]
+        clean = ~np.lib.stride_tricks.sliding_window_view(done, steps + 1, axis=0).any(-1)
+        if "terminated" in data.files:
+            near_fall = np.lib.stride_tricks.sliding_window_view(
+                data["terminated"], steps + 60, axis=0
+            ).any(-1)
+            clean = clean[: len(near_fall)] & ~near_fall
+        t, n = np.nonzero(clean)
+        command = data["command"] * np.array([1 / units.velocity, 1 / units.velocity, units.time])
+        return {
+            "skill_state": torch.as_tensor(data["skill_state"], device=self.device),
+            "command": torch.as_tensor(command, device=self.device, dtype=torch.float32),
+            "index": torch.as_tensor(np.stack([t + steps, n], -1), device=self.device),
+        }
+
+    def _start_from_contract(self, ids: torch.Tensor) -> None:
+        """Start a body with no demonstrations of its own inside the task's motion.
+
+        Reference state initialisation needs states of this body, which a second
+        body does not have. What the contract does have is the task's motion in
+        dimensionless units: the generator's history is seeded with a window of
+        it, the command is that window's (in this body's units), and the base is
+        given the window's CoM velocity in this body's units. The joints stay in
+        the default pose, so a body that does not step falls -- the plan asks for
+        exactly the steps that catch it.
+        """
+        windows = self.windows
+        pick = windows["index"][
+            torch.randint(len(windows["index"]), (len(ids),), device=self.device)
+        ]
+        t, n = pick[:, 0], pick[:, 1]
+        steps = self.interpolation.shape[1]
+        offsets = torch.arange(steps - 1, -1, -1, device=self.device)
+        window = windows["skill_state"][t[:, None] - offsets, n[:, None]].float()
+        normalised = self.generator.skill_norm(window)
+        self.history[ids] = normalised + self.sigma * torch.randn_like(normalised)
+        self.vel_command_b[ids] = windows["command"][t, n] / self.command_scale
+        self.is_standing_env[ids] = windows["command"][t, n].norm(dim=-1) == 0
+        heading = window[:, -1, _VX : _VX + 2] * self.units.velocity
+        # The root pose the reset just wrote; body poses are only refreshed by a step.
+        w, x, y, z = self.robot.data.root_quat_w[ids].unbind(-1)
+        yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+        c, s = torch.cos(yaw), torch.sin(yaw)
+        velocity = torch.zeros(len(ids), 6, device=self.device)
+        velocity[:, 0] = c * heading[:, 0] - s * heading[:, 1]
+        velocity[:, 1] = s * heading[:, 0] + c * heading[:, 1]
+        self.robot.write_root_velocity_to_sim(velocity, env_ids=ids)
+        self.needs_refill[ids] = False
+        self.replan[ids] = True
 
     def _start_from_demonstrations(self, ids: torch.Tensor) -> None:
         """Reference state initialisation (Peng et al., 2018) on the contract.
@@ -398,6 +454,11 @@ class ReferenceCommand(UniformVelocityCommand):
             chosen = every[torch.rand(len(every), device=self.device) < self.cfg.start_fraction]
             if len(chosen) > 0:
                 self._start_from_demonstrations(chosen)
+        if self.windows is not None and self.cfg.start_fraction > 0.0:
+            every = torch.arange(self.num_envs, device=self.device)[ids]
+            chosen = every[torch.rand(len(every), device=self.device) < self.cfg.start_fraction]
+            if len(chosen) > 0:
+                self._start_from_contract(chosen)
         return extras
 
     def _resample_command(self, env_ids: Sequence[int]) -> None:
@@ -495,6 +556,10 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     start_states: str | None = None
     """A capture of the task's demonstrations (with ``base_pos``) to start episodes from."""
+
+    start_windows: str | None = None
+    """A capture of the task's demonstrations by any body: its ``z*`` windows seed starts
+    on a body without demonstrations of its own (:meth:`ReferenceCommand._start_from_contract`)."""
 
     start_fraction: float = 0.0
     """Share of resets that start from a demonstrated state instead of the default pose."""

@@ -49,12 +49,18 @@ class Streams:
     end: torch.Tensor
     capture: torch.Tensor
     env: torch.Tensor
+    target: torch.Tensor | None = None
+    """Steps whose future may be learned from: False where the future is not the
+    teacher's (the history part of a DAgger capture, :func:`load_streams`)."""
 
     def __len__(self) -> int:
         return self.obs.shape[0]
 
     def to(self, device: torch.device | str) -> Streams:
-        return Streams(**{k: getattr(self, k).to(device) for k in self.__dataclass_fields__})
+        def move(value: torch.Tensor | None) -> torch.Tensor | None:
+            return None if value is None else value.to(device)
+
+        return Streams(**{k: move(getattr(self, k)) for k in self.__dataclass_fields__})
 
     def samples(self, future: int = 0) -> torch.Tensor:
         """Steps that are trustworthy and keep ``future`` successors inside their episode."""
@@ -105,6 +111,10 @@ def load_streams(paths: list[Path]) -> Streams:
         parts["falling"].append(columns(falling_steps(terminated)))
         parts["capture"].append(np.full(steps * envs, capture))
         parts["env"].append(np.repeat(np.arange(envs), steps))
+        # A DAgger capture starts each column with a history the teacher did not
+        # produce; only the steps from ``target_mask`` on carry the teacher's future.
+        mask = data["target_mask"] if "target_mask" in data.files else np.ones_like(done)
+        parts["target"].append(columns(mask.astype(bool)))
         for env in range(envs):
             start, end = _column_bounds(done[:, env])
             parts["start"].append(start + offset)
@@ -124,6 +134,7 @@ def load_streams(paths: list[Path]) -> Streams:
         end=stack("end", torch.long),
         capture=stack("capture", torch.long),
         env=stack("env", torch.long),
+        target=stack("target", torch.bool),
     )
 
 

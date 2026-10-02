@@ -172,6 +172,9 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             start_states=str(START_STATES),
             start_fraction=0.8,
             autonomous=True,
+            # No catching up with a body that falls behind: that let it veto the task
+            # again. A body that leaves the task falls, and a fall ends the episode.
+            resync_error=float("inf"),
         )
 
         self.observations = TrackObservationsCfg()

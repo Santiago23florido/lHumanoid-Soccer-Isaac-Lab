@@ -39,11 +39,13 @@ from isaaclab_tasks.manager_based.locomotion.velocity import mdp
 from isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg import G1Rewards
 
 from ....transfer.tasks.tracking import (
+    OCTAVE_WEIGHTS,
+    OCTAVES,
     ReferenceCommandCfg,
     contract_left,
+    contract_likelihood,
     contract_path,
     contract_privileged,
-    contract_tracking,
     contract_view,
 )
 from ..g1_walk.g1_walk_env_cfg import FROUDE_MATCHED_SPEED, G1WalkTeacherEnvCfg
@@ -139,14 +141,12 @@ class TrackPlayObservationsCfg(TrackObservationsCfg):
 
 @configclass
 class G1TrackRewards(G1Rewards):
+    # One likelihood, its error's scale marginalised over octaves (1 to 128 tolerances);
+    # it replaced three kernels two decades apart, between which it was flat (§8.4).
     contract = RewTerm(
-        func=contract_tracking, weight=1.0, params={"command_name": COMMAND, "kernel": 1.0}
-    )
-    contract_medium = RewTerm(
-        func=contract_tracking, weight=0.5, params={"command_name": COMMAND, "kernel": 10.0}
-    )
-    contract_coarse = RewTerm(
-        func=contract_tracking, weight=0.25, params={"command_name": COMMAND, "kernel": 100.0}
+        func=contract_likelihood,
+        weight=1.0,
+        params={"command_name": COMMAND, "kernels": OCTAVES, "weights": OCTAVE_WEIGHTS},
     )
 
 

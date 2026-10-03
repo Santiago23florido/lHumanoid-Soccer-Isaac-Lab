@@ -13,18 +13,20 @@ robot's tracking environment is built from:
 :func:`contract_view` / :func:`contract_path` / :func:`contract_privileged`
     What the tracker and its critic see of the plan: the states it asks for,
     and where it is going.
-:func:`contract_tracking`
+:func:`contract_likelihood`
     The only task-shaped reward a tracker gets: how likely the state it
-    reached is under the plan, at the plan's own tolerance.
+    reached is under the plan, at the plan's own tolerance, with the scale of
+    the body's error marginalised out (:data:`OCTAVES`).
 
 The tracker never sees the command or the task: the plan is the only thing
 that says what to do, so it cannot be ignored, and nothing a tracker learns is
 specific to the task whose generator trained it.
 """
 
-from .command import ReferenceCommand, ReferenceCommandCfg
+from .command import OCTAVE_WEIGHTS, OCTAVES, ReferenceCommand, ReferenceCommandCfg
 from .mdp import (
     contract_left,
+    contract_likelihood,
     contract_path,
     contract_privileged,
     contract_tracking,
@@ -32,9 +34,12 @@ from .mdp import (
 )
 
 __all__ = [
+    "OCTAVES",
+    "OCTAVE_WEIGHTS",
     "ReferenceCommand",
     "ReferenceCommandCfg",
     "contract_left",
+    "contract_likelihood",
     "contract_path",
     "contract_privileged",
     "contract_tracking",

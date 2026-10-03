@@ -50,6 +50,21 @@ def contract_left(env: ManagerBasedRLEnv, command_name: str, lag: float = 0.5) -
     return term.has_plan & (term.last_lag > lag)
 
 
+def contract_likelihood(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    kernels: tuple[float, ...] = (1.0,),
+    weights: tuple[float, ...] = (1.0,),
+) -> torch.Tensor:
+    """The reached state's likelihood under the plan, its error's scale unknown.
+
+    A quadrature over scales of ``exp(-e / (2 k²))``, ``e`` the mean of the
+    fields' errors in tolerances (see
+    :meth:`~.command.ReferenceCommand.tracking_likelihood`). Zero without a plan.
+    """
+    return _term(env, command_name).tracking_likelihood(kernels, weights)
+
+
 def contract_tracking(
     env: ManagerBasedRLEnv, command_name: str, kernel: float = 1.0
 ) -> torch.Tensor:
@@ -74,6 +89,7 @@ def contract_tracking(
 
 __all__ = [
     "contract_left",
+    "contract_likelihood",
     "contract_path",
     "contract_privileged",
     "contract_tracking",

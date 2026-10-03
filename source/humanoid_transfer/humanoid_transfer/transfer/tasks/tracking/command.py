@@ -510,7 +510,28 @@ class ReferenceCommand(UniformVelocityCommand):
         self.last_error = torch.where(valid, joint, self.last_error)
         state = error[:, :-1].mean(dim=-1)
         self.last_error_state = torch.where(valid, state, self.last_error_state)
+        self._joint = joint
         return torch.exp(-0.5 * joint / kernel**2) * valid
+
+    def tracking_likelihood(
+        self, kernels: Sequence[float], weights: Sequence[float]
+    ) -> torch.Tensor:
+        """``Σ w_k exp(-e / (2 k²))``: the plan's likelihood with the error's scale unknown.
+
+        How far a body can get from its plan is not only the encoder's error: a
+        body cannot reproduce a model's plan, or another body's, to the
+        millimetre. With that scale ``s`` unknown and a power-law prior on it, the
+        likelihood is ``∫ p(s) N(e; 0, s²) ds``, heavy-tailed: it peaks at the plan
+        and keeps a gradient at every distance. The scales ``k`` and weights ``w``
+        are a quadrature of that integral (:data:`OCTAVES`).
+        """
+        valid = self.has_plan
+        base = self.tracking_reward(1.0)
+        joint = self._joint
+        total = weights[0] * base
+        for kernel, weight in zip(kernels[1:], weights[1:], strict=True):
+            total = total + weight * torch.exp(-0.5 * joint / kernel**2) * valid
+        return total
 
     def _draw(self, ids: torch.Tensor, anchor: torch.Tensor) -> None:
         """Draw plans for ``ids``; ``anchor`` marks those that start from the body.
@@ -801,4 +822,24 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     procedural_seed: int = 0
 
 
-__all__ = ["ReferenceCommand", "ReferenceCommandCfg", "plan_interpolation"]
+OCTAVES = tuple(2.0**j for j in range(8))
+"""Scales of the likelihood's quadrature, in tolerances: an octave apart, 1 to 128.
+
+The first reward had three, at 1, 10 and 100 with weights 1, 0.5 and 0.25 --
+the same power law, ``w ∝ k^(-0.301)``, sampled two decades apart. Between
+them the likelihood was flat: at 15 tolerances, where a tracker practising
+the procedural family sat, getting a swing right changed the reward by 0.2 %
+per tolerance, and the swings were not learned. An octave apart, the same
+integral keeps its gradient; the three old scales are among these, with
+their weights."""
+
+OCTAVE_WEIGHTS = tuple(k ** (-math.log10(2.0)) for k in OCTAVES)
+
+
+__all__ = [
+    "OCTAVES",
+    "OCTAVE_WEIGHTS",
+    "ReferenceCommand",
+    "ReferenceCommandCfg",
+    "plan_interpolation",
+]

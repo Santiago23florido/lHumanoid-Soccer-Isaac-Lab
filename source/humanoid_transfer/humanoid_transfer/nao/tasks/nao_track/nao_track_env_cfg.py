@@ -45,11 +45,13 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
 
 from ....transfer.embodiment import G1, NAO
 from ....transfer.tasks.tracking import (
+    OCTAVE_WEIGHTS,
+    OCTAVES,
     ReferenceCommandCfg,
     contract_left,
+    contract_likelihood,
     contract_path,
     contract_privileged,
-    contract_tracking,
     contract_view,
 )
 from ...assets import nao_kinematics as nk
@@ -184,14 +186,12 @@ class NaoTrackRewards(RewardsCfg):
     joint_deviation_free = RewTerm(
         func=mdp.joint_deviation_l1, weight=-0.1, params={"asset_cfg": FREE_JOINTS}
     )
+    # One likelihood, its error's scale marginalised over octaves (1 to 128 tolerances);
+    # it replaced three kernels two decades apart, between which it was flat (§8.4).
     contract = RewTerm(
-        func=contract_tracking, weight=1.0, params={"command_name": COMMAND, "kernel": 1.0}
-    )
-    contract_medium = RewTerm(
-        func=contract_tracking, weight=0.5, params={"command_name": COMMAND, "kernel": 10.0}
-    )
-    contract_coarse = RewTerm(
-        func=contract_tracking, weight=0.25, params={"command_name": COMMAND, "kernel": 100.0}
+        func=contract_likelihood,
+        weight=1.0,
+        params={"command_name": COMMAND, "kernels": OCTAVES, "weights": OCTAVE_WEIGHTS},
     )
 
 

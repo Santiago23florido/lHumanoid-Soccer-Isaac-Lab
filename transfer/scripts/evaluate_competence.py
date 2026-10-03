@@ -124,6 +124,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--capture", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Judge every env as one group against the plans it followed (any source of plans).",
+    )
     args = parser.parse_args()
     data = dict(np.load(REPO_ROOT / args.capture))
     leg = float(data["leg_length"])
@@ -132,7 +137,11 @@ def main() -> int:
         "falls_max": FALLS_MAX, "tolerance": TOLERANCE, "speed_floor": SPEED_FLOOR,
         "use_max": USE_MAX}}  # fmt: skip
 
-    if "probe_index" not in data:
+    if args.all:
+        envs = np.arange(data["done"].shape[1])
+        report["all"] = judge(data, envs, dt_star)
+        print(json.dumps(report["all"], indent=1))
+    elif "probe_index" not in data:
         envs = np.flatnonzero(data["procedural"].any(axis=0))
         if len(envs) == 0:
             envs = np.arange(data["done"].shape[1])

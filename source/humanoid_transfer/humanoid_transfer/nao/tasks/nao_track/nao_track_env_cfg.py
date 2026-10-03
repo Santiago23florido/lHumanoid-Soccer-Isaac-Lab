@@ -61,7 +61,10 @@ CONTRACT = os.environ.get("HUMANOID_CONTRACT", str(DEFAULT_CONTRACT))
 POSTURE_CONTRACT = os.environ.get("HUMANOID_POSTURE_CONTRACT", CONTRACT)
 """The contract the NAO's tracker was trained on, which fixes its nominal crouch: the
 posture belongs to the body's tracker, so another task's contract must not move it."""
-START_WINDOWS = REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz"
+START_WINDOWS = os.environ.get(
+    "HUMANOID_START_WINDOWS", str(REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz")
+)
+"""Demonstrations a start is seeded from; another task's, to start inside its motion."""
 PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
 """Share of training episodes following the point-mass biped's plans (§8 of skill_space.md)."""
 

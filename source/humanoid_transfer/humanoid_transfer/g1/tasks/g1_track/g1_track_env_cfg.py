@@ -52,7 +52,9 @@ REPO_ROOT = Path(__file__).resolve().parents[6]
 BODY_CARD = REPO_ROOT / "g1" / "body" / "body_card.json"
 DEFAULT_CONTRACT = REPO_ROOT / "logs" / "contract" / "walk_starts" / "generator.pt"
 CONTRACT = os.environ.get("HUMANOID_CONTRACT", str(DEFAULT_CONTRACT))
-START_STATES = REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz"
+START_STATES = os.environ.get(
+    "HUMANOID_START_STATES", str(REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz")
+)
 """The task's generator; ``HUMANOID_CONTRACT`` points the same body at another task's."""
 
 PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))

@@ -11,7 +11,12 @@ step; a second body has no teacher. This capture needs only a contract task
   ``_fields``, ``contract_age``);
 * the body's units, so speeds compare across bodies in ``V = sqrt(g L)``;
 * ``encoder_input``: what the body's encoder reads, to fit one
-  (``train_body_encoder.py``).
+  (``train_body_encoder.py``);
+* with ``--procedural-fraction`` or ``--gait-probes``, plans from the
+  point-mass biped instead of the task (``transfer/latent/procedural.py``):
+  per step which envs follow it (``procedural``), and whether their biped has
+  fallen or is recovering; with probes, which probe each env follows
+  (``probe_index``, ``probes``).
 
 Usage::
 
@@ -25,6 +30,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -68,6 +74,19 @@ parser.add_argument(
     help="Feed the generator the true z* plus its noise, not the body's encoder.",
 )
 parser.add_argument("--start-fraction", type=float, default=None)
+parser.add_argument(
+    "--procedural-fraction",
+    type=float,
+    default=None,
+    help="Share of episodes whose plans come from the point-mass biped, with random schedules.",
+)
+parser.add_argument(
+    "--gait-probes",
+    type=Path,
+    default=None,
+    help="JSON list of fixed gaits of the family; env i follows probe i modulo their number.",
+)
+parser.add_argument("--procedural-seed", type=int, default=0)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--output", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
@@ -101,6 +120,13 @@ def main() -> int:
         command_cfg.rel_standing_envs = args_cli.standing_fraction
     if args_cli.resample_seconds is not None:
         command_cfg.resampling_time_range = tuple(args_cli.resample_seconds)
+    if args_cli.procedural_fraction is not None:
+        command_cfg.procedural_fraction = args_cli.procedural_fraction
+    probes = None
+    if args_cli.gait_probes is not None:
+        probes = json.loads(args_cli.gait_probes.read_text(encoding="utf-8"))
+        command_cfg.procedural_probes = probes
+    command_cfg.procedural_seed = args_cli.procedural_seed
     if args_cli.command is not None:
         vx, vy, wz = args_cli.command
         command_cfg.ranges.lin_vel_x = (vx, vx)
@@ -129,7 +155,7 @@ def main() -> int:
         "skill_state", "command", "action_executed", "base_lin_vel", "base_ang_vel",
         "base_quat", "base_pos", "contract_due", "contract_error", "contract_error_other",
         "contract_error_state", "contract_fields", "contract_age", "done", "terminated",
-        "encoder_input",
+        "encoder_input", "procedural", "biped_fallen", "biped_recovering",
     )  # fmt: skip
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
@@ -144,6 +170,11 @@ def main() -> int:
         record["base_quat"].append(robot.data.root_quat_w.cpu().numpy())
         record["base_pos"].append((robot.data.root_pos_w - origins).cpu().numpy())
         record["contract_due"].append(term.generator.skill_norm.inverse(term.due()).cpu().numpy())
+        record["procedural"].append(term.procedural.cpu().numpy())
+        biped = term.biped
+        none = np.zeros(inner.num_envs, dtype=bool)
+        record["biped_fallen"].append(none if biped is None else biped.fallen.cpu().numpy())
+        record["biped_recovering"].append(none if biped is None else biped.recovering.cpu().numpy())
         with torch.inference_mode():
             action = driver(obs["policy"])
         record["action_executed"].append(action.cpu().numpy())
@@ -159,7 +190,7 @@ def main() -> int:
     arrays = {
         k: np.stack(v).astype(
             np.bool_
-            if k in ("done", "terminated")
+            if k in ("done", "terminated", "procedural", "biped_fallen", "biped_recovering")
             else np.int64
             if k == "contract_age"
             else np.float32
@@ -167,6 +198,9 @@ def main() -> int:
         for k, v in record.items()
     }
     units = term.units
+    if probes is not None:
+        arrays["probe_index"] = term.probe_index.cpu().numpy()
+        arrays["probes"] = np.array(json.dumps(probes))
     args_cli.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         args_cli.output,

@@ -1051,6 +1051,25 @@ Limits and stopping rules:
   kernels 1, 2, … 128 with the old power law of weights (`OCTAVES`). The three old kernels
   are among them. At 15 tolerances the gradient is 13 times the old, at 2 it is 1.5
   times: no field loses its pull.
+- **G1 round 2** — the octave likelihood, round 1 resumed for 1000 iterations
+  (`competence_g1_r2_5195*.json`, `zero_shot_g1_r2_5195_*.json`):
+  - *Map:* the grid goes 13 → 26 of 61, the manoeuvres 0 → 5 of 6. Over the grid the duty
+    passes on 43 % (20 %) and the period on 98 %.
+  - *L2 passes:* all four twins. The published policy's three come out with duty
+    0.51–0.58 against 0.47–0.53, period exact, no falls, use 0.00–0.03.
+  - *L1b:* no falls on the true state or through the encoder (3 of 64 autonomous), speed
+    ratio 1.04–1.06, use 0.06 (round 12: 0.15). Stride −15 % and period −20 %: the walk's
+    generator's chain bias, followed (§7.1).
+  - *L3:* started inside the published gait, the tracker walks it on the published
+    generator's own chain with no falls in 128 episodes, at period 0.97 and duty 0.43/0.53
+    against the published policy's 0.98 and 0.47/0.53. Against the plans' own stitched
+    gait (period 0.77, its seams every 13 samples counted as steps) the gate's check fails;
+    against the policy it walks like, it does not.
+  - *L4 fails on falls:* 119–169 per 32 environments over 900 steps, with the plans used
+    (0.016–0.04). The falls come 60–105 steps into each episode, as the generator starts
+    the body from rest — the published generator's own chain diverges from a standing
+    start (§7.3), now on the body's history. A task-side failure (v): the pre-registered
+    correction is DAgger of the published generator on the G1.
 
 ## What this stage hands to the next
 

@@ -58,6 +58,9 @@ from ...assets.nao import NAO_STAND_JOINT_POS, get_nao_stand_cfg
 REPO_ROOT = Path(__file__).resolve().parents[6]
 DEFAULT_CONTRACT = REPO_ROOT / "logs" / "contract" / "walk_starts" / "generator.pt"
 CONTRACT = os.environ.get("HUMANOID_CONTRACT", str(DEFAULT_CONTRACT))
+POSTURE_CONTRACT = os.environ.get("HUMANOID_POSTURE_CONTRACT", CONTRACT)
+"""The contract the NAO's tracker was trained on, which fixes its nominal crouch: the
+posture belongs to the body's tracker, so another task's contract must not move it."""
 START_WINDOWS = REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz"
 
 COMMAND = "base_velocity"
@@ -196,7 +199,7 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Scene: the NAO on flat ground, crouched as low as the task's body walked.
         self.scene.robot = get_nao_stand_cfg(prim_path="{ENV_REGEX_NS}/Robot")
-        posture = contract_posture(CONTRACT)
+        posture = contract_posture(POSTURE_CONTRACT)
         self.scene.robot.init_state.joint_pos = {**NAO_STAND_JOINT_POS, **posture}
         self.scene.robot.init_state.pos = (0.0, 0.0, nk.sole_height_below_base(posture) + 0.005)
         self.scene.terrain.terrain_type = "plane"

@@ -29,6 +29,8 @@ cd "$root"
 "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt"
 policy="$run/exported/$checkpoint.pt"
 mkdir -p nao/rollouts
+# The NAO's crouch is its tracker's, fixed by the contract it was trained on.
+export HUMANOID_POSTURE_CONTRACT="$root/$walk"
 
 capture() {
   "$python" -u transfer/scripts/capture_contract.py --headless --task-id NaoTrack-Play-v0 \

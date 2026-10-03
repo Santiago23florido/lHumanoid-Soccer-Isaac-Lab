@@ -45,6 +45,7 @@ def main() -> int:
     args = parser.parse_args()
 
     saved = torch.load(args.task, map_location="cpu", weights_only=False)
+    body_saved = torch.load(args.body, map_location="cpu", weights_only=False)
     task = load_contract(args.task)
     body = load_contract(args.body)
     if body.encoder is None:
@@ -76,7 +77,8 @@ def main() -> int:
         task,
         ContractDims(**saved["dims"]),
         ContractClock(**saved["clock"]),
-        saved["encoder_input"],
+        # The encoder reads the body's senses: its input is the body's, not the task's.
+        body_saved["encoder_input"],
     )
     print(
         f"{args.output}: {args.task} with the encoder of {args.body} "

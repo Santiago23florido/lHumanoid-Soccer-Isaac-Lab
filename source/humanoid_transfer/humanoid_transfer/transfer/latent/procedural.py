@@ -244,11 +244,13 @@ class GaitRanges:
     with ``A = π / (4 β)`` the half-sine's peak. Humans: about 0.055 walking, 0.07 running;
     a slow run (long stances and long flights) would bounce a tenth of a leg."""
 
-    leg_orbit: tuple[float, float] = (0.05, 0.30)
-    """``μ``: how much of the feet's orbital momentum the body's angular momentum carries."""
+    leg_orbit: tuple[float, float] = (0.022, 0.147)
+    """``μ``: how much of the feet's orbital momentum the body's angular momentum carries.
+    Fitted on the walks: 0.044 (G1), 0.098 (NAO); the range is half the smaller to one and
+    a half times the larger (``transfer/results/procedural_calibration.json``)."""
 
-    yaw_inertia: tuple[float, float] = (0.0, 0.05)
-    """``ι``: the body's yaw inertia, in ``m L²``."""
+    yaw_inertia: tuple[float, float] = (0.004, 0.109)
+    """``ι``: the body's yaw inertia, in ``m L²``. Fitted: 0.0084 (G1), 0.073 (NAO)."""
 
     intent_noise: tuple[float, float] = (0.02, 0.03)
     """Stationary spread of the intent's wander, on velocity (``V``) and turn (``1/T``)."""

@@ -32,7 +32,7 @@ ranges fixed by physics (:class:`GaitRanges`):
   mean height.
 * **Horizontal.** The legs push along themselves, so the centre of mass is a
   variable-height inverted pendulum about the centre of pressure,
-  ``c̈ = F (c − p) / c_z`` (Caron et al., 2018).
+  ``c̈ = F (c − p) / c_z`` (Caron et al., 2019).
 * **Stepping and balance.** A walking foot aims where the divergent
   component of motion must be when it lands for the gait to repeat at the
   commanded velocity (Englsberger et al., 2015), for the model's own centre

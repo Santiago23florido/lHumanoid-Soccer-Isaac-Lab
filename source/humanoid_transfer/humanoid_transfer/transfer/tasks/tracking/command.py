@@ -20,13 +20,23 @@ adds is the contract:
   sampling of the trajectory (see :mod:`~...latent.contract`).
 * **The first step after a reset** is read before the simulator has applied
   the reset pose, as the captures found; it is neither stored nor rewarded.
+* **Plans no task wrote.** With ``procedural_fraction``, that share of
+  episodes follows the point-mass biped of
+  :mod:`~humanoid_transfer.transfer.latent.procedural` instead of the task's
+  generator: a plan from the whole family of feasible gaits, anchored on the
+  body at the episode's first trustworthy step, with exact integrals. The
+  tracker is not told which source a plan came from. The fields the biped
+  cannot derive are scored at its measured model error where that exceeds
+  the encoder's (``transfer/results/procedural_calibration.json``).
 """
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Sequence
 from dataclasses import MISSING
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -40,6 +50,7 @@ from ....common.similarity import UnitSystem
 from ....common.skill_state import SKILL_LAYOUT
 from ...latent.contract import load_contract, plan_integrals
 from ...latent.memory import TimeGrid
+from ...latent.procedural import GaitRanges, PointMassBiped
 from ...latent.skill_torch import BodyConstants, skill_state
 
 if TYPE_CHECKING:
@@ -152,6 +163,7 @@ class ReferenceCommand(UniformVelocityCommand):
             # Integrating a velocity known to sigma: the error grows like sqrt(time),
             # counted from when the reference last started from the body (below).
             self.integral_rate = rates * self.dt_star
+            self.tolerance_procedural = self._procedural_tolerance(sigma, length)
 
         n, size = self.num_envs, generator.skill
         steps = self.interpolation.shape[1]
@@ -188,6 +200,26 @@ class ReferenceCommand(UniformVelocityCommand):
         self.has_plan = torch.zeros(n, dtype=torch.bool, device=self.device)
         self.starts = self._load_starts(cfg.start_states) if cfg.start_states else None
         self.windows = self._load_windows(cfg.start_windows) if cfg.start_windows else None
+        self.procedural = torch.zeros(n, dtype=torch.bool, device=self.device)
+        """Envs whose episode follows the point-mass biped instead of the task's generator."""
+        self.biped = None
+        if cfg.procedural_fraction > 0.0 or cfg.procedural_probes:
+            self.biped = PointMassBiped(
+                n,
+                GaitRanges(),
+                body_step=self.dt_star,
+                substep=grid_step / 4,
+                horizon=length * self.dt_star,
+                device=self.device,
+                seed=cfg.procedural_seed,
+            )
+            offsets = torch.arange(1, length + 1, dtype=torch.float64) * self.dt_star
+            self.biped.set_offsets(offsets)
+            if cfg.procedural_probes:
+                self._set_probes(cfg.procedural_probes)
+        self.metrics["procedural"] = torch.zeros(n, device=self.device)
+        self.metrics["error_procedural"] = torch.zeros(n, device=self.device)
+        self.metrics["error_task"] = torch.zeros(n, device=self.device)
         self._reward_stamp = -1
         self._reward_true = torch.zeros(n, size, device=self.device)
         self._true_now = torch.zeros(n, size, device=self.device)
@@ -198,6 +230,41 @@ class ReferenceCommand(UniformVelocityCommand):
             f"commit {self.commit}, view {self.view}, encoder {self.encoder is not None}\n"
             + super().__str__()
         )
+
+    def _procedural_tolerance(self, sigma: torch.Tensor, length: int) -> torch.Tensor:
+        """``(length, 27)``: the precision tolerance, widened to the biped's model error where
+        that is the larger -- the fields a point mass cannot derive (tilt, base rate,
+        angular momentum). A procedural plan is a likelihood under the model it was written
+        with; scoring those fields at the encoder's precision would score the model."""
+        tolerance = sigma.clone()
+        if self.cfg.procedural_tolerance == "calibrated" and self.cfg.procedural_calibration:
+            report = json.loads(Path(self.cfg.procedural_calibration).read_text(encoding="utf-8"))
+            names = SKILL_LAYOUT.component_names()
+            std = self.generator.skill_norm.std.to(self.device)
+            for name, value in report["sigma_model"].items():
+                i = names.index(name)
+                model = value / float(std[i])
+                if model > float(sigma[i]):
+                    tolerance[i] = math.sqrt(float(sigma[i]) ** 2 + model**2)
+        return tolerance.expand(length, -1).clone()
+
+    def _set_probes(self, probes: list[dict]) -> None:
+        """Every env follows one fixed gait of the family, env ``i`` probe ``i % len``."""
+        n = self.num_envs
+        keys = ("forward", "lateral", "turn", "period", "width", "height", "clearance", "lean")
+        which = [i % len(probes) for i in range(n)]
+        params = {
+            key: torch.tensor([float(probes[w][key]) for w in which], device=self.device)
+            for key in keys
+        }
+        params["duty"] = torch.tensor([list(probes[w]["duty"]) for w in which], device=self.device)
+        params["first"] = torch.tensor([i % 2 for i in range(n)], device=self.device)
+        params["duration"] = torch.full((n,), 1e9, device=self.device)
+        params["offset"] = torch.tensor(
+            [float(probes[w].get("offset", 0.5)) for w in which], device=self.device
+        )
+        self.biped.set_probes(torch.arange(n, device=self.device), params)
+        self.probe_index = torch.tensor(which, device=self.device)
 
     def _load_starts(self, path: str) -> dict[str, torch.Tensor]:
         """States of the task's own demonstrations, to start episodes from (RSI)."""
@@ -389,6 +456,9 @@ class ReferenceCommand(UniformVelocityCommand):
             self._reward_frame = self.frame()
             self._reward_stamp = stamp
         due, tolerance = self.due(), self.tolerance[self.age]
+        if self.biped is not None:
+            widened = self.tolerance_procedural[self.age]
+            tolerance = torch.where(self.procedural[:, None], widened, tolerance)
         error = (self._reward_true - due) / tolerance
         # The same state against the plan another environment holds: if a tracker
         # ignored its plan, the two errors would be alike.
@@ -468,11 +538,21 @@ class ReferenceCommand(UniformVelocityCommand):
         # generator's answer to them is meaningless but must stay finite.
         plan = torch.nan_to_num(plan, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
         full = torch.cat([window[:, -1:], plan], dim=1)
-        self.plan[ids] = torch.einsum("lk,nkd->nld", self.plan_matrix, full)
+        rows = torch.einsum("lk,nkd->nld", self.plan_matrix, full)
         step = float(self.generator.grid_step)
         integrals = plan_integrals(self.generator.skill_norm.inverse(plan), step)
         integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
-        self.integrals[ids] = torch.einsum("lk,nkd->nld", self.plan_matrix, integrals)
+        integrals = torch.einsum("lk,nkd->nld", self.plan_matrix, integrals)
+        if self.biped is not None:
+            # The biped's trajectory, read at the body's own instants, with its exact
+            # displacement and turn for integrals.
+            ahead, moved, _ = self.biped.plan(ids)
+            ahead = self.generator.skill_norm(ahead).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
+            chosen = self.procedural[ids]
+            rows = torch.where(chosen[:, None, None], ahead, rows)
+            integrals = torch.where(chosen[:, None, None], moved, integrals)
+        self.plan[ids] = rows
+        self.integrals[ids] = integrals
         com, yaw = self._frame_now
         self.start_com[ids] = torch.where(anchor[:, None], com[ids], reference_com)
         self.start_yaw[ids] = torch.where(anchor, yaw[ids], reference_yaw)
@@ -492,14 +572,22 @@ class ReferenceCommand(UniformVelocityCommand):
         self.anchored[ids] = 0
         self.far_steps[ids] = 0
         self.resyncs[ids] = 0.0
+        every = torch.arange(self.num_envs, device=self.device)[ids]
+        if self.biped is not None:
+            # A procedural episode starts from the default pose: the biped starts from
+            # the body, not the body from a demonstration.
+            if self.cfg.procedural_probes:
+                self.procedural[every] = True
+            else:
+                draw = torch.rand(len(every), device=self.device)
+                self.procedural[every] = draw < self.cfg.procedural_fraction
+        task = every[~self.procedural[every]]
         if self.starts is not None and self.cfg.start_fraction > 0.0:
-            every = torch.arange(self.num_envs, device=self.device)[ids]
-            chosen = every[torch.rand(len(every), device=self.device) < self.cfg.start_fraction]
+            chosen = task[torch.rand(len(task), device=self.device) < self.cfg.start_fraction]
             if len(chosen) > 0:
                 self._start_from_demonstrations(chosen)
         if self.windows is not None and self.cfg.start_fraction > 0.0:
-            every = torch.arange(self.num_envs, device=self.device)[ids]
-            chosen = every[torch.rand(len(every), device=self.device) < self.cfg.start_fraction]
+            chosen = task[torch.rand(len(task), device=self.device) < self.cfg.start_fraction]
             if len(chosen) > 0:
                 self._start_from_contract(chosen)
         return extras
@@ -514,6 +602,11 @@ class ReferenceCommand(UniformVelocityCommand):
         metric = self.metrics["contract_error"]
         self.metrics["contract_error"] = 0.98 * metric + 0.02 * self.last_error
         self.metrics["lag"] = 0.98 * self.metrics["lag"] + 0.02 * self.last_lag
+        procedural = self.procedural.float()
+        self.metrics["procedural"] = procedural
+        smoothed = self.metrics["contract_error"]
+        self.metrics["error_procedural"] = smoothed * procedural
+        self.metrics["error_task"] = smoothed * (1.0 - procedural)
 
     def _update_command(self) -> None:
         super()._update_command()
@@ -523,6 +616,11 @@ class ReferenceCommand(UniformVelocityCommand):
         ready = ~self.just_reset
         refill = ready & self.needs_refill
         carried = ready & ~self.needs_refill
+        if self.biped is not None:
+            self.biped.advance()
+            start = (refill & self.procedural).nonzero().squeeze(-1)
+            if len(start) > 0:
+                self.biped.anchor(start, self.generator.skill_norm.inverse(estimate[start]))
 
         filled = estimate[:, None].expand_as(self.history)
         shifted = torch.cat([self.physical[:, 1:], estimate[:, None]], dim=1)
@@ -686,6 +784,21 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     half_precision: bool = False
     """Draw plans under float16 autocast (the state, history and plan stay float32)."""
+
+    procedural_fraction: float = 0.0
+    """Share of episodes whose plans come from the point-mass biped, not the task's generator."""
+
+    procedural_probes: list[dict] | None = None
+    """Fixed gaits of the family, one per env in turn (evaluation); every episode follows one."""
+
+    procedural_tolerance: str = "calibrated"
+    """``calibrated``: the biped's model error widens the tolerance on the fields it cannot
+    derive; ``precision``: the encoder's error everywhere, as for the task's plans."""
+
+    procedural_calibration: str | None = None
+    """``procedural_calibration.json``: the biped's model error per component."""
+
+    procedural_seed: int = 0
 
 
 __all__ = ["ReferenceCommand", "ReferenceCommandCfg", "plan_interpolation"]

@@ -55,6 +55,12 @@ CONTRACT = os.environ.get("HUMANOID_CONTRACT", str(DEFAULT_CONTRACT))
 START_STATES = REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz"
 """The task's generator; ``HUMANOID_CONTRACT`` points the same body at another task's."""
 
+PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
+"""Share of training episodes following the point-mass biped's plans instead of the task's
+(``transfer/docs/skill_space.md`` §8); 0 keeps the walk alone."""
+
+CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
+
 BASE_BODY = "pelvis"
 FOOT_BODIES = ["left_ankle_roll_link", "right_ankle_roll_link"]
 COMMAND = "base_velocity"
@@ -180,6 +186,8 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             # No catching up with a body that falls behind: that let it veto the task
             # again. A body that leaves the task falls, and a fall ends the episode.
             resync_error=float("inf"),
+            procedural_fraction=PROCEDURAL,
+            procedural_calibration=str(CALIBRATION),
         )
 
         self.observations = TrackObservationsCfg()
@@ -219,6 +227,7 @@ class G1TrackEnvCfg_PLAY(G1TrackEnvCfg):
         command.ranges.lin_vel_x = (FROUDE_MATCHED_SPEED, FROUDE_MATCHED_SPEED)
         command.use_encoder = True
         command.start_fraction = 0.0
+        command.procedural_fraction = 0.0
         # The teacher's own play conditions, so the two captures compare.
         command.resampling_time_range = (10.0, 10.0)
         command.rel_standing_envs = 0.02

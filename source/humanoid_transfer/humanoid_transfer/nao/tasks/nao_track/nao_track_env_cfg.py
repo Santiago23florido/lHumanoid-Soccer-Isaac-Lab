@@ -62,6 +62,10 @@ POSTURE_CONTRACT = os.environ.get("HUMANOID_POSTURE_CONTRACT", CONTRACT)
 """The contract the NAO's tracker was trained on, which fixes its nominal crouch: the
 posture belongs to the body's tracker, so another task's contract must not move it."""
 START_WINDOWS = REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz"
+PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
+"""Share of training episodes following the point-mass biped's plans (§8 of skill_space.md)."""
+
+CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
 
 COMMAND = "base_velocity"
 BASE_BODY = "base_link"
@@ -254,6 +258,8 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             # No catching up with a body that falls behind: that let it veto the task
             # again. A body that leaves the task falls, and a fall ends the episode.
             resync_error=float("inf"),
+            procedural_fraction=PROCEDURAL,
+            procedural_calibration=str(CALIBRATION),
         )
 
         self.observations = NaoTrackObservationsCfg()
@@ -310,5 +316,6 @@ class NaoTrackEnvCfg_PLAY(NaoTrackEnvCfg):
         command.resampling_time_range = (10.0, 10.0)
         command.rel_standing_envs = 0.02
         command.start_fraction = 0.0
+        command.procedural_fraction = 0.0
         # Captures count falls only.
         self.terminations.contract_left = None

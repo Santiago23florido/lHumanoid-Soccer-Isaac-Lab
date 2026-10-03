@@ -757,6 +757,21 @@ problems the G1 never met, because the G1 reached them already walking.
    deep crouch is a design question. The obvious candidate is the CoM
    height, which is the pendulum's own length.
 
+**At 500 iterations the NAO walks the G1's walk**
+(`contract_nao_walk_mid_500.json`). It starts from standing at the G1
+teacher's play command in its own units, on the true state, drawing
+plans from its own history. Measured against the G1 teacher in body
+units:
+- **Stability and speed:** 0 / 32 falls, 0.0815 `V` (0.127 m/s, a speed
+  ratio of 0.97).
+- **Use gate:** passes at 0.153; every field but the feet's position is
+  within 2 tolerances.
+- **Gait:** stride 0.111 (−30 %), period 1.35 `T` (−28 %), duty 0.83 /
+  0.79.
+- **Against the plans:** it steps quicker and shorter than asked (asked
+  period 1.66 `T`). The G1's tracker misses the other way, with fewer,
+  longer steps.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

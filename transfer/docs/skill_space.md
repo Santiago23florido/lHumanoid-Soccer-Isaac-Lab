@@ -772,6 +772,25 @@ units:
   period 1.66 `T`). The G1's tracker misses the other way, with fewer,
   longer steps.
 
+**At 1500 iterations, on every path** (`contract_nao_walk_nao2.json`):
+
+| path | falls | speed ratio (`V`) | stride | period | duty | use |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| deployed (the NAO's encoder) | 0 / 64 | 1.05 | −18 % | −21 % | 0.84 / 0.82 | 0.083 |
+| true state, own history | 0 / 64 | 1.01 | −18 % | −19 % | 0.85 / 0.82 | 0.093 |
+| true state, autonomous | 0 / 64 | 1.00 | −21 % | −21 % | 0.84 / 0.82 | 0.095 |
+
+Every field is within 1.3 tolerances of its plan, except the feet's
+position (about 7). The NAO's encoder (`train_body_encoder.py`, anchor
+only) needed the starts:
+- **Steady walking only:** fitted on that, its held-out error was 0.034,
+  and the deployed loop fell 500 times in 540 episodes. Every deployed
+  episode starts from the spawn pose, which the captures had discarded,
+  so the encoder misread the start, the plan was meaningless, the NAO
+  fell, and the same start came round again.
+- **With starts and stops from the spawn pose:** its error is 0.031 and
+  the deployed path walks.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

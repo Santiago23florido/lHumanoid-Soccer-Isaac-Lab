@@ -710,6 +710,53 @@ still N + M trainings, but on the union of skills rather than on one.
 That changes the requirement ("trained once, with walking"), so it is
 left to the user.
 
+### 7.4 The NAO
+
+`NaoTrack-v0` is the G1's tracking task on the NAO: the walk's contract,
+plans read at the NAO's own control instants (0.126 `T` against the G1's
+0.077), and the same reward. Training it from scratch exposed two
+problems the G1 never met, because the G1 reached them already walking.
+
+1. **A reference that has walked away teaches nothing.** Within 100
+   iterations the NAO learned to stay upright (tilt terminations 60 % →
+   2 %), but not to walk. It was 3.7 leg lengths behind a reference it
+   cannot steer, so every kernel of the likelihood but the widest was
+   dead, and the widest gave no gradient to start.
+
+   Motion trackers end the episode once the body is too far from its
+   reference to catch up (DeepMimic; PHC at half a metre), which keeps
+   practice where the reward can teach. `contract_left` does the same:
+   past half a leg length behind (several steps, more than the next step
+   can recover), the episode ends as a fall does. This applies to both
+   bodies in training; play captures count falls only. Within 90
+   iterations the NAO kept up (lag 0.13 L, whole episodes).
+
+2. **The bodies are not geometrically similar.** `z*` is in each body's
+   leg lengths. In its nominal crouch the NAO's CoM sits 1.084 `L` above
+   its soles, where the G1 walks at 0.95 `L`. That gap was nine tenths of
+   the NAO's remaining error (1600 tolerances), which drowns every finer
+   term:
+
+   | field | NAO nominal | G1 walking | gap (tolerances) |
+   | --- | ---: | ---: | ---: |
+   | height | 1.084 | 0.950 | 99 |
+   | foot height below CoM | −1.084 | −0.94 | 73–88 |
+   | foot fore-aft | −0.051 | ≈ 0 | 5–8 |
+   | foot lateral | 0.202 | 0.193 | 2–3 |
+
+   Dynamic similarity in leg-length units asks the NAO to stand as low
+   as the task's body did. The tracking task's nominal posture is now
+   the crouch whose CoM height, from the URDF, is the contract's mean
+   (0.942 `L`: knee 1.56 rad, hip and ankle at minus half of it). The
+   actions are offsets around that crouch, which belongs to the tracker
+   (`HUMANOID_POSTURE_CONTRACT`). In a smoke run the joint error started
+   at 210 instead of 1600, and the 10-kernel term earned a hundred times
+   more.
+
+   Whether another length unit would make such bodies similar without a
+   deep crouch is a design question. The obvious candidate is the CoM
+   height, which is the pendulum's own length.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

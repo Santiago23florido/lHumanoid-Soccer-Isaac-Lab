@@ -207,15 +207,17 @@ a strategy for a different one.**
      `Isaac-Velocity-Flat-G1-v0` policy's.
    - **Per body:** a tracker trained by RL. It never sees the task and has
      the reference's path in view.
-   - **G1 status:** it walks the round trip at the teacher's speed, with no
-     falls on any path, and follows its plans (use gate). Stride is +20–30 %
-     because the left foot drags.
+   - **G1 status:** round 12 passes gates B and C on the deployed path.
+     The pass is fragile: on the true state, stride and period are +22 %.
+   - **NAO status:** trained once on the walk, it walks the G1's walk on
+     every path, deployed included. No falls, Froude-matched speed, gait
+     −18 to −21 %.
    - **The published task does not transfer zero-shot** to a tracker
-     trained on the walk alone, not even on the G1: a coverage limit.
+     trained on the walk alone, on either body: a coverage limit.
    - **Open decision:** whether trackers train on every available skill.
    See [`skill_space.md`](skill_space.md) §7.
-3. **Student task.** `NaoTrack-v0`: the NAO following the walk's contract,
-   training by RL; `transfer/scripts/nao_contract.sh` evaluates it against the
+3. **Student task.** ✅ `NaoTrack-v0`: the NAO following the walk's contract,
+   trained by RL; `transfer/scripts/nao_contract.sh` evaluates it against the
    G1's policies. The paragraph below predates it. A NAO walking environment. This did not exist and was
    the largest single piece of work. It must be built as a new task, not as a
    variant of `nao_stand`: that task terminates on a step, which defines it and

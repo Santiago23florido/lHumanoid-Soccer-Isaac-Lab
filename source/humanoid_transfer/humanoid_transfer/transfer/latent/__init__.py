@@ -41,4 +41,8 @@ capture those rollouts and run the result closed-loop.
     that samples the next ``z*`` from the history of ``ẑ*`` and the command,
     and its training, gate and chained-gait measurement. Bodies follow it in
     :mod:`humanoid_transfer.transfer.tasks.tracking`.
+``procedural``
+    Plans no task wrote: a point-mass biped on any contact schedule, drawn
+    from ranges fixed by physics, so a body's tracker can practise the whole
+    family of plans it might be asked for, not one task's.
 """

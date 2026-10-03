@@ -53,7 +53,7 @@ from ....transfer.tasks.tracking import (
     contract_view,
 )
 from ...assets import nao_kinematics as nk
-from ...assets.nao import get_nao_stand_cfg
+from ...assets.nao import NAO_STAND_JOINT_POS, get_nao_stand_cfg
 
 REPO_ROOT = Path(__file__).resolve().parents[6]
 DEFAULT_CONTRACT = REPO_ROOT / "logs" / "contract" / "walk_starts" / "generator.pt"
@@ -75,6 +75,42 @@ FREE_JOINTS = SceneEntityCfg(
     joint_names=list(nk.ARM_ACTUATED_JOINTS) + ["HeadYaw", "HeadPitch"],
     preserve_order=True,
 )
+
+
+def contract_posture(contract: str) -> dict[str, float]:
+    """The NAO's crouch whose CoM height, in leg lengths, is the contract's mean.
+
+    ``z*`` is in each body's leg lengths, and the two bodies are not geometrically
+    similar: in its nominal crouch the NAO's centre of mass sits 1.084 ``L`` above
+    its soles, where the G1 walks at 0.95 ``L`` -- 99 tolerances apart, nine
+    tenths of the error of a NAO that otherwise followed its plans, and enough to
+    drown every finer term of the likelihood. Dynamic similarity asks the NAO
+    to stand as low, in its own leg lengths, as the task's body did: the
+    sagittal chain is bent (hip and ankle at minus half the knee, which keeps the
+    torso upright and the foot flat) until the CoM height, from the URDF, is the
+    contract's mean. The actions are offsets around this posture.
+    """
+    import torch
+
+    saved = torch.load(contract, map_location="cpu", weights_only=False)
+    target = float(saved["generator"]["skill_norm.mean"][0])
+
+    def bent(knee: float) -> dict[str, float]:
+        posture = dict(nk.NOMINAL_STAND_JOINT_POS)
+        for side in ("L", "R"):
+            posture[f"{side}HipPitch"] = -knee / 2
+            posture[f"{side}KneePitch"] = knee
+            posture[f"{side}AnklePitch"] = -knee / 2
+        return posture
+
+    def height(knee: float) -> float:
+        return nk.com_height_above_soles(bent(knee)) / NAO.leg_length
+
+    low, high = 0.0, 2.0  # the knee's range starts below 0 and ends at 2.11 rad
+    for _ in range(40):
+        middle = (low + high) / 2
+        low, high = (middle, high) if height(middle) > target else (low, middle)
+    return bent((low + high) / 2)
 
 
 def sole_points() -> list[list[float]]:
@@ -158,8 +194,11 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
     def __post_init__(self) -> None:
         super().__post_init__()
 
-        # Scene: the NAO on flat ground.
+        # Scene: the NAO on flat ground, crouched as low as the task's body walked.
         self.scene.robot = get_nao_stand_cfg(prim_path="{ENV_REGEX_NS}/Robot")
+        posture = contract_posture(CONTRACT)
+        self.scene.robot.init_state.joint_pos = {**NAO_STAND_JOINT_POS, **posture}
+        self.scene.robot.init_state.pos = (0.0, 0.0, nk.sole_height_below_base(posture) + 0.005)
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
         self.scene.terrain.physics_material.static_friction = 0.8

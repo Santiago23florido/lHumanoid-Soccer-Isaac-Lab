@@ -1013,6 +1013,44 @@ Limits and stopping rules:
 ### 8.4 Log
 
 - *Pre-registration* (this section, before any tracker was trained on the family).
+- **Baselines**, the trackers trained on the walk alone (`competence_g1_r12.json`,
+  `competence_nao_nao2.json`):
+  - *Grid:* 3 of 61 probes on the G1, 6 of 57 on the NAO.
+  - *Twins:* the walk's twin passes on both — the walk tracker follows the biped's walk as
+    it follows the real one (use 0.02). The published policy's twins fail on duty exactly
+    as the zero-shot did (0.85 against 0.5): the map predicts the failure without the task.
+- **G1 round 1** — round 12 resumed with 70 % procedural plans, for 2 × 1000 iterations
+  (`competence_g1_r1_*.json`, `zero_shot_g1_r1_4196_walk.json`):
+  - *L1 passes:* random schedules, 0 falls, plans used.
+  - *Map:* the grid goes 3 → 8 → 13 of 61. On every grid probe falls, speed and use now
+    pass, and the period on 85 %; the duty on 20 %.
+  - *L2 fails, on the duty alone:* the published policy's twins come out with period and
+    velocity exact, no falls, plans used, and duty 0.67–0.78 against 0.47–0.53. Asked to
+    swing, the foot carries more than 5 % of the weight 40 % of the time, whatever the
+    contact threshold, and lifts half as high.
+  - *L1b, measured against round 12, fails, and not because of the tracker:* it now steps at
+    the rate its plans ask. Body over asked: period 1.12–1.18 and stride 1.04–1.10, against
+    round 12's 1.43–1.56 and 1.48–1.61. Round 12 passed gate C on the deployed path by not
+    following its plans; the walk's generator asks for quick steps (§7.1, its chain bias,
+    asked period 1.23–1.47 against the teacher's 1.87), and a tracker that follows them takes
+    them. More walk in the mix, the pre-registered correction, would teach it to ignore its
+    plans again; it is not applied. The walk's fidelity now waits on the task side.
+  - *What the duty failure is, measured:* on the twins the joint error sits at about 15
+    tolerances, dominated by fields the encoder knows to a millimetre (CoM height 43,
+    feet 11–43). The reward's kernels were 1, 10 and 100: at 15 the first is dead and the
+    second flat, and a correct swing changes the reward by 0.2 % per tolerance — no
+    signal, which neither a curriculum (the pre-registered correction for L2, about
+    coverage, which every other criterion shows is there) nor more exploration supplies.
+  - *Two hypotheses ruled out:* the encoder's error on the family's states (refitted on
+    them it is 0.2–0.6 of the walk-fitted one: the tolerance is not too tight for lack of
+    data), and the point-mass model's error on every field
+    (`procedural_model_error.json`: 3–14 encoder errors, mostly the walk teacher's own
+    stride-to-stride irregularity; widening by it would erase the contact signal).
+- **Round 2's correction** (a deviation from the pre-registered order, for the reason above):
+  the same likelihood with the error's scale marginalised by an octave quadrature,
+  kernels 1, 2, … 128 with the old power law of weights (`OCTAVES`). The three old kernels
+  are among them. At 15 tolerances the gradient is 13 times the old, at 2 it is 1.5
+  times: no field loses its pull.
 
 ## What this stage hands to the next
 

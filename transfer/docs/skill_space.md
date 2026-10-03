@@ -694,6 +694,30 @@ command:
   for the lift, with a tolerance on foot height below a millimetre, and
   the tracker settled for the slide.
 
+**Round 12 passes the gates on the deployed path**
+(`_r12_2198.json`). It is round 11's tracker after 600 more iterations
+with early termination (§7.4), on `walk_dagger3e`: DAgger round 3, and
+the encoder refitted on round 11's states.
+
+| path | falls | speed ratio | stride | period | duty | use | gate C |
+| --- | ---: | ---: | ---: | ---: | --- | ---: | --- |
+| deployed (encoder) | 1 / 64 | 1.00 | +6.4 % | +5.1 % | +5.4 / +4.5 % | 0.149 | **pass** |
+| true state, own history | 0 / 64 | 0.98 | +22 % | +23 % | +6.5 / +5.2 % | 0.114 | fail |
+| true state, autonomous | 1 / 64 | 1.05 | +24 % | +18 % | +6.7 / +4.2 % | 0.053 | fail |
+
+The plan pre-registered two gates on the deployed path:
+- **Gate B (use)** passes on every path.
+- **Gate C (behaviour)** passes on the deployed path. The fall rate is
+  1.6 points above the teacher's, against an allowance of 2.
+
+The pass is fragile. Fed the true state, the same tracker takes strides
+a fifth longer and slower. The encoder's error moves the plans (asked
+period 1.38 `T`, against 1.48 on the true state), and with them the gait,
+by about 15 %. Here that moves it towards the teacher's. A robust pass
+needs the two paths to agree. The remaining gap on the true state is the
+one §7.1 leaves open: the generator's chain steps fast, while the body
+takes longer strides.
+
 ### 7.3 A new task on the same body, zero-shot
 
 The published `Isaac-Velocity-Flat-G1-v0` policy is the new task. Its
@@ -848,9 +872,11 @@ gait.
   - *Per body:* an encoder refitted on the body's own states (`train_encoder.py`,
     `train_body_encoder.py`), moved between a body's contracts with
     `body_encoder.py`.
-- **G1:** round 11's tracker walks the round trip at the teacher's speed
-  without falls, and every path passes the use gate. Gate C fails on stride
-  (+20–30 %): the left foot drags, and the generator's chain steps fast.
+- **G1:** round 12 passes both pre-registered gates on the deployed path
+  (speed ratio 1.00; stride, period and duty within 6.4 %; 1 fall in 64).
+  Fed the true state it still misses stride and period by about 22 %. The
+  encoder's error moves the gait by about 15 %, and the generator's chain
+  steps fast (§7.1, open).
 - **The published task, zero-shot on the G1, fails** (§7.3). A tracker
   practised on one gait does not follow another. The open decision is
   whether each body's tracker trains once on every available skill, tested

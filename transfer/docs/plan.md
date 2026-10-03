@@ -200,8 +200,8 @@ a strategy for a different one.**
    physical history (so the body cannot leak in through it) walks too after
    one DAgger round, but flips the stride error from 16 % too long to 29 %
    too short. See [`skill_space.md`](skill_space.md) §5–6.
-2c. **The contract.** **G1 round trip walks; gate C fails on stride; NAO
-   training.** The learned action code was replaced by a physical interface:
+2c. **The contract.** **G1 round trip passes the gates on its deployed path
+   (fragile); the NAO walks the G1's walk on every path; zero-shot new task fails.** The learned action code was replaced by a physical interface:
    the next values of `z*`.
    - **Per task:** a generator, the walk's and the published
      `Isaac-Velocity-Flat-G1-v0` policy's.
@@ -252,10 +252,10 @@ that, and if the answer is no, the comparison in step 5 has no content and the
 | `transfer/latent/` | G1 side: anchored shared latent space, distilled (DART + 3 DAgger rounds) and run closed-loop. Walks; stride timing off by 12–20 %; not pinned. Superseded by the contract (below). |
 | `transfer/latent/contract.py`, `skill_torch.py` | Done. The task side of the contract: a flow-matching generator of the next `z*`, trained offline on a teacher's states, DAgger rounds on closed-loop states; `z*` on the GPU. |
 | `transfer/tasks/tracking/` | Done. The body side: references, plan view and path, joint-likelihood reward. |
-| `g1/tasks/g1_track/`, `nao/tasks/nao_track/` | G1: round 11 walks the round trip, gate C fails on stride. NAO: training. |
+| `g1/tasks/g1_track/`, `nao/tasks/nao_track/` | G1: round 12 passes gates B and C on the deployed path (true state: stride +22 %). NAO: walks the walk on every path, gait −18 to −21 %. |
 | `transfer/scripts/*contract*.sh`, `capture_contract.py`, `train_body_encoder.py`, `body_encoder.py`, `widen_inputs.py` | Done. Closed loop, DAgger, new task, NAO evaluation; encoders per body; network widening. |
 | `g1/body/body_card.json` | Measured from the simulator by `g1/scripts/measure_body.py`. |
-| Student walking task | `NaoTrack-v0` (the contract tracker); training. |
+| Student walking task | `NaoTrack-v0` (the contract tracker): walks at the Froude-matched speed, no falls, deployed path included. |
 
 The distillation losses are unwritten on purpose. Writing a reward term against
 an environment that does not exist is how the standing task acquired a

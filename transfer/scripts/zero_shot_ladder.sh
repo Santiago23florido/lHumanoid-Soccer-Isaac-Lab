@@ -31,7 +31,9 @@ cd "$root"
 want() { [[ " ${stages[*]} " == *" $1 "* ]]; }
 
 task="${ZS_TASK:-flat}"
-task_generator="logs/contract/${task}_h20/generator.pt"
+# ZS_GENERATOR: another generator of the same task (after task-side DAgger, say).
+task_generator="${ZS_GENERATOR:-logs/contract/${task}_h20/generator.pt}"
+generator_name="$(basename "$(dirname "$task_generator")")"
 if [ "$task" = rough ]; then
   commands="forward 0.25 0 0
 fast 0.6 0 0
@@ -58,7 +60,7 @@ print(math.sqrt(nao / g1), math.sqrt(g1 / nao))")"
 fi
 read -r speed_scale turn_scale <<< "$scale"
 walk_zs="logs/contract/walk_zs_${body}_${tag}/generator.pt"
-task_zs="logs/contract/${task}_zs_${body}_${tag}/generator.pt"
+task_zs="logs/contract/${generator_name}_zs_${body}_${tag}/generator.pt"
 mkdir -p "$rollouts"
 
 "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt" > /dev/null
@@ -116,11 +118,11 @@ if want l3; then
   export HUMANOID_CONTRACT="$root/$task_zs"
   export HUMANOID_START_STATES="$root/g1/rollouts/${task}_dart.npz"
   export HUMANOID_START_WINDOWS="$root/g1/rollouts/${task}_dart.npz"
-  capture "${task}_chain" --num-envs 64 --contract-from-truth --reference autonomous \
+  capture "${generator_name}_chain" --num-envs 64 --contract-from-truth --reference autonomous \
     --start-fraction 1
   "$python" transfer/scripts/evaluate_competence.py --all \
-    --capture "$rollouts/zs_${tag}_${task}_chain.npz" \
-    --output "transfer/results/zero_shot_${body}_${tag}_${task}_l3.json" | grep -A7 '"checks"'
+    --capture "$rollouts/zs_${tag}_${generator_name}_chain.npz" \
+    --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}_l3.json" | grep -A7 '"checks"'
   unset HUMANOID_START_STATES HUMANOID_START_WINDOWS
 fi
 if want l4; then
@@ -129,13 +131,13 @@ if want l4; then
     vx=$("$python" -c "print($vx * $speed_scale)")
     vy=$("$python" -c "print($vy * $speed_scale)")
     wz=$("$python" -c "print($wz * $turn_scale)")
-    capture "${task}_${name}_encoder" --num-envs 32 --reference physical --command "$vx" "$vy" "$wz"
-    capture "${task}_${name}_truth" --num-envs 32 --reference physical --contract-from-truth \
+    capture "${generator_name}_${name}_encoder" --num-envs 32 --reference physical --command "$vx" "$vy" "$wz"
+    capture "${generator_name}_${name}_truth" --num-envs 32 --reference physical --contract-from-truth \
       --command "$vx" "$vy" "$wz"
     "$python" transfer/scripts/evaluate_contract.py \
       --run "teacher=g1/rollouts/${task}_play_${name}.npz" \
-      --run "encoder=$rollouts/zs_${tag}_${task}_${name}_encoder.npz" \
-      --run "truth=$rollouts/zs_${tag}_${task}_${name}_truth.npz" \
-      --output "transfer/results/zero_shot_${body}_${tag}_${task}_l4_${name}.json" | grep -v "^  "
+      --run "encoder=$rollouts/zs_${tag}_${generator_name}_${name}_encoder.npz" \
+      --run "truth=$rollouts/zs_${tag}_${generator_name}_${name}_truth.npz" \
+      --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}_l4_${name}.json" | grep -v "^  "
   done <<< "$commands"
 fi

@@ -1070,6 +1070,23 @@ Limits and stopping rules:
     the body from rest — the published generator's own chain diverges from a standing
     start (§7.3), now on the body's history. A task-side failure (v): the pre-registered
     correction is DAgger of the published generator on the G1.
+- **Task-side DAgger, round 1** (`task_dagger.sh`, `contract_flat_dagger1.json`,
+  `zero_shot_g1_r2_5195_flat_dagger1_*.json`). The G1's frozen tracker ran with the
+  published generator under five commands of the task's range, plus starts and stops. The
+  published policy acted from 1024 of the loop's states, and the generator was retrained on
+  its data and this round's (gate passes, chain period 0.93 against 0.98).
+  - *Falls:* 0 deployed (136–169 before), 3–9 on the true state.
+  - *Deployed:* period 0.96–0.98 against 0.98, plans used (0.31–0.36), every field
+    within 1.5 tolerances of its plan.
+  - *What fails now is the speed.* Asked 0.30, 0.60 and 0.32 m/s where the published
+    policy walks 0.18, 0.49 and 0.24 at those commands; the body takes what it is asked.
+    The generator's chain was already 11 % fast. Now that the tracker delivers its plans,
+    that bias compounds upward through the body's history, where round 12 had delivered 75 %
+    and compounded down. Stride, which is speed times period, fails gate C. The true-state
+    path also suffers: its history's noise makes this generator's plans jitter, and the
+    body steps at 0.6 `T`.
+  - Both are the task side's, and DAgger is the correction: a second round, from this
+    loop's states, at the speeds the published policy does not walk.
 
 ## What this stage hands to the next
 

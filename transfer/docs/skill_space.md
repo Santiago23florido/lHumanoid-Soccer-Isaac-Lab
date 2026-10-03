@@ -857,6 +857,163 @@ where the published gait steps quickly with alternating feet (duty
 trained on the walk alone executes the walk on any body, and no other
 gait.
 
+## 8. Zero-shot by coverage: every tracker practises a physical family of plans
+
+§7.3 and §7.4 ended on a limit, not a defect: a tracker trained by RL is an
+inverse model over the plans it practised. Trained on the walk's contract
+alone, the G1 fell 120–240 times on the published policy's gait and the NAO
+shuffled. This section keeps the contract and everything about it — the
+generator per task, the encoder and tracker per body, ancestral sampling when
+deployed, the autonomous reference in training, the precision likelihood, the
+anchored integral and the path in view — and changes one thing: the
+distribution of plans each body's tracker is trained on.
+
+### 8.1 Why, and what is claimed
+
+- **Zero-shot, defined.** No gradient step of a body's encoder or tracker uses
+  data from a new task's generator or teacher. A new task trains only its own
+  generator, on G1 data (its teacher, and DAgger on the G1).
+- **Why it fails today.** The tracker's loss on a task is bounded by its
+  training loss times the concentrability `C = sup d_task / d_train` (Kakade
+  and Langford, 2002; Munos, 2003). Outside the support of `d_train`, `C` is
+  infinite and nothing is guaranteed. The walk's support does not hold the
+  published gait (duty 0.5 and 0.98 `T` against 0.9 and 1.9 `T`).
+- **What to train on, without knowing the task.** Over tasks whose plans have
+  density at most `ρ` on the set `F` of physically feasible plans, the worst
+  `C` is `ρ / inf d_train`, minimised by the uniform distribution on `F`: the
+  minimax argument of domain randomisation, applied to plans.
+- **Why `F` can be sampled.** A plan of `z*` is not a free 13 × 27 array.
+  Centroidal dynamics fix it once the contact schedule, the footholds and the
+  CoM's start are given, so `F` is parameterised by about a dozen
+  dimensionless numbers per segment. They are drawn uniformly, and
+  log-uniformly for the period (a scale: Jeffreys' prior).
+- **Why it is shared.** The parameters are dimensionless (Froude, `T`, `L`,
+  duty, `m g`), so one family trains every body; each body executes the part
+  of it its tracker can (its competence), measured with no task in sight.
+- **When a task transfers.** Its plans lie in the family (i), within the
+  body's competence (ii) — which the tracker has to have learned (iii) — and
+  the tracker does not treat real plans differently from procedural ones of
+  the same gait (iv: no shortcut, Geirhos et al., 2020). The closed loop must
+  also keep the task's generator in its own support (v), and the encoder must
+  cover the states (vi). Each level of the evaluation isolates one of these.
+
+### 8.2 The family
+
+`transfer/latent/procedural.py`: a point mass on massless legs that push
+along themselves.
+
+- **Contacts.** Event-based contacts on a phase clock; duties below one half
+  give flight phases.
+- **Loads.** A half-sine of load per stance, its impulse set by what follows
+  the stance — one model across the walk–run transition.
+- **Stepping and balance.**
+  - Foot placement is deadbeat for the model's own centre of pressure,
+    double support and turns included, with an integral on the speed.
+  - The CoP tracks the periodic DCM within the soles.
+  - Standing holds the DCM over the feet; starts lean before they step.
+- **Recovery.** A recovery steps in place when a compound transition drifts.
+- **Calibrated fields.** The three fields a point mass cannot derive — tilt,
+  the base's rate beyond the turn, and angular momentum — are calibrated on
+  both bodies' walks (`procedural_calibration.json`). Their model error is 4–6
+  times the encoder's, and becomes their tolerance on procedural plans.
+
+The ranges, set by physics before any task was trained:
+
+| parameter | range |
+| --- | --- |
+| speed `v_x`, `v_y` | −0.10 – 0.45 `V`, ±0.15 `V` |
+| turn | ±0.3 / `T` |
+| period | 0.6 – 3.0 `T`, log-uniform |
+| duty | 0.30 – 0.95, asymmetry ±0.08 |
+| step width | 0.20 – 0.55 `L` |
+| CoM height | 0.85 – 1.00 `L` |
+| clearance | 0.01 – 0.12 `L` |
+| lean | 0 – 0.20 rad |
+
+Constraints:
+- the shortest swing is 1.5 control steps of the body, the only body-specific
+  term;
+- stride ≤ 1 `L`;
+- step ≤ 0.55 `L`;
+- mean swing speed ≤ 2 `V`;
+- the stance's CoM bounce is ≤ 0.08 `L`.
+
+Measured (`tests/test_procedural.py`, random schedules over 77 `T`):
+- the vertical acceleration is the load minus the weight;
+- the CoP implied by the horizontal acceleration stays under the feet;
+- fixed gaits come out with their period, duty and speed (3 %, 0.03, 10 %);
+- 2.8 % of the time is spent recovering;
+- 0.7 % of episodes fall, after which the plan holds still and the body's
+  episode ends on its lag.
+
+**Coverage, H1** (`procedural_coverage.json`):
+
+| capture | inside the family for the G1 | for the NAO |
+| --- | --- | --- |
+| the walk teacher | yes | no: its 0.15 `T` swing is under 1.5 NAO steps |
+| published policy, forward / fast / turning | yes | yes |
+
+The published policy walks with its CoM at 0.86 `L` (the walk at 0.95), at
+the low edge of the range.
+
+**Style, a diagnostic.** A logistic probe separates walk windows from
+procedural ones with AUC 0.96 on every field and 0.89 on the derived fields.
+On the derived fields the published policy's windows are nearer to the
+family than to the walk (60–90 %); on every field they are nearer to the walk.
+The calibrated fields give the source away. This is the shortcut risk that
+level L3 below exists to catch.
+
+**Data hygiene.**
+- The ranges were set before any tracker was trained on them.
+- The published policy's gait was known (§7.3), so it is a semi-blind test.
+- Isaac Lab's `Isaac-Velocity-Rough-G1-v0` is the blind one. Its gait is not
+  looked at until both trackers are frozen, and it is evaluated once.
+
+### 8.3 The loop, pre-registered
+
+Each tracker is trained on 70 % procedural and 30 % walk plans, warm-started
+from its walk tracker (G1 round 12, NAO crouch 2). It is then evaluated level
+by level. Levels L1–L3 read the true state (plus the encoder's noise). L4
+reads both the true state and the encoder; the deployed path decides.
+
+| level | condition | gate |
+| --- | --- | --- |
+| L1 learning | (iii) | random schedules as in training: use < 0.5, falls ≤ 10 %; competence map before/after, reported |
+| L1b no regression | the walk | each path: falls ≤ round 12's + 2 points, speed ratio ≥ 0.9, stride/period/duty ≤ round 12's + 5 points, use passes |
+| L2 twins | (ii) + (iii) on the published gait | each procedural twin: falls ≤ 5 %, speed within 10 % of asked (floor 0.05 `V`), period and duty within 10 %, use < 0.5 |
+| L3 the published generator, autonomous | (iv) | started inside the published gait: use < 0.5, falls ≤ 5 %, body within 10 % of asked |
+| L4 the published generator, deployed | (v) + (vi): the zero-shot result | gates B and C against the published policy, per command |
+
+One correction per round, chosen by the first level that fails. A correction
+is never aimed at the published gait.
+
+| fails | correction |
+| --- | --- |
+| L1 | learning-progress curriculum over cells of the family (ALP-GMM, Portelas et al., 2019; PLR, Jiang et al., 2021) → action std reset to 0.6 → widen the network, function-preserving |
+| L1b | walk share 0.3 → 0.5 |
+| L2 (L1 passes) | the curriculum of L1 |
+| L3 (L2 passes) | model error on more fields → randomised shapes (load ramps, swing profile) → procedural plans only |
+| L4 true state (L3 passes) | DAgger of the published generator on the G1 (task side) |
+| L4 encoder (true state passes) | refit the body's encoder on more procedural states and starts |
+
+Limits and stopping rules:
+- **Rounds.** At most three RL rounds on the G1 and two on the NAO.
+- **The NAO.** It is trained only once the G1 passes L4, and the published
+  generator stays frozen for it. A twin outside the NAO's competence is
+  reported as a physical limit of that body, not a transfer failure.
+- **Escalations, decided by the user.** A model-based decoder, training on
+  the union of skills, or a different length unit.
+
+**Threats to validity, declared.**
+- The published policy is a semi-blind test.
+- Each RL round is a single seed.
+- The 10 % / 2-point thresholds are §5's, unchanged.
+- The deployed path decides, per command.
+
+### 8.4 Log
+
+- *Pre-registration* (this section, before any tracker was trained on the family).
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates
@@ -928,3 +1085,14 @@ gait.
   cross-embodiment robot control. arXiv:2601.15419.
 - CrossBFM (2026), arXiv:2609.38087; PHASOR (2026), arXiv:2606.01851;
   H-Zero (2025), arXiv:2512.00971.
+- Caron, S., Escande, A., Lanari, L. and Mallein, B. (2019). Capturability-based
+  pattern generation for walking with variable height. *IEEE T-RO*.
+- Geirhos, R. et al. (2020). Shortcut learning in deep neural networks. *Nature
+  Machine Intelligence*.
+- Jiang, M., Grefenstette, E. and Rocktäschel, T. (2021). Prioritized level replay. *ICML*.
+- Kakade, S. and Langford, J. (2002). Approximately optimal approximate reinforcement
+  learning. *ICML*.
+- Munos, R. (2003). Error bounds for approximate policy iteration. *ICML*.
+- Portelas, R., Colas, C., Hofmann, K. and Oudeyer, P.-Y. (2019). Teacher algorithms for
+  curriculum learning of deep RL in continuously parameterized environments. *CoRL*.
+- Raibert, M. H. (1986). *Legged robots that balance*. MIT Press.

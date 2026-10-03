@@ -54,6 +54,15 @@ parser.add_argument(
 )
 parser.add_argument("--reference", choices=("autonomous", "physical"), default=None)
 parser.add_argument(
+    "--standing-fraction",
+    type=float,
+    default=None,
+    help="Share of environments commanded to stand at each resample: starts and stops.",
+)
+parser.add_argument(
+    "--resample-seconds", type=float, nargs=2, default=None, metavar=("LOW", "HIGH")
+)
+parser.add_argument(
     "--contract-from-truth",
     action="store_true",
     help="Feed the generator the true z* plus its noise, not the body's encoder.",
@@ -88,6 +97,10 @@ def main() -> int:
     command_cfg.use_encoder = not args_cli.contract_from_truth
     if args_cli.start_fraction is not None:
         command_cfg.start_fraction = args_cli.start_fraction
+    if args_cli.standing_fraction is not None:
+        command_cfg.rel_standing_envs = args_cli.standing_fraction
+    if args_cli.resample_seconds is not None:
+        command_cfg.resampling_time_range = tuple(args_cli.resample_seconds)
     if args_cli.command is not None:
         vx, vy, wz = args_cli.command
         command_cfg.ranges.lin_vel_x = (vx, vx)

@@ -64,9 +64,10 @@ def main() -> int:
     with torch.no_grad():
         physical_body = source.inverse(body.encoder(probe))
         physical_task = target.inverse(encoder(probe))
-    error = float((physical_body - physical_task).abs().max())
+    # Relative: random inputs drive the estimate far out, where float32 rounds coarsely.
+    error = float(((physical_body - physical_task).abs() / (1 + physical_body.abs())).max())
     if error > 1e-4:
-        raise RuntimeError(f"the change of units moved the estimate by {error}")
+        raise RuntimeError(f"the change of units moved the estimate by {error} (relative)")
 
     task.encoder = encoder
     task.meta = {**task.meta, "encoder_from": str(args.body)}
@@ -77,7 +78,10 @@ def main() -> int:
         ContractClock(**saved["clock"]),
         saved["encoder_input"],
     )
-    print(f"{args.output}: {args.task} with the encoder of {args.body} (units moved, {error:.1e})")
+    print(
+        f"{args.output}: {args.task} with the encoder of {args.body} "
+        f"(units moved, {error:.1e} relative)"
+    )
     return 0
 
 

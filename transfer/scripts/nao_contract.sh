@@ -44,11 +44,19 @@ for reference in physical autonomous; do
     > "logs/contract/capture_nao_walk_${tag}_${reference}.log" 2>&1
   tail -1 "logs/contract/capture_nao_walk_${tag}_${reference}.log"
 done
+# Starts and stops, from the spawn pose on: an encoder fitted on steady walking alone
+# misread every start of the deployed loop (500 falls in 540 episodes).
+capture --contract-from-truth --reference physical --settle-steps 0 \
+  --standing-fraction 0.3 --resample-seconds 2 5 \
+  --output "nao/rollouts/track_walk_${tag}_starts.npz" \
+  > "logs/contract/capture_nao_walk_${tag}_starts.log" 2>&1
+tail -1 "logs/contract/capture_nao_walk_${tag}_starts.log"
 
 nao_walk="logs/contract/walk_nao_${tag}/generator.pt"
 "$python" transfer/scripts/train_body_encoder.py "$walk" \
   --data "nao/rollouts/track_walk_${tag}_physical.npz" \
   --data "nao/rollouts/track_walk_${tag}_autonomous.npz" \
+  --data "nao/rollouts/track_walk_${tag}_starts.npz" \
   --output "$nao_walk" --results "transfer/results/encoder_nao_${tag}.json"
 
 export HUMANOID_CONTRACT="$root/$nao_walk"

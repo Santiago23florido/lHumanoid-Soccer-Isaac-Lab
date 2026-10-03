@@ -791,6 +791,26 @@ only) needed the starts:
 - **With starts and stops from the spawn pose:** its error is 0.031 and
   the deployed path walks.
 
+**The published task on the NAO, zero-shot** (`contract_nao_new_task_nao2_*.json`).
+The setup:
+- the flat contract, with the NAO's encoder moved over;
+- the NAO's tracker unchanged, still in the crouch it trained in;
+- the G1's three test commands, converted to the NAO's units.
+
+Results:
+
+| command | falls (encoder / true state, of 64) | speed ratio | use |
+| --- | ---: | ---: | ---: |
+| forward | 1 / 3 | 0.20 / 0.14 | 0.67 / 0.57 |
+| fast | 0 / 0 | 0.32 / 0.34 | 0.64 / 0.59 |
+| turning | 0 / 1 | 0.41 / 0.37 | 0.71 / 0.64 |
+
+The NAO stays up but does not follow: it shuffles (duty about 0.95)
+where the published gait steps quickly with alternating feet (duty
+0.5). The coverage limit of §7.3 holds on the second body. A tracker
+trained on the walk alone executes the walk on any body, and no other
+gait.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates
@@ -813,9 +833,13 @@ only) needed the starts:
   practised on one gait does not follow another. The open decision is
   whether each body's tracker trains once on every available skill, tested
   on a held-out one such as Isaac Lab's `Isaac-Velocity-Rough-G1-v0`.
-- **NAO:** `NaoTrack-v0` trains on the walk's contract with the same recipe.
-  `nao_contract.sh` evaluates it end to end against the G1's policies, in
-  body units: walk, its own encoder, the published task.
+- **NAO** (§7.4): trained once on the walk's contract, it walks the G1's walk
+  on every path, deployed included.
+  - Results: no falls, the Froude-matched speed (ratio 1.00–1.05 in `V`), its
+    plans used; stride and period −18 to −21 %.
+  - What it needed: its own encoder fitted on starts, and the crouch dynamic
+    similarity asks for.
+  - The published task does not transfer to it either.
 - The command in body units: the NAO's speed follows from `c*` and its own `V`.
 
 ## References

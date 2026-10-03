@@ -456,6 +456,28 @@ physical history *is* the chain. The chain is the perfect-tracking limit
 of the deployed loop, and its bias has to be removed in the generator
 (§7.2, round 10).
 
+**What did not remove it, measured:**
+- *History noise and commitment:* the chained period is the same with
+  history noise 0, 1 or 2 σ (1.46 / 1.47 / 1.45 `T`) and with a 6- or
+  13-step commitment (1.47 / 1.40).
+- *Three DAgger rounds:* chain period 1.471, 1.469, 1.482 against the
+  teacher's 1.852. Round 3 drew on a loop that already walked at the
+  teacher's speed, with no teacher falls.
+- *Single plans are calibrated:* not only in their first contact change
+  but in all of them. Contact changes per 13-step plan per foot:
+
+  | | left | right | first 6 steps (left / right) |
+  | --- | ---: | ---: | --- |
+  | generator | 1.16 | 1.27 | 0.55 / 0.58 |
+  | teacher | 1.13 | 1.30 | 0.52 / 0.60 |
+
+The acceleration lives in the recursion. The generator answers histories
+made of its own output differently from the teacher's histories, and no
+body's history reproduces its output well enough for DAgger to reach it.
+A sequence-level objective (training through chained plans, or a
+discriminator on chained sequences) is the general next step, and is
+left open.
+
 ### 7.2 The body side, iterated
 
 **Round 2** (`contract_g1_closed_loop_r2.json`): fields scored apart, scores

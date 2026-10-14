@@ -10,14 +10,27 @@ retuned for the contract. Two things differ, both about the input:
   NAO's task uses: the plan is in normalised units and joint velocities in
   rad/s, so a running normaliser keeps either from dominating; the critic also
   reads the true ``z*`` against the plan.
+
+With ``HUMANOID_SYMMETRY=1`` each minibatch is doubled with its mirror image
+(:mod:`~humanoid_transfer.transfer.tasks.tracking.symmetry`): the family and the
+robot are mirror-symmetric, so the optimal tracker is equivariant, and round 2's
+was not (its left stance 0.041 of a stride short of its right across the
+competence map).
 """
+
+import os
 
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import (
     RslRlMLPModelCfg,
     RslRlOnPolicyRunnerCfg,
     RslRlPpoAlgorithmCfg,
+    RslRlSymmetryCfg,
 )
+
+from ..mirror import augment
+
+SYMMETRY = os.environ.get("HUMANOID_SYMMETRY", "0") == "1"
 
 
 @configclass
@@ -53,4 +66,9 @@ class G1TrackPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
+        symmetry_cfg=(
+            RslRlSymmetryCfg(use_data_augmentation=True, data_augmentation_func=augment)
+            if SYMMETRY
+            else None
+        ),
     )

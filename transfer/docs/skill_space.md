@@ -1200,6 +1200,23 @@ Limits and stopping rules:
     3. on a tie, round 3.
 
     The chosen tracker is frozen for the NAO's evaluation and the blind test.
+  - *The augmentation, stopped at iteration 160 of 1000.* Training was getting worse
+    against round 2:
+    - action `σ` rose from 1.02 to 1.18;
+    - the surrogate loss went from −0.01 to +0.11;
+    - the policy grew *less* equivariant: the logged mirror error went 0.23 → 0.46, and the
+      legs' from 0.20 to 0.36.
+
+    The mechanism is PPO's. A reflected sample keeps the original's advantage and old
+    log-probability, so its importance ratio is `π(P a | M o) / π(a | o) ≈ exp(−Σ d² / 2σ²)`
+    for an asymmetry `d`. For a trained, asymmetric policy that is nearly zero, and the
+    clipped objective can then only widen `σ`, never move the means. Augmentation suits a
+    policy trained from scratch, which is symmetric from the start (Mittal et al. train
+    so); this one is warm-started.
+  - *Round 3 is run with the mirror loss instead:* `‖π(M o) − P π(o)‖²` on the action
+    means, weight 1 (`HUMANOID_SYMMETRY=loss`). Everything else — iterations, the
+    selection rule — is unchanged. The stopped run stays in
+    `logs/rsl_rl/g1_track/2026-10-14_15-20-31_zs_g1_r3`.
 
 ## What this stage hands to the next
 

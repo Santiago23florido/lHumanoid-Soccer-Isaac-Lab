@@ -108,3 +108,19 @@ def test_an_unknown_observation_is_refused(g1: dict) -> None:
             np.zeros(SKILL_LAYOUT.size),
             np.ones(SKILL_LAYOUT.size),
         )
+
+
+def test_a_joint_shared_by_both_sides_reflects_onto_itself() -> None:
+    # The NAO's hip yaw-pitch: one motor, the right joint a mimic of the left.
+    spec = {
+        "joints": [
+            {"name": "LHipYawPitch", "partner": "RHipYawPitch", "sign": 1},
+            {"name": "RHipYawPitch", "partner": "LHipYawPitch", "sign": 1},
+            {"name": "LHipRoll", "partner": "RHipRoll", "sign": -1},
+            {"name": "RHipRoll", "partner": "LHipRoll", "sign": -1},
+        ],
+        "mimic": {"RHipYawPitch": ["LHipYawPitch", -1.0]},
+    }
+    p = joint_mirror(["LHipYawPitch", "LHipRoll", "RHipRoll"], spec)
+    np.testing.assert_allclose(p, [[-1, 0, 0], [0, 0, -1], [0, -1, 0]])
+    np.testing.assert_allclose(p @ p, np.eye(3))

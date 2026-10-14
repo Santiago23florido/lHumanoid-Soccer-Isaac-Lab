@@ -52,11 +52,13 @@ if [ "$body" = g1 ]; then
   task_id=G1Track-Play-v0
   walk="logs/contract/walk_dagger3e/generator.pt"
   rollouts=g1/rollouts
+  mirror=g1/body/mirror.json
   scale="1 1"
 else
   task_id=NaoTrack-Play-v0
   walk="logs/contract/walk_dagger2e/generator.pt"
   rollouts=nao/rollouts
+  mirror=nao/body/mirror.json
   export HUMANOID_POSTURE_CONTRACT="$root/$walk"
   scale="$("$python" -c "
 import math
@@ -70,6 +72,13 @@ mkdir -p "$rollouts"
 
 "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt" > /dev/null
 policy="$run/exported/$checkpoint.pt"
+# ZS_SYMMETRIZE=1: deploy the tracker averaged with its mirror image (symmetrize_actor.py);
+# the tag should say so.
+if [ "${ZS_SYMMETRIZE:-0}" = 1 ]; then
+  "$python" transfer/scripts/symmetrize_actor.py "$policy" --mirror "$mirror" --contract "$walk" \
+    --body "$body" | tail -1
+  policy="$run/exported/${checkpoint}_sym.pt"
+fi
 
 capture() {
   local name="$1"

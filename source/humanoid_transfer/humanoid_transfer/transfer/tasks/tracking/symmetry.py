@@ -31,8 +31,9 @@ class TrackerMirror:
 
     def __init__(self, env, mirror: Path | str) -> None:
         inner = env.unwrapped
-        robot = inner.scene["robot"]
-        joints = load_joint_mirror(robot.data.joint_names, mirror)
+        # The actuated joints, in the actions' order; the joint observations read the same.
+        (action,) = inner.action_manager._terms.values()
+        joints = load_joint_mirror(action._joint_names, mirror)
         if inner.action_manager.total_action_dim != joints.shape[0]:
             raise ValueError("the actions are not one per joint of the measured mirror")
         commands = inner.command_manager._terms.values()

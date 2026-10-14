@@ -5,14 +5,24 @@ contract the same way. One value comes from the NAO's standing study instead:
 ``init_std = 0.5``. Actions are offsets of 0.25 rad per unit, and a unit of
 exploration noise knocks the NAO over before it learns anything (see
 ``nao/tasks/nao_stand/agents/rsl_rl_ppo_cfg.py``).
+
+With ``HUMANOID_SYMMETRY=1`` each minibatch is doubled with its mirror image, as
+the G1's (``g1/tasks/g1_track/agents/rsl_rl_ppo_cfg.py``).
 """
+
+import os
 
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import (
     RslRlMLPModelCfg,
     RslRlOnPolicyRunnerCfg,
     RslRlPpoAlgorithmCfg,
+    RslRlSymmetryCfg,
 )
+
+from ..mirror import augment
+
+SYMMETRY = os.environ.get("HUMANOID_SYMMETRY", "0") == "1"
 
 
 @configclass
@@ -48,4 +58,9 @@ class NaoTrackPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
+        symmetry_cfg=(
+            RslRlSymmetryCfg(use_data_augmentation=True, data_augmentation_func=augment)
+            if SYMMETRY
+            else None
+        ),
     )

@@ -55,13 +55,25 @@ PLANAR = np.diag([1.0, -1.0, -1.0])
 
 
 def joint_mirror(names: Sequence[str], spec: dict) -> np.ndarray:
-    """``(J, J)``: the reflected joint vector is ``P @ q`` (``spec`` from ``measure_mirror.py``)."""
+    """``(J, J)``: the reflected joint vector is ``P @ q`` (``spec`` from ``measure_mirror.py``).
+
+    ``names`` may be a subset -- the joints a policy commands. A joint whose
+    partner is not among them must have a partner that follows one of them
+    (``spec["mimic"]``: follower to ``[leader, multiplier]``), as the NAO's right
+    hip yaw-pitch follows its left on one motor; the reflection then lands on the
+    leader, divided by the multiplier so the reflected pose keeps the constraint.
+    """
     rows = {row["name"]: row for row in spec["joints"]}
+    mimic = spec.get("mimic", {})
     names = list(names)
     matrix = np.zeros((len(names), len(names)))
     for i, name in enumerate(names):
         row = rows[name]
-        matrix[names.index(row["partner"]), i] = row["sign"]
+        partner, sign = row["partner"], row["sign"]
+        if partner not in names:
+            partner, multiplier = mimic[partner]
+            sign = sign / multiplier
+        matrix[names.index(partner), i] = sign
     return matrix
 
 

@@ -38,11 +38,12 @@ from humanoid_transfer.transfer.symmetry import (  # noqa: E402
 )
 
 
-def tracker_terms(joints: int, view: int) -> list[tuple[str, int]]:
-    """The tracker's policy group, in order (``TrackPolicyCfg``)."""
+def tracker_terms(joints: int, view: int, imu: bool = False) -> list[tuple[str, int]]:
+    """The tracker's policy group, in order: the G1's ``TrackPolicyCfg``, or with ``imu``
+    the NAO's ``NaoTrackPolicyCfg``, which has no base linear velocity."""
     skill = SKILL_LAYOUT.size
     return [
-        ("base_lin_vel", 3),
+        *([] if imu else [("base_lin_vel", 3)]),
         ("base_ang_vel", 3),
         ("projected_gravity", 3),
         ("joint_pos", joints),
@@ -74,18 +75,28 @@ def main() -> int:
     parser.add_argument("--mirror", type=Path, required=True, help="The body's measure_mirror.py.")
     parser.add_argument("--contract", type=Path, required=True, help="Fixes the plan's units.")
     parser.add_argument("--view", type=int, default=None, help="Default: the contract's.")
+    parser.add_argument(
+        "--body",
+        choices=("g1", "nao"),
+        default="g1",
+        help="g1: every joint, base velocity observed; nao: the actuated joints "
+        "(nao_kinematics.ACTUATED_JOINTS), no base linear velocity.",
+    )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
     spec = json.loads(args.mirror.read_text(encoding="utf-8"))
     names = [row["name"] for row in spec["joints"]]
+    if args.body == "nao":
+        from humanoid_transfer.nao.assets.nao_kinematics import ACTUATED_JOINTS
+
+        names = list(ACTUATED_JOINTS)
     contract = load_contract(args.contract)
     view = args.view or contract.generator.view
     norm = contract.generator.skill_norm
     joints = joint_mirror(names, spec)
-    mirror = observation_mirror(
-        tracker_terms(len(names), view), joints, norm.mean.numpy(), norm.std.numpy()
-    )
+    terms = tracker_terms(len(names), view, imu=args.body == "nao")
+    mirror = observation_mirror(terms, joints, norm.mean.numpy(), norm.std.numpy())
     actor = torch.jit.load(str(args.actor), map_location="cpu").eval()
     width = mirror.offset.shape[0]
     probe = torch.zeros(1, width)

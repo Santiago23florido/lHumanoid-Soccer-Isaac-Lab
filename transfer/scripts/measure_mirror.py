@@ -48,6 +48,14 @@ parser.add_argument(
 )
 parser.add_argument("--delta", type=float, default=0.1, help="Joint move, radians.")
 parser.add_argument("--max-joints", type=int, default=40)
+parser.add_argument(
+    "--mimic",
+    nargs=3,
+    action="append",
+    default=[],
+    metavar=("FOLLOWER", "LEADER", "MULTIPLIER"),
+    help="A joint driven by another (the model's mimic), recorded for joint_mirror.",
+)
 parser.add_argument("--output", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -122,6 +130,7 @@ def main() -> int:
     symmetric = float((reflected(points[:1]) - points[:1]).norm(dim=-1).max()) / scale
     report = {"task": args_cli.task_id, "delta": args_cli.delta, "joints": [], "links": links}
     report["default_pose_residual"] = symmetric
+    report["mimic"] = {f: [leader, float(m)] for f, leader, m in args_cli.mimic}
     # Displacements from the default pose, not positions: the pose's own small asymmetry
     # (a few millimetres) cancels, and a joint that moves its links by one still shows.
     moves = points - points[:1]

@@ -59,7 +59,7 @@ capture() {
   shift
   "$python" -u g1/scripts/capture_rollouts.py --headless --task-id G1Track-Play-v0 \
     --driver-policy "$policy" --num-envs 32 --steps 900 --settle-steps 100 \
-    --reference physical --contract-from-truth "$@" \
+    --reference physical "$@" \
     --output "g1/rollouts/${task}_loop_${round}_${tag}.npz" \
     > "logs/contract/capture_${task}_loop_${round}_${tag}.log" 2>&1
   tail -1 "logs/contract/capture_${task}_loop_${round}_${tag}.log"
@@ -67,16 +67,19 @@ capture() {
 
 states=()
 i=0
+# Both paths a deployment can take: the true state (with the encoder's noise) and the encoder.
 while read -r vx vy wz; do
-  capture "c${i}" --command "$vx" "$vy" "$wz"
+  capture "c${i}" --contract-from-truth --command "$vx" "$vy" "$wz"
+  capture "c${i}_encoder" --command "$vx" "$vy" "$wz"
   states+=(--states "g1/rollouts/${task}_loop_${round}_c${i}.npz")
+  states+=(--states "g1/rollouts/${task}_loop_${round}_c${i}_encoder.npz")
   i=$((i + 1))
 done <<< "$commands"
-capture starts --standing-fraction 0.3 --resample-seconds 2 5
+capture starts --contract-from-truth --standing-fraction 0.3 --resample-seconds 2 5
 states+=(--states "g1/rollouts/${task}_loop_${round}_starts.npz")
 
 "$python" -u g1/scripts/teacher_from_states.py --headless "${states[@]}" \
-  --checkpoint "$published" --task-id "$teacher_task" --fixed-command \
+  --checkpoint "$published" --task-id "$teacher_task" --fixed-command --last-action source \
   --output "g1/rollouts/${task}_dagger_${round}.npz" > "logs/contract/${task}_dagger_${round}.log" 2>&1
 tail -1 "logs/contract/${task}_dagger_${round}.log"
 

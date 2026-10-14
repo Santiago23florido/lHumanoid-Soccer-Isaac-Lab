@@ -59,6 +59,13 @@ parser.add_argument("--task-id", default=None, help="The teacher's task (default
 parser.add_argument(
     "--fixed-command", action="store_true", help="No heading control: hold the command."
 )
+parser.add_argument(
+    "--last-action",
+    choices=("zero", "source"),
+    default="zero",
+    help="The teacher's first last-action input: zero, or the joint targets in force at the "
+    "captured state (the capture's own last action, same action space).",
+)
 parser.add_argument("--output", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -169,6 +176,13 @@ def main() -> int:
             command_term.is_heading_env[:] = False
         command_term.time_left[:] = 1.0e9
         inner.action_manager.reset()
+        if args_cli.last_action == "source":
+            # The joint targets are part of the state: the policy's last action is the
+            # target its joints were driven to. Zeroed, it reads a body commanded to the
+            # default pose mid-stride, and its first steps answer that, not the state.
+            last = take("obs")[:, -inner.action_manager.total_action_dim :]
+            inner.action_manager._action[:] = last
+            inner.action_manager._prev_action[:] = last
         observation = inner.observation_manager.compute()["policy"]
 
         window = np.stack([source["skill_state"][t - k, n] for k in range(args_cli.history)][::-1])

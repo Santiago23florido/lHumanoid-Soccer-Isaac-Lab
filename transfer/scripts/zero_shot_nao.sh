@@ -34,6 +34,7 @@ echo "start $(date +%H:%M) iterations $iterations" > "$status"
 if [ ! -f nao/body/mirror.json ]; then
   "$python" -u transfer/scripts/measure_mirror.py --headless --task-id NaoTrack-v0 \
     --prefix L R --prefix l_ r_ --mimic RHipYawPitch LHipYawPitch 1.0 \
+    --max-joints 48 \
     --output nao/body/mirror.json > logs/contract/measure_mirror_nao.log 2>&1
 fi
 "$python" - <<'PYEOF' | tee -a "$status"

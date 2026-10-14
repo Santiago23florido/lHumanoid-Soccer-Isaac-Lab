@@ -1166,6 +1166,40 @@ Limits and stopping rules:
     The family is mirror-symmetric (tested) and so is the robot; the tracker is not. That
     asymmetry belongs to the body side, the map shows it without the task, and it decides
     both of the remaining failures.
+- **The correction: an equivariant tracker** (`transfer/symmetry.py`, a deviation from the
+  catalog for the reason above). When the family and the robot are mirror-symmetric, the
+  optimal tracker answers a reflected input with its action reflected. The maps:
+  - *Joints:* from the body's own kinematics (`measure_mirror.py`, `g1/body/mirror.json`).
+    Each joint is moved ±0.1 rad; the reflected displacements of every link origin and
+    centre of mass pick the partner's sign. Residuals are below 1.5e-3 of the move, against
+    2.0 for the other sign, on all 37 joints. Six finger signs differ from what the
+    position-only probe suggested, so they are measured, not guessed.
+  - *The plan:* `mirror_matrix` in the contract's normalised units.
+
+  The test-time form needs no training: `½ (π(o) + P π(A o + b))`, the projection onto
+  equivariant policies (`symmetrize_actor.py`).
+- **Round 2's tracker, symmetrized** (`*_r2_5195_sym*.json`):
+  - *L4 (amended) passes at all three commands.* No falls; plans used (0.36–0.40); speed
+    1.09, 1.05 and 1.17; stride 2.7–6 %, period 2.5–3 %, duty 1.1–7.2 %. A wrong sign
+    anywhere would have averaged the tracker with a body it does not have.
+  - *Map:* left minus right duty −0.003 (−0.041 before). Grid 26 → 32 of 61, manoeuvres
+    5 → 6 of 6.
+  - *L2 now fails, on the duty:* the published gait's procedural twins are each followed
+    with stances 0.05 of a stride longer than the biped asks, on both feet (9–12 %); before
+    symmetrizing, the left foot's short bias had hidden it on that side. On the task's own
+    plans the stances are at or below what is asked (−0.04 to 0). So this is the family's
+    load profile against real contact — a half-sine that ends exactly at the duty — as
+    much as the tracker.
+- **G1 round 3, pre-registered before training** — the last RL round on the G1:
+  - *Run:* round 2 resumed for 1000 iterations with every minibatch doubled by its mirror
+    image (rsl-rl's symmetry augmentation; `HUMANOID_SYMMETRY=1`), and deployed
+    symmetrized.
+  - *Choosing the G1's tracker,* between round 3 and round 2 symmetrized:
+    1. the one whose first failing level comes later in the ladder (L1, L1b, L2, L4);
+    2. then the one that passes more levels;
+    3. on a tie, round 3.
+
+    The chosen tracker is frozen for the NAO's evaluation and the blind test.
 
 ## What this stage hands to the next
 

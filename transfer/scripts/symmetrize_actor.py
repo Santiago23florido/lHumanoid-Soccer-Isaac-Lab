@@ -24,6 +24,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -34,6 +35,7 @@ from humanoid_transfer.common.skill_state import SKILL_LAYOUT  # noqa: E402
 from humanoid_transfer.transfer.latent.contract import load_contract  # noqa: E402
 from humanoid_transfer.transfer.symmetry import (  # noqa: E402
     joint_mirror,
+    joint_offsets,
     observation_mirror,
 )
 
@@ -56,17 +58,26 @@ def tracker_terms(joints: int, view: int, imu: bool = False) -> list[tuple[str, 
 
 class Symmetrized(nn.Module):
     def __init__(
-        self, actor: nn.Module, linear: torch.Tensor, offset: torch.Tensor, joints: torch.Tensor
+        self,
+        actor: nn.Module,
+        linear: torch.Tensor,
+        offset: torch.Tensor,
+        joints: torch.Tensor,
+        action_offset: torch.Tensor,
     ) -> None:
         super().__init__()
         self.actor = actor
         self.register_buffer("linear", linear)
         self.register_buffer("offset", offset)
         self.register_buffer("joints", joints)
+        self.register_buffer("action_offset", action_offset)
+
+    def reflect_action(self, action: torch.Tensor) -> torch.Tensor:
+        return action @ self.joints.T + self.action_offset
 
     def forward(self, observation: torch.Tensor) -> torch.Tensor:
         reflected = observation @ self.linear.T + self.offset
-        return 0.5 * (self.actor(observation) + self.actor(reflected) @ self.joints.T)
+        return 0.5 * (self.actor(observation) + self.reflect_action(self.actor(reflected)))
 
 
 def main() -> int:
@@ -95,8 +106,21 @@ def main() -> int:
     view = args.view or contract.generator.view
     norm = contract.generator.skill_norm
     joints = joint_mirror(names, spec)
+    # Offsets for a default pose that is not its own reflection (zero on the G1).
+    position = action = np.zeros(len(names))
+    if "default_joint_pos" in spec:
+        default = np.array([spec["default_joint_pos"][n] for n in names])
+        position, _ = joint_offsets(joints, default, 1.0)
+    if "action" in spec:
+        recorded = spec["action"]
+        index = [recorded["joints"].index(n) for n in names]
+        offset = np.array(recorded["offset"])[index]
+        scale = np.array(recorded["scale"])[index]
+        action = joint_offsets(joints, offset, 1.0)[0] / scale
     terms = tracker_terms(len(names), view, imu=args.body == "nao")
-    mirror = observation_mirror(terms, joints, norm.mean.numpy(), norm.std.numpy())
+    mirror = observation_mirror(
+        terms, joints, norm.mean.numpy(), norm.std.numpy(), position, action
+    )
     actor = torch.jit.load(str(args.actor), map_location="cpu").eval()
     width = mirror.offset.shape[0]
     probe = torch.zeros(1, width)
@@ -107,11 +131,13 @@ def main() -> int:
         torch.as_tensor(mirror.linear, dtype=torch.float32),
         torch.as_tensor(mirror.offset, dtype=torch.float32),
         torch.as_tensor(joints, dtype=torch.float32),
+        torch.as_tensor(action, dtype=torch.float32),
     ).eval()
     output = args.output or args.actor.with_name(args.actor.stem + "_sym.pt")
     torch.jit.script(module).save(str(output))
     x = torch.randn(64, width)
-    gap = (module(x @ module.linear.T + module.offset) - module(x) @ module.joints.T).abs().max()
+    reflected = x @ module.linear.T + module.offset
+    gap = (module(reflected) - module.reflect_action(module(x))).abs().max()
     print(f"{output}: {width} inputs, view {view}; equivariance gap {float(gap):.1e}")
     return 0
 

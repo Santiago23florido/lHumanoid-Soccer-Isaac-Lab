@@ -22,7 +22,11 @@ Every map here is its own inverse, and the tests hold them to that.
 
 * **Joints** come from a body's measured mirror (``measure_mirror.py``): each
   joint's partner and whether a positive angle maps to a positive angle. Joint
-  positions are relative to the default pose, which must itself be symmetric.
+  positions are read relative to the default pose ``q0`` and actions as offsets
+  ``(q − q0) / scale``; if ``q0`` is not its own reflection (``P q0 ≠ q0``), both
+  reflect with an offset, ``P x + (P q0 − q0)`` and ``P a + (P q0 − q0) / scale``
+  (:func:`joint_offsets`). The G1's default pose is symmetric; the offset is
+  computed anyway, for any body.
 * **The skill state** is reflected by
   :func:`~humanoid_transfer.common.skill_state.mirror_matrix` in physical
   units. In a contract's normalised units ``(z − μ) / s`` that is affine:
@@ -81,6 +85,18 @@ def load_joint_mirror(names: Sequence[str], path: Path | str) -> np.ndarray:
     return joint_mirror(names, json.loads(Path(path).read_text(encoding="utf-8")))
 
 
+def joint_offsets(
+    joints: np.ndarray, default: np.ndarray, scale: np.ndarray | float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Offsets reflecting positions relative to ``default`` and actions scaled by ``scale``.
+
+    With ``P`` an involution, ``x ↦ P x + c`` is one exactly when ``P c = −c``,
+    which ``c = P q0 − q0`` is.
+    """
+    position = joints @ default - default
+    return position, position / scale
+
+
 def normalised_skill_mirror(mean: np.ndarray, std: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """``(A, b)`` reflecting a normalised ``z*``: ``A z_n + b``."""
     m = mirror_matrix(SKILL_LAYOUT)
@@ -116,11 +132,14 @@ def observation_mirror(
     joints: np.ndarray,
     skill_mean: np.ndarray,
     skill_std: np.ndarray,
+    position_offset: np.ndarray | None = None,
+    action_offset: np.ndarray | None = None,
 ) -> AffineMirror:
     """The mirror of one observation group, from its terms' names and widths, in order.
 
     The names are those of the tracking environments' observation terms; one this
-    does not know is an error, never passed through unreflected.
+    does not know is an error, never passed through unreflected. The offsets are
+    :func:`joint_offsets`' (zero when the default pose is symmetric).
     """
     skill = SKILL_LAYOUT.size
     relative, _ = normalised_skill_mirror(skill_mean, skill_std)
@@ -133,8 +152,12 @@ def observation_mirror(
             mirror.add(AXIAL)
         elif name in ("velocity_commands",):
             mirror.add(PLANAR)
-        elif name in ("joint_pos", "joint_vel", "actions"):
+        elif name == "joint_pos":
+            mirror.add(joints, position_offset)
+        elif name == "joint_vel":
             mirror.add(joints)
+        elif name == "actions":
+            mirror.add(joints, action_offset)
         elif name == "contract":
             # The plan over the view relative to ẑ*, then ẑ*.
             mirror.add(relative, repeat=(width - skill) // skill)
@@ -157,6 +180,7 @@ __all__ = [
     "PLANAR",
     "VECTOR",
     "joint_mirror",
+    "joint_offsets",
     "load_joint_mirror",
     "normalised_skill_mirror",
     "observation_mirror",

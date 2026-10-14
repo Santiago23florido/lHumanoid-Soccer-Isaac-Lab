@@ -19,10 +19,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import torch
 from tensordict import TensorDict
 
-from ...symmetry import load_joint_mirror, observation_mirror
+from ...symmetry import joint_offsets, load_joint_mirror, observation_mirror
 from .command import ReferenceCommand
 
 
@@ -36,6 +37,13 @@ class TrackerMirror:
         joints = load_joint_mirror(action._joint_names, mirror)
         if inner.action_manager.total_action_dim != joints.shape[0]:
             raise ValueError("the actions are not one per joint of the measured mirror")
+        # Positions are read from the default pose, actions are scaled offsets from theirs.
+        count = joints.shape[0]
+        robot = inner.scene["robot"]
+        default = _per_joint(robot.data.default_joint_pos[:, action._joint_ids], count)
+        position, _ = joint_offsets(joints, default, 1.0)
+        _, moved = joint_offsets(joints, _per_joint(action._offset, count), 1.0)
+        scaled = moved / _per_joint(action._scale, count)
         commands = inner.command_manager._terms.values()
         term = next(t for t in commands if isinstance(t, ReferenceCommand))
         norm = term.generator.skill_norm
@@ -43,12 +51,13 @@ class TrackerMirror:
         manager = inner.observation_manager
         device = inner.device
         self.joints = torch.as_tensor(joints, dtype=torch.float32, device=device)
+        self.action_offset = torch.as_tensor(scaled, dtype=torch.float32, device=device)
         self.groups: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
         for group, names in manager.active_terms.items():
             shapes = manager.group_obs_term_dim[group]
             layout = [(n, int(torch.tensor(s).prod())) for n, s in zip(names, shapes, strict=True)]
             try:
-                affine = observation_mirror(layout, joints, mean, std)
+                affine = observation_mirror(layout, joints, mean, std, position, scaled)
             except KeyError:
                 continue  # a group no learner reads (the teacher's labels)
             self.groups[group] = (
@@ -61,7 +70,14 @@ class TrackerMirror:
         return x @ linear.T + offset
 
     def action(self, a: torch.Tensor) -> torch.Tensor:
-        return a @ self.joints.T
+        return a @ self.joints.T + self.action_offset
+
+
+def _per_joint(value, count: int) -> np.ndarray:
+    """An action term's scale or offset, or a default pose: one number per joint (env 0)."""
+    if isinstance(value, torch.Tensor):
+        return value[0].detach().cpu().double().numpy()
+    return np.full(count, float(value))
 
 
 _MIRRORS: dict[int, TrackerMirror] = {}

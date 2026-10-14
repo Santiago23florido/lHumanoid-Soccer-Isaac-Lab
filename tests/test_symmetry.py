@@ -124,3 +124,41 @@ def test_a_joint_shared_by_both_sides_reflects_onto_itself() -> None:
     p = joint_mirror(["LHipYawPitch", "LHipRoll", "RHipRoll"], spec)
     np.testing.assert_allclose(p, [[-1, 0, 0], [0, 0, -1], [0, -1, 0]])
     np.testing.assert_allclose(p @ p, np.eye(3))
+
+
+def test_an_asymmetric_default_pose_still_reflects_exactly() -> None:
+    from humanoid_transfer.transfer.symmetry import joint_offsets
+
+    rng = np.random.default_rng(2)
+    names = ["LHipRoll", "RHipRoll", "LKnee", "RKnee"]
+    spec = {
+        "joints": [
+            {"name": "LHipRoll", "partner": "RHipRoll", "sign": -1},
+            {"name": "RHipRoll", "partner": "LHipRoll", "sign": -1},
+            {"name": "LKnee", "partner": "RKnee", "sign": 1},
+            {"name": "RKnee", "partner": "LKnee", "sign": 1},
+        ]
+    }
+    p = joint_mirror(names, spec)
+    default = np.array([0.05, 0.02, 0.4, 0.3])
+    scale = 0.25
+    position, action = joint_offsets(p, default, scale)
+    q = rng.normal(size=(6, 4))
+    reflected_q = q @ p.T
+    # Positions relative to the default pose, and actions as scaled offsets from it.
+    np.testing.assert_allclose((q - default) @ p.T + position, reflected_q - default)
+    np.testing.assert_allclose(
+        ((q - default) / scale) @ p.T + action, (reflected_q - default) / scale
+    )
+    np.testing.assert_allclose(p @ action, -action)
+    m = observation_mirror(
+        [("joint_pos", 4), ("actions", 4)],
+        p,
+        np.zeros(SKILL_LAYOUT.size),
+        np.ones(SKILL_LAYOUT.size),
+        position,
+        action,
+    )
+    x = rng.normal(size=(3, 8))
+    once = x @ m.linear.T + m.offset
+    np.testing.assert_allclose(once @ m.linear.T + m.offset, x, atol=1e-12)

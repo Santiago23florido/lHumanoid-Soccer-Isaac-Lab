@@ -97,7 +97,12 @@ def main() -> int:
     n = inner.num_envs
     links = list(robot.data.body_names)
     joint_partner = [joints.index(partner(j, prefixes)) for j in joints]
-    link_partner = [links.index(partner(b, prefixes)) for b in links]
+    # A link whose name has no partner (a merged frame named for one side only) is left
+    # out of the comparison and reported, rather than paired with the wrong one.
+    keep = [i for i, b in enumerate(links) if partner(b, prefixes) in links]
+    unpaired = [b for i, b in enumerate(links) if i not in keep]
+    slot = {i: k for k, i in enumerate(keep)}
+    link_partner = [slot[links.index(partner(links[i], prefixes))] for i in keep]
 
     default = robot.data.default_joint_pos[:1].clone()
     position = default.expand(n, -1).clone()
@@ -120,8 +125,8 @@ def main() -> int:
     rotation = math_utils.convert_quat(transforms[..., 3:7], to="wxyz")
     centre = view.get_coms().to(device)[..., :3]
     masses = transforms[..., :3] + math_utils.quat_apply(rotation, centre)
-    points = torch.cat([transforms[..., :3], masses], dim=1) - pose[:, None, :3]
-    both = link_partner + [k + len(links) for k in link_partner]
+    points = torch.cat([transforms[:, keep, :3], masses[:, keep]], dim=1) - pose[:, None, :3]
+    both = link_partner + [k + len(keep) for k in link_partner]
 
     def reflected(p: torch.Tensor) -> torch.Tensor:
         return p[:, both] * torch.tensor([1.0, -1.0, 1.0], device=device)
@@ -130,7 +135,26 @@ def main() -> int:
     symmetric = float((reflected(points[:1]) - points[:1]).norm(dim=-1).max()) / scale
     report = {"task": args_cli.task_id, "delta": args_cli.delta, "joints": [], "links": links}
     report["default_pose_residual"] = symmetric
+    report["unpaired_links"] = unpaired
     report["mimic"] = {f: [leader, float(m)] for f, leader, m in args_cli.mimic}
+    # What positions and actions are measured from, so a policy's inputs can be reflected
+    # offline (symmetrize_actor.py) when the default pose is not its own reflection.
+    default = robot.data.default_joint_pos[0].tolist()
+    report["default_joint_pos"] = dict(zip(joints, default, strict=True))
+    manager = getattr(inner, "action_manager", None)
+    if manager is not None and len(manager._terms) == 1:
+        (action,) = manager._terms.values()
+
+        def per_joint(value) -> list[float]:
+            if isinstance(value, torch.Tensor):
+                return value[0].tolist()
+            return [float(value)] * len(action._joint_names)
+
+        report["action"] = {
+            "joints": list(action._joint_names),
+            "scale": per_joint(action._scale),
+            "offset": per_joint(action._offset),
+        }
     # Displacements from the default pose, not positions: the pose's own small asymmetry
     # (a few millimetres) cancels, and a joint that moves its links by one still shows.
     moves = points - points[:1]

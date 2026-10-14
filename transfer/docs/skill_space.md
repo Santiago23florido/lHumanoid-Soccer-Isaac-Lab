@@ -1087,6 +1087,85 @@ Limits and stopping rules:
     body steps at 0.6 `T`.
   - Both are the task side's, and DAgger is the correction: a second round, from this
     loop's states, at the speeds the published policy does not walk.
+- **Task-side DAgger, round 2** (`contract_flat_dagger2.json`,
+  `zero_shot_g1_r2_5195_flat_dagger2_*.json`). Round 1's loop was captured on both paths,
+  the true state and the encoder. The published policy acted from 1024 of its states, and
+  the generator was retrained on the teacher's data and both rounds' (gate passes, chain
+  period 0.94).
+  - *Deployed, no falls.* The plans are used (0.31–0.49) and period 0.96–0.98.
+  - *The speed runs further away.* Asked 0.48, 0.76 and 0.40 m/s at the three commands,
+    against round 1's 0.30, 0.60 and 0.32 and the policy's 0.18, 0.49 and 0.24. Stride is
+    +49 to +155 %.
+  - *True state:* 14–36 falls, period 0.66–0.69. *L3:* 30 falls in 133 episodes, mostly in
+    the first 1–3 s after starting from the policy's noisy states, at commands up to
+    0.96 m/s forward and 0.42 m/s sideways.
+- **Why DAgger diverges here, measured** (offline, nothing trained):
+  - *The generator on its own chain is the policy's.* Chained on its own plans from the
+    G1's spawn state — what a perfect tracker would walk — rounds 1 and 2 start 32 of 32
+    chains, reach 0.20, 0.51 and 0.27 m/s within two seconds, and keep period 0.93–0.99 and
+    duty 0.49/0.54. The published policy, in its training environment, walks 0.20 m/s at the
+    first command. The pre-DAgger generator starts only 6–7 of 32. Started from the loop's
+    own 0.49 m/s states, every round's chain returns to 0.20 within 6 s, also when every
+    plan is overshot by 3 %.
+  - *On the body's history it barely reverts.* Fed the deployed loop's own windows (encoder,
+    true state, or true state plus noise), round 2 plans 0.47 m/s where the body was
+    walking 0.49. The tracker overshoots its plans by 1.7 %. That balance is the loop's
+    fixed point.
+  - *The policy's labels say so.* From the loop's states, the published policy speeds up
+    for the first 0.26 s — a commitment's length — and only then slows down (command
+    0.25: 0.35 → 0.43 → 0.37 → 0.23 m/s over one second). Round 2's fast half goes
+    0.50 → 0.53. From its own states the jump is small (0.183 → 0.196, or 0.186 with the
+    joint targets in force written as its last action, `--last-action source`). From the
+    loop's states the same correction changes the jump by 0.002 m/s, so the transplant is
+    not to blame.
+  - *So the labels are right and the loop is not.* Every 0.26 s the generator is asked,
+    again, what the policy does in the first 0.26 s after finding itself in the G1
+    tracker's state, and the policy's answer — a pendulum ahead of its foot, caught by a
+    quick step — is to speed up. Each round adds data at the higher speeds the previous
+    round reached; the fixed point moves up with it.
+- **What this says about reading the body's history.** Let a plan revert a deviation from
+  the commanded gait by a fraction `κ` per commitment. Let a body's tracker overshoot by
+  `ε`, and let `δ` be how the task's expert answers that body's way of moving. The loop
+  then settles where `(1 − κ)(1 + ε)` and `δ` balance, which is far from the expert's gait
+  whenever `κ ≲ ε`, as here. Both `ε` and `δ` belong to the pair of task and body:
+  - a generator kept stable on a body's history must be trained on that body's
+    histories — N × M trainings, the thing the contract exists to avoid;
+  - DAgger on the G1 writes the published policy's reaction to the *G1 tracker's* style
+    into the task's generator, which is wrong for any other body.
+
+  Reading its own plans instead (the autonomous reference, already the tracker's training
+  mode and §7's L3), the generator's chain is a property of the task alone — it is what
+  the task's gate checks. The tracker follows the plan's anchored displacement, so its
+  `ε` cannot accumulate, and the body enters the history only where it must: at a start
+  and when it has left the plan (a resync). That splits the loop into the two halves N + M
+  can certify separately. Task-side DAgger keeps one job, the starts, which is what it
+  fixed (6 → 32 of 32).
+- **Amendment to L4, made before its result was read:** the deployed path is the encoder
+  with the autonomous reference. The physical reference stays as a diagnostic, and its
+  failure above stands.
+- **L4, amended** (`zero_shot_g1_r2_5195_flat_dagger2_auto_l4_*.json`). Round 2's tracker
+  and round 2's generator, both frozen, at the three commands:
+  - *Deployed:*
+    - no falls in 64 episodes at any command;
+    - plans used (0.22–0.27);
+    - speed 1.10, 1.06 and 1.15 times the policy's;
+    - stride +3 to +7 %, period −2.5 to −3.5 %;
+    - the plans ask for duties within 4 % of the policy's (0.48–0.50 / 0.54).
+  - *Gate C* passes at the fast command. At forward and turning it fails on the left
+    foot's duty alone: 10.2 % and 10.5 % short of the policy's, against a limit of 10 %.
+    The body's left stance is 13–14 % shorter than its plan asks; the right is within 3 %.
+  - *True state:* 11–17 falls, period 0.60–0.65, use 0.78. This path writes the task
+    contract's `σ` into the tracker's view, and the published contract's `σ` is the walk
+    encoder's error on the published policy's states when the contract was trained. That is
+    8.8 times (median; up to 56) the noise the tracker trained with, and 4–10 times the
+    deployed encoder's error on these same runs. So this path measures that earlier
+    encoder, not the one deployed, and is not read as a diagnostic of this one.
+  - *The left foot, measured without the task.* Over the competence map
+    (`competence_g1_r2_5195.json`), where every plan's two duties are equal, the body's
+    left duty is 0.041 below its right; on moving gaits near duty 0.55 it is 0.054 below.
+    The family is mirror-symmetric (tested) and so is the robot; the tracker is not. That
+    asymmetry belongs to the body side, the map shows it without the task, and it decides
+    both of the remaining failures.
 
 ## What this stage hands to the next
 

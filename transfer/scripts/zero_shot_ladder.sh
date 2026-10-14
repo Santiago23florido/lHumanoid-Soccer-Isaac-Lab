@@ -34,6 +34,11 @@ task="${ZS_TASK:-flat}"
 # ZS_GENERATOR: another generator of the same task (after task-side DAgger, say).
 task_generator="${ZS_GENERATOR:-logs/contract/${task}_h20/generator.pt}"
 generator_name="$(basename "$(dirname "$task_generator")")"
+# ZS_REFERENCE: what the deployed generator reads in L4 -- the body's history (physical), or
+# its own plans, caught up with the body only when the body has left them (autonomous).
+reference="${ZS_REFERENCE:-physical}"
+mode=""
+if [ "$reference" = autonomous ]; then mode="_auto"; fi
 if [ "$task" = rough ]; then
   commands="forward 0.25 0 0
 fast 0.6 0 0
@@ -131,13 +136,15 @@ if want l4; then
     vx=$("$python" -c "print($vx * $speed_scale)")
     vy=$("$python" -c "print($vy * $speed_scale)")
     wz=$("$python" -c "print($wz * $turn_scale)")
-    capture "${generator_name}_${name}_encoder" --num-envs 32 --reference physical --command "$vx" "$vy" "$wz"
-    capture "${generator_name}_${name}_truth" --num-envs 32 --reference physical --contract-from-truth \
+    capture "${generator_name}${mode}_${name}_encoder" --num-envs 32 --reference "$reference" \
       --command "$vx" "$vy" "$wz"
+    capture "${generator_name}${mode}_${name}_truth" --num-envs 32 --reference "$reference" \
+      --contract-from-truth --command "$vx" "$vy" "$wz"
     "$python" transfer/scripts/evaluate_contract.py \
       --run "teacher=g1/rollouts/${task}_play_${name}.npz" \
-      --run "encoder=$rollouts/zs_${tag}_${generator_name}_${name}_encoder.npz" \
-      --run "truth=$rollouts/zs_${tag}_${generator_name}_${name}_truth.npz" \
-      --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}_l4_${name}.json" | grep -v "^  "
+      --run "encoder=$rollouts/zs_${tag}_${generator_name}${mode}_${name}_encoder.npz" \
+      --run "truth=$rollouts/zs_${tag}_${generator_name}${mode}_${name}_truth.npz" \
+      --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${mode}_l4_${name}.json" \
+      | grep -v "^  "
   done <<< "$commands"
 fi

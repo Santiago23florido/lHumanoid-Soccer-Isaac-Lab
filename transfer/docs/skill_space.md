@@ -1190,6 +1190,13 @@ Limits and stopping rules:
     plans the stances are at or below what is asked (−0.04 to 0). So this is the family's
     load profile against real contact — a half-sine that ends exactly at the duty — as
     much as the tracker.
+  - *L1 passes* (1 fall in 128 environments). *L1b fails:*
+    - speed ratio 0.84 deployed and 0.86 on the true state, against round 2's 1.04–1.06;
+    - 4 falls in 64 deployed.
+
+    The walk teacher's own gait is asymmetric (duty 0.92 / 0.86), and the average mixes
+    in the tracker's answer to its mirror image, a walk it never practised. Training
+    toward the mirror (round 3) practises both.
 - **G1 round 3, pre-registered before training** — the last RL round on the G1:
   - *Run:* round 2 resumed for 1000 iterations with every minibatch doubled by its mirror
     image (rsl-rl's symmetry augmentation; `HUMANOID_SYMMETRY=1`), and deployed
@@ -1217,6 +1224,31 @@ Limits and stopping rules:
     means, weight 1 (`HUMANOID_SYMMETRY=loss`). Everything else — iterations, the
     selection rule — is unchanged. The stopped run stays in
     `logs/rsl_rl/g1_track/2026-10-14_15-20-31_zs_g1_r3`.
+- **G1 round 3** (`2026-10-14_15-38-39_zs_g1_r3_loss`, model_6194, deployed symmetrized;
+  `*_r3_6194_sym*.json`):
+  - *Training:* the mirror error fell from 0.20 to 0.019, `σ` stayed at 1.02–1.11, and
+    the contract reward ended at 2.74 (round 2: 2.64).
+  - *L1 passes:* 1 fall in 256 episodes, use 0.006.
+  - *Map:* grid 39 of 61 (26 for round 2, 32 for round 2 symmetrized), manoeuvres 6 of 6,
+    left minus right duty −0.004.
+  - *L2 passes:* all four twins, duty within 2.8–7.8 %. The stance that symmetrizing alone
+    had lengthened is learned back.
+  - *L1b fails on its letter, as round 2 did:*
+    - what the tracker controls passes on every path: falls 0, 0 and 1 in 64; speed ratio
+      0.97–1.04; use 0.05–0.06;
+    - stride and period on the deployed path are 23 % off, against round 12's 6 % and 5 %
+      plus 5 points. That is the walk generator's chain bias (§7.1), now followed.
+  - *L3 fails:* 15 falls in 129 episodes, use 0.66. L3 reads the true state with the
+    published contract's noise, the 8.8-fold one discussed under L4 above. Open: whether
+    it fails at the tracker's own training noise.
+  - *L4 (amended) passes at every command:* no falls, plans used (0.27–0.30), speed 1.09,
+    1.06 and 1.16, stride 1.7–5.2 %, period 3.8–5.3 %, duty 0.7–8.4 %.
+- **The G1's tracker, by the pre-registered rule:** both candidates first fail at L1b;
+  round 3 passes three levels (L1, L2, L4), round 2 symmetrized two (L1, L4). Round 3 it
+  is, deployed symmetrized, with its refitted encoder (`walk_zs_g1_r3_6194_sym`). Frozen.
+- **The G1 passes L4**, the condition for the NAO's round. The task side used for it —
+  the published generator with task-side DAgger for its starts, `flat_dagger2` — is
+  frozen with it.
 
 ## What this stage hands to the next
 

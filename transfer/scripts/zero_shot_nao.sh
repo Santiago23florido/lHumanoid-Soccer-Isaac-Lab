@@ -49,7 +49,14 @@ from humanoid_transfer.transfer.symmetry import joint_mirror, joint_offsets
 
 spec = json.load(open("nao/body/mirror.json", encoding="utf-8"))
 rows = {r["name"]: r for r in spec["joints"]}
-bad = [n for n in ACTUATED_JOINTS if not rows[n]["residual"] < 0.05 < 1.0 < rows[n]["other_residual"]]
+# The chosen sign must win clearly. Not near zero: the NAO's model is not an exact mirror
+# image in its arms (its default pose, symmetric joint by joint, reflects to 3.3 cm in its
+# links), so an arm's reflected move matches its partner's to 8-36 % of the move -- against
+# 170-200 % for the other sign. The legs match to 1e-4.
+bad = [
+    n for n in ACTUATED_JOINTS
+    if not (rows[n]["residual"] < 0.5 and rows[n]["other_residual"] > max(1.0, 3 * rows[n]["residual"]))
+]
 p = joint_mirror(ACTUATED_JOINTS, spec)
 offset = joint_offsets(p, np.array([spec["default_joint_pos"][n] for n in ACTUATED_JOINTS]), 1.0)[0]
 print(f"mirror: default pose residual {spec['default_pose_residual']:.2e}, "

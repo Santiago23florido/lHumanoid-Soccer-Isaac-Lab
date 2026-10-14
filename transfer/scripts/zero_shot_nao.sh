@@ -70,6 +70,7 @@ unset HUMANOID_PROCEDURAL HUMANOID_SYMMETRY
 run="$(ls -d logs/rsl_rl/nao_track/*_"${name}" | tail -1)"
 checkpoint="model_$((start_checkpoint + iterations - 1))"
 ZS_SYMMETRIZE=1 ZS_REFERENCE=autonomous ZS_GENERATOR=logs/contract/flat_dagger2/generator.pt \
-  bash transfer/scripts/zero_shot_ladder.sh nao "$run" "$checkpoint" "${name#zs_}_sym" \
+  bash transfer/scripts/zero_shot_ladder.sh nao "$run" "$checkpoint" \
+  "${name#zs_nao_}_${checkpoint#model_}_sym" \
   > "logs/contract/ladder_${name}.log" 2>&1
 echo "ladder $(date +%H:%M): logs/contract/ladder_${name}.log" >> "$status"

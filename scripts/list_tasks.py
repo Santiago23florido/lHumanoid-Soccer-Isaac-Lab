@@ -27,10 +27,14 @@ if str(_EXTENSION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXTENSION_ROOT))
 
 # Which embodiment each id belongs to, for grouping. Matched as a prefix.
+#
+# The label carries the development state as well as the track, because a
+# registry listing is where someone decides what to train next, and "registered"
+# and "being built on" are not the same thing. See ARCHITECTURE.md, Boundaries.
 TRACKS = {
-    "NaoStand": "nao — target embodiment",
-    "G1Walk": "g1 — source embodiment",
-    "HumanoidSoccer": "soccer — long-horizon target",
+    "G1Walk": "g1 — source embodiment: trained, weights pinned in g1/policy/",
+    "NaoStand": "nao — target embodiment: finished balance task, kept, not an input",
+    "HumanoidSoccer": "soccer — long-horizon target: inactive scaffolding",
 }
 
 

@@ -1,6 +1,10 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# The extension is not installed in the environment the tests run in, and must
+# not need to be: every test file has to import it on its own, not because some
+# other file earlier in the collection order happened to patch sys.path.
+pythonpath = ["source/humanoid_transfer"]
 
 [tool.ruff]
 line-length = 100

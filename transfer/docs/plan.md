@@ -135,19 +135,90 @@ into an assumption and the finding circular.
 
 ### Still not addressed
 
-Torque feasibility. A configuration inside the joint limits may still be
+Torque feasibility. `transfer.embodiment` now *measures* the gap in body
+units — the NAO has a sixth of the G1's hip and knee torque and 2.4× its ankle
+torque, see [`skill_space.md`](skill_space.md) — but nothing weights the
+teacher by it yet. A configuration inside the joint limits may still be
 unreachable because the actuators cannot hold it — `LAnklePitch` has 3.023 N·m
 against a 12.98 N·m/rad destabilising gravitational stiffness. That is a limit of
 the body and belongs in `feasibility`; it is not implemented.
 
+## What this starts from
+
+Two halves, and both are decisions rather than circumstances.
+
+**The teacher is fixed.** `g1/policy/teacher_policy.pt`, hashed and pinned, with
+the seed, command range and measured gait beside it. Not "retrain the G1 when
+needed": the comparisons below are three signals × masked/unmasked × 3 seeds, and
+a teacher that differs between them makes the study a measurement of the teacher.
+Retraining is possible and deliberately awkward — `tests/test_teacher_policy.py`
+fails until the manifest is updated to match.
+
+**The student starts from its body, not from its balance task.** `nao/assets`
+and `common/` are shared; `nao/tasks/nao_stand` and `nao/controllers` are frozen
+out, enforced by `tests/test_development_baseline.py`.
+
+That boundary is here because it was crossed twice, both times invisibly:
+
+| Where | What was imported | Why it was wrong |
+| --- | --- | --- |
+| `transfer/feasibility.py` | Zero-step capturability as the imitation weight | Measures how close to rest a state is; walking states are *not* at rest. Down-weighted 0 of 12 800 real samples, on the double-stance polygon. |
+| `g1/tasks/g1_walk` | The 0.443 m/s capturable bound as the reason for the 0.15 m/s student target | The speed is a free parameter of the experiment. The margin a gait keeps is a result, so it cannot be its own justification. |
+
+Neither was a bug that raised anything. Both were the standing task's definition
+reused as if it were a fact about the robot, which is why the line is now drawn
+between **the body** and **the task** rather than between the two robots.
+
+The standing work is kept, registered, reproducible and reported. It answers its
+own question — "recover without stepping" — and the zero-step termination is
+what poses that question. **A condition may define a task; it may not prescribe
+a strategy for a different one.**
+
 ## Order of work
 
-1. **Teacher.** Train `G1Walk-Teacher-v0` to a stable gait at the Froude-matched
-   speed. Nothing novel; Isaac Lab's configuration already does this.
-2. **Rollout capture.** Record teacher trajectories: joint states, CoM,
-   centroidal momentum, contact events. This defines what the student can be
-   shown.
-3. **Student task.** A NAO walking environment. This does not exist yet and is
+1. **Teacher.** ✅ **Done.** `G1Walk-Teacher-v0` trained to a stable gait at the
+   Froude-matched speed, measured rather than assumed (0.206 m/s achieved
+   against 0.249 commanded, 51–60 mm foot clearance), and pinned as
+   `g1/policy/teacher_policy.pt`. Nothing novel: Isaac Lab's configuration
+   already does this, and exactly one field was changed.
+2. **Rollout capture.** ✅ **Done.** 400 steps × 32 environments at 50 Hz, all
+   three candidate signals recorded together in the teacher's own units —
+   joint states with names, centroidal position, velocity and angular momentum,
+   per-foot normal force. Untracked (`g1/rollouts/`), regenerable from the
+   pinned policy. Checked for reachability before use by
+   `transfer/scripts/check_reachability.py`, which is what caught the unsigned
+   elbow.
+2b. **The shared skill space.** **G1 side built; skill not yet pinned.** The centroidal signal
+   made exact and learnable: a 27-number skill state in each body's own units
+   (Buckingham's π theorem), certified against the simulator; each body as
+   its dimensionless groups and the defect between them; and a learned latent
+   space — per-body encoder and decoder, shared skill policy and dynamics —
+   anchored to that state so the NAO's encoder can be aligned from its own
+   simulation. Closed-loop the anchored policy walks without falling at the
+   teacher's speed, but no run reproduces the stride timing to the 10 % the
+   criteria ask, so it is not pinned yet. A shared memory that reads only the
+   physical history (so the body cannot leak in through it) walks too after
+   one DAgger round, but flips the stride error from 16 % too long to 29 %
+   too short. See [`skill_space.md`](skill_space.md) §5–6.
+2c. **The contract.** **G1 round trip passes the gates on its deployed path
+   (fragile); the NAO walks the G1's walk on every path; zero-shot new task fails.** The learned action code was replaced by a physical interface:
+   the next values of `z*`.
+   - **Per task:** a generator, the walk's and the published
+     `Isaac-Velocity-Flat-G1-v0` policy's.
+   - **Per body:** a tracker trained by RL. It never sees the task and has
+     the reference's path in view.
+   - **G1 status:** round 12 passes gates B and C on the deployed path.
+     The pass is fragile: on the true state, stride and period are +22 %.
+   - **NAO status:** trained once on the walk, it walks the G1's walk on
+     every path, deployed included. No falls, Froude-matched speed, gait
+     −18 to −21 %.
+   - **The published task does not transfer zero-shot** to a tracker
+     trained on the walk alone, on either body: a coverage limit.
+   - **Open decision:** whether trackers train on every available skill.
+   See [`skill_space.md`](skill_space.md) §7.
+3. **Student task.** ✅ `NaoTrack-v0`: the NAO following the walk's contract,
+   trained by RL; `transfer/scripts/nao_contract.sh` evaluates it against the
+   G1's policies. The paragraph below predates it. A NAO walking environment. This did not exist and was
    the largest single piece of work. It must be built as a new task, not as a
    variant of `nao_stand`: that task terminates on a step, which defines it and
    is exactly wrong here. The student's objective is open — track the commanded
@@ -158,7 +229,13 @@ the body and belongs in `feasibility`; it is not implemented.
 5. **The comparison.** Three signals × masked/unmasked × 3 seeds.
 6. **Ablate the mask** on the best signal.
 
-Steps 1–2 are unblocked. Step 3 gates everything after it.
+Steps 1–2 are done. **Step 3 gates everything after it**, and it is the next
+piece of work: a NAO walking environment that does not exist yet.
+
+Before it, the cheapest check in this document is still worth doing first —
+*can a student learn to walk at all?* Step 4's baseline with `λ_im = 0` answers
+that, and if the answer is no, the comparison in step 5 has no content and the
+0.15 m/s target is the first thing to suspect.
 
 ## What is implemented
 
@@ -167,11 +244,20 @@ Steps 1–2 are unblocked. Step 3 gates everything after it.
 | `common/capturability.py` | Done, tested. Embodiment-agnostic LIPM/DCM/capturability. |
 | `g1/assets/g1.py` | Done. Source-robot selection, swappable to H1 in one line. |
 | `g1/tasks/g1_walk/` | Done. Teacher task, Froude-capped commands. |
+| `g1/policy/` | **Done. Trained teacher, pinned and hashed.** The baseline every comparison runs against. |
 | `transfer/correspondence.py` | Name map and **sign** done and tested. Scale map deliberately absent — it is the experiment. |
 | `transfer/feasibility.py` | Reachability criterion done and tested. Torque feasibility not implemented. |
 | `transfer/scripts/check_reachability.py` | Done. Run it on a rollout before training on it. |
 | `transfer/distillation.py` | Configuration only. The loss terms need the student environment first. |
-| Student walking task | **Not started.** The critical path. |
+| `common/skill_state.py`, `centroidal.py`, `similarity.py`, `gait.py` | Done, tested. The skill state in body units, its invariances, the gait signature. |
+| `transfer/embodiment.py` | Done, tested. Each body as dimensionless groups; the similarity defect. |
+| `transfer/latent/` | G1 side: anchored shared latent space, distilled (DART + 3 DAgger rounds) and run closed-loop. Walks; stride timing off by 12–20 %; not pinned. Superseded by the contract (below). |
+| `transfer/latent/contract.py`, `skill_torch.py` | Done. The task side of the contract: a flow-matching generator of the next `z*`, trained offline on a teacher's states, DAgger rounds on closed-loop states; `z*` on the GPU. |
+| `transfer/tasks/tracking/` | Done. The body side: references, plan view and path, joint-likelihood reward. |
+| `g1/tasks/g1_track/`, `nao/tasks/nao_track/` | G1: round 12 passes gates B and C on the deployed path (true state: stride +22 %). NAO: walks the walk on every path, gait −18 to −21 %. |
+| `transfer/scripts/*contract*.sh`, `capture_contract.py`, `train_body_encoder.py`, `body_encoder.py`, `widen_inputs.py` | Done. Closed loop, DAgger, new task, NAO evaluation; encoders per body; network widening. |
+| `g1/body/body_card.json` | Measured from the simulator by `g1/scripts/measure_body.py`. |
+| Student walking task | `NaoTrack-v0` (the contract tracker): walks at the Froude-matched speed, no falls, deployed path included. |
 
 The distillation losses are unwritten on purpose. Writing a reward term against
 an environment that does not exist is how the standing task acquired a
@@ -196,6 +282,14 @@ nobody checked for weeks, because it ran without error the whole time.
 
 ## Related documents
 
-- [`task_nao_stand.md`](../../nao/docs/task_balance.md) — the student's balance task, and the
-  source of the capturability numbers used here.
+- [`task_balance.md`](../../nao/docs/task_balance.md) — the student's finished
+  balance task. **Read for context, not depended on.** It was previously listed
+  here as "the source of the capturability numbers used here", which is exactly
+  the relationship this plan no longer has with it: the capturability figures
+  that remain are instrumentation, derived in `common/` from geometry, and
+  `transfer.feasibility.standing_margin` reports them rather than requiring them.
+- [`../../g1/policy/README.md`](../../g1/policy/README.md) — the pinned teacher,
+  and why it is the only tracked binary.
+- [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) — where each package lives,
+  and the enforced boundary between the NAO's body and the NAO's balance task.
 - [`architecture.md`](../../ARCHITECTURE.md) — where each package lives.

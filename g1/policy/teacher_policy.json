@@ -1,0 +1,80 @@
+{
+  "$comment": [
+    "The trained teacher this project builds on. Pinned here because it is the",
+    "one artifact in the repository that is not reproducible: 1 h 58 m of GPU",
+    "time, and a rerun under a different seed gives different weights. Every",
+    "transfer comparison has to be against the same teacher or it measures the",
+    "teacher instead of the transfer. tests/test_teacher_policy.py checks this",
+    "file against the bytes next to it and against the environment config in",
+    "source/, so a swapped or stale teacher fails loudly rather than quietly.",
+    "Regenerate with g1/policy/README.md if you really mean to replace it."
+  ],
+  "policy": {
+    "file": "teacher_policy.pt",
+    "format": "torchscript",
+    "sha256": "fdcbe88c0e83257304ee09a8d454d9d68503cfa8211ddeaa23659e286d95dcb3",
+    "bytes": 356822,
+    "observation_dim": 123,
+    "action_dim": 37,
+    "parameter_count": 85925,
+    "loads_without_isaac_lab": true
+  },
+  "provenance": {
+    "robot": "unitree_g1",
+    "usd": "Isaac Lab Nucleus, Robots/Unitree/G1/g1.usd (downloaded, not vendored)",
+    "task_id": "G1Walk-Teacher-v0",
+    "env_cfg": "humanoid_transfer.g1.tasks.g1_walk.g1_walk_env_cfg:G1WalkTeacherEnvCfg",
+    "base_env_cfg": "isaaclab_tasks...config.g1.flat_env_cfg:G1FlatEnvCfg",
+    "run_name": "2026-09-23_13-28-36_teacher",
+    "exported_utc": "2026-09-23T13:28:00Z",
+    "seed": 1,
+    "iterations": 1500,
+    "num_envs": 4096,
+    "steps_per_env_per_update": 24,
+    "total_env_steps": 147456000,
+    "wall_clock_seconds": 7053,
+    "device": "RTX 4070 Laptop",
+    "control_hz": 50.0,
+    "sim_dt": 0.005,
+    "decimation": 4,
+    "source_checkpoint": {
+      "file": "model_1499.pt",
+      "sha256": "d35290da8184a3f6c4efdeebd84c2223d8e6383cdfcd5d3f33b8775f24921320",
+      "tracked": false,
+      "note": "Lives under the gitignored logs/ tree. Recorded so the untracked original can be identified if it is still on disk."
+    },
+    "params_dumped_by_the_run": ["teacher_env.yaml", "teacher_agent.yaml"]
+  },
+  "command_distribution": {
+    "$comment": "The only field of the inherited configuration this project overrides.",
+    "lin_vel_x": [0.0, 0.2488351441615056],
+    "lin_vel_y": [0.0, 0.0],
+    "ang_vel_z": [0.0, 0.0],
+    "heading": [0.0, 0.0],
+    "derivation": "froude_matched_speed(0.15, 0.2689, 0.74)"
+  },
+  "verification": {
+    "$comment": "Measured after training, not inferred from the reward curve. g1/scripts/measure_gait.py, 32 envs, 8 s.",
+    "commanded_forward_velocity_mps": 0.2488,
+    "achieved_forward_velocity_body_frame_mps": 0.206,
+    "fraction_of_command": 0.83,
+    "lateral_drift_mps": 0.004,
+    "net_displacement_speed_mps": 0.203,
+    "foot_clearance_left_mm": {"mean": 51.2, "max": 78.5},
+    "foot_clearance_right_mm": {"mean": 60.4, "max": 75.8},
+    "verdict": "walking",
+    "final_mean_reward": 33.88,
+    "final_episode_length_steps": 997.34,
+    "final_action_std": 0.44
+  },
+  "what_this_does_not_establish": [
+    "One seed. No claim about variance across training runs.",
+    "One speed. Not a general gait controller.",
+    "Simulation only. No hardware and no measured actuator model.",
+    "Nothing about transfer. A teacher that walks is the input to the question, not an answer."
+  ],
+  "licensing": {
+    "weights": "Produced by this project. Covered by the repository LICENSE.",
+    "recipe_and_asset": "Isaac Lab, BSD-3-Clause. The G1 USD is downloaded from Nucleus at run time and is not redistributed here."
+  }
+}

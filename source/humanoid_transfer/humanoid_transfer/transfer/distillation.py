@@ -29,7 +29,7 @@ Configuration and the feasibility weighting are implemented. The loss terms
 themselves are not: they need the student environment to exist first, and
 writing them against an environment that has not been built is how the
 zero-step task acquired a reward term that computed a number nobody had
-checked. See ``docs/transfer.md`` for the order of work.
+checked. See ``transfer/docs/plan.md`` for the order of work.
 """
 
 from __future__ import annotations
@@ -56,13 +56,15 @@ class TeacherSignal(str, Enum):
     """
 
     CENTROIDAL = "centroidal"
-    """Match the teacher's centre-of-mass trajectory and centroidal momentum,
-    scaled by leg length and mass.
+    """Match the teacher's skill state: CoM, base tilt and turn, feet, load
+    shares and centroidal angular momentum, each in the body's own units.
 
-    Discards the joint configuration entirely and keeps what the linear
-    inverted pendulum says actually matters. Invariant to the joint-count
-    mismatch, which is the reason to expect it to survive the gap better than
-    joint matching.
+    Discards the joint configuration entirely and keeps what the centroidal
+    equations are written in. "Scaled by leg length and mass" is made exact by
+    :mod:`~humanoid_transfer.common.skill_state`: every field is divided by the
+    body's unit for its dimension, which makes the state identical for
+    dynamically similar motions of bodies of any size (tested). The teacher's
+    gait, encoded and certified, is in ``transfer/results/skill_space_teacher.json``.
     """
 
     CONTACT_SCHEDULE = "contact_schedule"

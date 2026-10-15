@@ -44,10 +44,32 @@ TEACHER_LEG_LENGTH = 0.74
 STUDENT_TARGET_SPEED = 0.15
 """Forward speed the student is eventually meant to reach, in m/s.
 
-Chosen well inside the NAO's zero-step capturable envelope, whose weakest
-direction is 0.443 m/s. A walking gait has to remain recoverable between steps,
-so the target speed has to leave margin against that bound rather than approach
-it.
+**A free parameter of the experiment, declared as one.** Froude matching relates
+the two robots' speeds; it does not pick either of them. Once this number is
+chosen the teacher's follows, and that is the whole content of the relation.
+
+The dimensionless consequence is ``Fr = 0.15^2 / (9.81 * 0.2689) = 0.00853``,
+which both robots then share. That is a very slow walk: terrestrial animals walk
+across roughly ``Fr = 0.1`` to ``0.5``. Setting it two orders of magnitude below
+that is a choice about how hard to make the *first* transfer experiment, not a
+limit read off the robot.
+
+It is **not** derived from the student's zero-step capturable envelope, and an
+earlier version of this docstring said it was --- that the 0.443 m/s weakest
+direction justified staying near a third of it. That reasoning was backwards in
+the same way the transfer package's first feasibility criterion was. The
+envelope is the standing task's definition: it measures how close to rest a
+state is. Requiring the walking target to keep margin against it imposes a
+condition on *how* the student is allowed to walk, out of a quantity that only
+means something for a robot trying not to step. How much margin a learned gait
+keeps is a result to report (``transfer.feasibility.standing_margin``), so it
+cannot also be the reason the speed was picked.
+
+What would actually falsify this number: a student that cannot walk at
+0.15 m/s with ``lambda_im = 0``. That is the baseline in
+``transfer/docs/plan.md`` step 4, and if it fails the number is wrong and the
+teacher has to be retrained --- which is why the teacher is pinned and hashed
+rather than regenerated silently (see ``g1/policy/README.md``).
 """
 
 FROUDE_MATCHED_SPEED = froude_matched_speed(

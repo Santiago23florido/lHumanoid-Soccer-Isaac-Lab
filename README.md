@@ -42,7 +42,7 @@ an external extension. It is split the same three ways internally — see
 
 ## Where the work stands
 
-### Track 1 — the target robot: **done and measured**
+### Track 1 — the target robot: **done and measured; kept, not built on**
 
 Zero-step balance under perturbation, with a hard constraint: a foot that lifts
 or slides more than 50 mm ends the episode. Without it the robot solves the task
@@ -80,6 +80,14 @@ Established along the way, and reusable:
 5. **Sample size gates every claim.** At n = 128 the standard error near p = 0.85
    is 3.2 points, larger than any effect this task produces.
 
+This track is **finished, and deliberately not the starting point for the NAO
+walking work.** The robot's *body* — URDF, USD, kinematics, actuator model — is
+shared. The balance *task* is not: its zero-step termination defines a problem
+whose objective is the opposite of a gait's, and importing that criterion has
+already cost two rewrites. The boundary is enforced by
+`tests/test_development_baseline.py`; the reasoning is in
+[ARCHITECTURE.md](ARCHITECTURE.md#boundaries).
+
 ### Track 2 — the source robot: **trained and verified walking**
 
 `G1Walk-Teacher-v0`, built on Isaac Lab's `G1FlatEnvCfg`, with commands capped at
@@ -100,6 +108,11 @@ Isaac Lab ships **no pretrained weights** for the G1 — it ships the model, the
 environment and the PPO hyperparameters. Exactly one field was changed, the
 command velocity range, and these weights were produced here.
 
+They are **pinned in [`g1/policy/`](g1/policy/README.md)** and hashed: the one
+derived binary this repository tracks, because it is the one artifact that cannot
+be regenerated. A rerun under another seed is a different gait, and every
+transfer comparison is a comparison against this teacher.
+
 **→ [`g1/TRAINING.md`](g1/TRAINING.md)** documents the provenance of every
 component, the one variable that was chosen and why, the learning curve, and how
 the gait was verified rather than assumed.
@@ -108,10 +121,13 @@ the gait was verified rather than assumed.
 
 | Module | State |
 | --- | --- |
-| Joint correspondence | Done, tested. Records what the map *cannot* express. |
-| Feasibility masking | Done, tested. Ignores the teacher where it asks for the impossible. |
+| Joint correspondence | Done, tested, **signed**. Records what the map *cannot* express. |
+| Reachability criterion | Done, tested. Ignores the teacher where the student's body cannot reach, and nowhere else. |
 | Student objective | Configuration only. |
 | **Student walking task** | **Not started — the critical path.** |
+
+The baseline it starts from: the **pinned G1 teacher** on one side, the **NAO's
+body alone** on the other.
 
 Read [`transfer/README.md`](transfer/README.md) for the hypothesis and
 [`transfer/docs/plan.md`](transfer/docs/plan.md) for the order of work and the

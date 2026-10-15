@@ -22,6 +22,18 @@ REQUIRED_PATHS = [
     "nao/scripts/view_asset.py",
     "nao/scripts/render_pose.py",
     "nao/scripts/fetch_meshes.py",
+    # Track 2, the source embodiment. The teacher is tracked, unlike every other
+    # derived artifact, because it is the only one that cannot be regenerated:
+    # a rerun under a different seed is a different gait. See g1/policy/README.md.
+    "g1/TRAINING.md",
+    "g1/policy/README.md",
+    "g1/policy/teacher_policy.pt",
+    "g1/policy/teacher_policy.json",
+    "g1/policy/teacher_env.yaml",
+    "g1/policy/teacher_agent.yaml",
+    # The teacher's body as its simulation integrates it. Measured, not derived:
+    # the G1 USD is downloaded at run time, so a test cannot re-derive it.
+    "g1/body/body_card.json",
     # Track 3, the research question.
     "transfer/docs/plan.md",
     # Cross-track entry points.
@@ -41,8 +53,7 @@ def test_scaffold_paths_exist() -> None:
 
 def test_task_id_is_registered_in_scaffold() -> None:
     task_init = (
-        ROOT
-        / "source/humanoid_transfer/humanoid_transfer/soccer/tasks/humanoid_soccer/__init__.py"
+        ROOT / "source/humanoid_transfer/humanoid_transfer/soccer/tasks/humanoid_soccer/__init__.py"
     )
     assert "HumanoidSoccer-Direct-v0" in task_init.read_text(encoding="utf-8")
 

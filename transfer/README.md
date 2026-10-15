@@ -103,6 +103,9 @@ number an assumption.
 | `feasibility.py` | Reachability done and tested. Torque feasibility not implemented. |
 | `scripts/check_reachability.py` | Done. Caught a sign error that affected 100% of samples. |
 | `distillation.py` | Configuration only. The loss terms need the student environment first. |
+| `embodiment.py` | Each body as dimensionless groups and the defect between them. |
+| `latent/` | The shared latent space, G1 side: anchored to the skill state, distilled, walks closed-loop. Not pinned: stride timing misses its criterion. |
+| `scripts/encode_skill.py`, `train_latent.py`, `evaluate_latent.py` | Certify the skill state, train the latent model, compare policies closed-loop. |
 | Student walking task | **Not started.** The critical path. |
 
 The losses are unwritten on purpose. Writing a reward term against an
@@ -112,9 +115,30 @@ without error for weeks.
 
 Code lives in `source/humanoid_transfer/humanoid_transfer/transfer/`.
 
+## What this starts from
+
+| | |
+| --- | --- |
+| Teacher | **Fixed.** `g1/policy/teacher_policy.pt`, hashed and pinned. Every comparison runs against this one gait, or it measures the teacher instead of the transfer. |
+| Student | **Its body only.** `nao/assets` and `common/` are shared; `nao/tasks/nao_stand` and `nao/controllers` are frozen out and enforced by a test. |
+
+The NAO's balance task is finished, kept and registered. It is not the starting
+point for a gait: its zero-step termination defines a problem whose objective is
+the opposite. The same criterion has leaked into the walking work twice — once as
+the imitation weight here, once as the justification for the teacher's command
+speed — and both times nothing raised. See
+[`../ARCHITECTURE.md`](../ARCHITECTURE.md#boundaries).
+
+## The shared skill space
+
+The centroidal signal, made exact: a 27-number state in each body's own units
+that every humanoid shares by construction, and a learned latent space
+anchored to it, with a per-body encoder and decoder around a skill every body
+shares. Full account and results: [`docs/skill_space.md`](docs/skill_space.md).
+
 ## Order of work
 
-1. **Teacher.** Train `G1Walk-Teacher-v0` to a stable gait. Unblocked.
+1. **Teacher.** Trained, verified walking, pinned. Done.
 2. **Rollout capture.** Record joint states, CoM, centroidal momentum, contacts.
 3. **Student task.** A NAO *walking* environment. Does not exist. It must be a
    new task rather than a variant of the balance one, whose zero-step

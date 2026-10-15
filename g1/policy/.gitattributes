@@ -1,0 +1,12 @@
+# The pinned teacher's bytes are checked against a SHA-256 in
+# teacher_policy.json, so any end-of-line translation would break the check --
+# and would break it on checkout, on a machine nobody is looking at. Git's
+# binary heuristic already gets this right; this makes it explicit so a future
+# root-level `* text` cannot quietly take it over.
+teacher_policy.pt   -text -diff
+
+# The configurations the training run dumped. Kept byte-for-byte as written:
+# they are a record of that run, not files this project edits. core.autocrlf is
+# true on the development machine, which would otherwise rewrite them.
+teacher_env.yaml    text eol=lf
+teacher_agent.yaml  text eol=lf

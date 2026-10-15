@@ -28,8 +28,16 @@ Contents:
     Whether the target's joints can reach a configuration at all, so the
     teacher signal can be ignored where it asks for the impossible. Also
     reports the zero-step margin a gait keeps, as a measurement.
+``embodiment``
+    Each body as its dimensionless groups, and the similarity defect between
+    two of them: which aspects of the student's body the skill will strain.
 ``distillation``
     The student objective.
+``latent``
+    The learned shared space, and the one subpackage that uses torch: a
+    per-body encoder and decoder around a skill policy and latent dynamics
+    every body shares, anchored to the analytic skill state of
+    :mod:`~humanoid_transfer.common.skill_state`.
 
-See ``docs/transfer.md`` for the research plan and the open questions.
+See ``transfer/docs/plan.md`` for the research plan and the open questions.
 """

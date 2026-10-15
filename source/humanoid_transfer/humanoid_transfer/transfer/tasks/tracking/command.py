@@ -116,6 +116,10 @@ class ReferenceCommand(UniformVelocityCommand):
         inertia = view.get_inertias()[0].to(self.device, torch.float32).reshape(-1, 3, 3)
         com_offset = self.robot.data.body_com_pos_b[0].to(torch.float32)
         sole_points = torch.tensor(cfg.sole_points, device=self.device, dtype=torch.float32)
+        self.sole_corners = None
+        if cfg.sole_corners is not None:
+            corners = torch.tensor(cfg.sole_corners, device=self.device, dtype=torch.float32)
+            self.sole_corners = corners - com_offset[foot_ids][:, None]
         units = UnitSystem(cfg.leg_length, float(masses.sum()))
         self.units = units
         self.body = BodyConstants(
@@ -445,6 +449,7 @@ class ReferenceCommand(UniformVelocityCommand):
             data.body_com_ang_vel_w,
             load,
             base_velocity=self.cfg.base_velocity,
+            corners=self.sole_corners,
         )
         return self.generator.skill_norm(z)
 
@@ -774,6 +779,10 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     sole_points: list[list[float]] = MISSING
     """Each foot's sole point in its link frame, metres."""
+
+    sole_corners: list[list[list[float]]] | None = None
+    """Each foot's sole corners in its link frame, metres: where a pitched foot touches the
+    ground, for the kinematic estimator's height. None: the sole points."""
 
     leg_length: float = MISSING
     """The body's unit of length, metres."""

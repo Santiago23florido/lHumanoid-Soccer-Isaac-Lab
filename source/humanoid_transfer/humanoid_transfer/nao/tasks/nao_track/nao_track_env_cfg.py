@@ -134,6 +134,21 @@ def sole_points() -> list[list[float]]:
     ]
 
 
+def sole_corners() -> list[list[list[float]]]:
+    """Each foot's sole corners in its link frame: the support polygon about its sole point.
+
+    The polygon is stated for the right foot, wider on its outer edge; the left mirrors it.
+    """
+    corners = []
+    for side, sole in zip(("left", "right"), sole_points(), strict=True):
+        low, high = nk.SUPPORT_POLYGON_Y_SINGLE
+        lateral = (-high, -low) if side == "left" else (low, high)
+        corners.append(
+            [[sole[0] + x, sole[1] + y, sole[2]] for x in nk.SUPPORT_POLYGON_X for y in lateral]
+        )
+    return corners
+
+
 @configclass
 class NaoTrackPolicyCfg(ObsGroup):
     """What a NAO could sense: IMU, joint encoders, last action -- and the plan."""
@@ -248,6 +263,7 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             base_body=BASE_BODY,
             foot_bodies=FOOT_BODIES,
             sole_points=sole_points(),
+            sole_corners=sole_corners(),
             leg_length=NAO.leg_length,
             flow_solver="midpoint",
             flow_steps=8,

@@ -193,3 +193,28 @@ def test_leg_odometry_recovers_the_velocities_when_the_loaded_foot_stands_still(
         expected.numpy(),
         atol=1e-10,
     )
+
+
+def test_the_ground_is_under_the_lowest_corner_of_a_pitched_foot() -> None:
+    from humanoid_transfer.common.skill_state import SKILL_LAYOUT
+    from humanoid_transfer.transfer.latent.skill_torch import proprioceptive_skill_state
+
+    body, t, load = _proprioceptive_case(0)
+    # A sole rectangle around each sole point, 2 cm below it in the foot's frame.
+    offsets = torch.tensor(
+        [[0.1, 0.03, -0.02], [0.1, -0.03, -0.02], [-0.05, 0.03, -0.02], [-0.05, -0.03, -0.02]],
+        dtype=torch.float64,
+    )
+    corners = body.sole_from_com[:, None, :] + offsets[None]
+    z = proprioceptive_skill_state(
+        body, t["quat"], t["com_pos"], t["com_lin_vel"], t["ang_vel"], load, corners=corners
+    )
+    feet = list(body.foot_index)
+    from humanoid_transfer.transfer.latent.skill_torch import quat_to_matrix
+
+    rotation = quat_to_matrix(t["quat"][:, feet])
+    points = t["com_pos"][:, feet, None] + torch.einsum("nfij,fkj->nfki", rotation, corners)
+    lowest = points[..., 2].flatten(1).min(dim=1).values
+    c = torch.einsum("b,nbi->ni", body.masses, t["com_pos"]) / body.masses.sum()
+    expected = (c[:, 2] - lowest) / UNITS.length
+    torch.testing.assert_close(z[:, SKILL_LAYOUT.slice_of("height")][:, 0], expected)

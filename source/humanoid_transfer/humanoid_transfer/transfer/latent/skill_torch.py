@@ -170,6 +170,7 @@ def proprioceptive_skill_state(
     foot_load: torch.Tensor,
     base_velocity: bool = True,
     layout: ZLayout = SKILL_LAYOUT,
+    corners: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """``z*`` as a body can compute it from its own sensors and kinematic model.
 
@@ -179,7 +180,10 @@ def proprioceptive_skill_state(
     depends on where the body is or which way it faces. What a body cannot sense
     is replaced by what it can infer:
 
-    - the ground is under the lower sole, so the height is the CoM's above it;
+    - the ground is under the lowest point of either foot's sole -- one of its
+      ``corners`` ``(2, K, 3)``, from each foot's CoM in its link frame (a pitched
+      foot touches with its heel or toe, its sole point above the ground), or the
+      sole points without them -- and the height is the CoM's above it;
     - without a base velocity (``base_velocity=False``, as on the NAO) the more
       loaded foot is taken to stand still, and every velocity is measured from it
       (leg odometry) -- the angular momentum, about the CoM, does not change;
@@ -190,6 +194,11 @@ def proprioceptive_skill_state(
     """
     soles = sole_points(body, link_quat, com_pos)
     ground = soles[..., 2].min(dim=1).values
+    if corners is not None:
+        feet = list(body.foot_index)
+        foot_rot = quat_to_matrix(link_quat[:, feet])
+        points = com_pos[:, feet, None] + torch.einsum("nfij,fkj->nfki", foot_rot, corners)
+        ground = points[..., 2].flatten(1).min(dim=1).values
     lifted = com_pos.clone()
     lifted[..., 2] = com_pos[..., 2] - ground[:, None] + body.ground_height
     velocity = com_lin_vel

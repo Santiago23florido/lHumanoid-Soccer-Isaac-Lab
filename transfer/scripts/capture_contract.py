@@ -174,6 +174,9 @@ def main() -> int:
         # The state is read before the step; the plan's due state is the target of the
         # state this step reaches (the next row of skill_state).
         record["skill_state"].append(skill_now())
+        # What the generator and the tracker read for that same state (computed when the
+        # previous step ended): the row it estimates is this row of skill_state.
+        record["estimate"].append(term.generator.skill_norm.inverse(term.estimate).cpu().numpy())
         record["encoder_input"].append(term.encoder_input().cpu().numpy())
         record["command"].append(inner.command_manager.get_command(COMMAND).cpu().numpy())
         record["base_lin_vel"].append(robot.data.root_lin_vel_b.cpu().numpy())
@@ -195,8 +198,6 @@ def main() -> int:
             action = driver(obs["policy"])
         record["action_executed"].append(action.cpu().numpy())
         obs, _, terminated, truncated, _ = env.step(action)
-        # What the generator and the tracker read for the state this step reached.
-        record["estimate"].append(term.generator.skill_norm.inverse(term.estimate).cpu().numpy())
         record["contract_error"].append(term.last_error.cpu().numpy())
         record["contract_error_other"].append(term.last_error_other.cpu().numpy())
         record["contract_error_state"].append(term.last_error_state.cpu().numpy())

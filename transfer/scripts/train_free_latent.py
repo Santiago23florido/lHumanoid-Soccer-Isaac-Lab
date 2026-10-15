@@ -1,4 +1,4 @@
-"""Learn the free latent part from both bodies, and test whether it carries physics across them.
+"""Learn the free latent part from both bodies, and test what it carries across them.
 
 F5 of ``transfer/docs/skill_space.md`` §9 (:mod:`~humanoid_transfer.transfer.latent.free_latent`).
 The data are captures of each body's tracker following the same fixed gaits of
@@ -7,21 +7,30 @@ foot's measured balance and the biped's gait phase. Two states are a pair when
 they follow the same probe at the same phase (one of ``--phase-bins``): the
 same planned gait at the same moment, each dynamically valid on its own body.
 
-**The test, pre-registered.** Only the G1's physics trains the predictor: the
-NAO enters through the pairs' alignment and the body classifier alone. The
-predictor is then asked about the NAO's held-out probes. ``ζ`` carries physics
-across bodies if ``(z*, ζ)`` predicts the NAO's balance and falls better than
-``z*`` alone -- a predictor trained the same way with ``ζ`` set to zero -- by
-more than twice the bootstrap standard error over held-out probes, while the
-classifier tells the bodies apart no better than chance (within twice its
-standard error).
+**Round 2 (the user's choice after round 1).** Round 1 read both bodies' balance
+with one predictor; paired states are held up differently on the two bodies,
+so it could not pass (§9.1). Here ``ζ`` stays shared, aligned and blind to the
+body -- what a plan carries from one body to another -- while each body reads
+its physics from ``(z*, ζ)`` with its own head, trained on its own procedural
+data (the body side; no task's data). Each foot's centre of pressure is
+measured as a fraction of its own support polygon. Pre-registered:
+
+1. **Shared.** Paired states' ``ζ`` agree, and a classifier tells the bodies apart
+   on held-out pairs no better than chance, within twice its standard error.
+2. **Informative.** On each body's held-out probes, its head with ``ζ`` predicts
+   its balance better than its head with ``ζ`` set to zero, by more than twice the
+   bootstrap standard error over probes.
+3. **Carried.** On held-out pairs, the NAO's head reading the NAO's ``z*`` and the
+   *G1's* ``ζ`` -- what a plan written from the G1 would hand the NAO -- predicts the
+   NAO's balance better than with ``ζ`` set to zero, by the same margin.
 
 Usage::
 
     python transfer/scripts/train_free_latent.py \
-        --g1 g1/rollouts/zs_r3_6194_sym_map.npz --g1 g1/rollouts/zs_r3_6194_sym_corners.npz \
-        --nao nao/rollouts/zs_r1_3498_sym_map.npz --nao nao/rollouts/zs_r1_3498_sym_corners.npz \
-        --output logs/free_latent/f5_r1/model.pt --results transfer/results/free_latent_f5.json
+        --g1 g1/rollouts/zs_r3_6194_sym_f5_map.npz --g1 g1/rollouts/zs_r3_6194_sym_f5_corners.npz \
+        --nao nao/rollouts/zs_r1_3498_sym_f5_map.npz \
+        --nao nao/rollouts/zs_r1_3498_sym_f5_corners.npz \
+        --output logs/free_latent/f5_r2/model.pt --results transfer/results/free_latent_f5_r2.json
 """
 
 from __future__ import annotations
@@ -63,6 +72,32 @@ LEGS = {
     "nao": ("LHip", "LKnee", "LAnkle"),
 }
 """Name prefixes of each body's left-leg joints; the right leg's mirror them."""
+
+POLYGONS = {
+    "g1": {
+        "x": (-0.101555, 0.101555),
+        "left": (-0.032735, 0.032735),
+        "right": (-0.032735, 0.032735),
+    },
+    "nao": {"x": (-0.0607, 0.1033), "left": (-0.0397, 0.0526), "right": (-0.0526, 0.0397)},
+}
+"""Each foot's support polygon about its sole point, metres: the G1's collision box underside
+(``g1/body/body_card.json``), the NAO's measured foot (``nao_kinematics.SUPPORT_POLYGON_*``)."""
+
+
+def polygon_fraction(balance: np.ndarray, body: str, length: float) -> np.ndarray:
+    """The centre of pressure, from leg lengths about the sole point to a fraction of the foot.
+
+    -1 and +1 are the polygon's edges along each axis; the forces are left as they are.
+    """
+    out = balance.copy()
+    polygon = POLYGONS[body]
+    for i, side in enumerate(("left", "right")):
+        for axis, bounds in ((0, polygon["x"]), (1, polygon[side])):
+            centre, half = (bounds[0] + bounds[1]) / 2, (bounds[1] - bounds[0]) / 2
+            column = 2 * i + axis
+            out[..., column] = (balance[..., column] * length - centre) / half
+    return out
 
 
 @dataclass
@@ -121,7 +156,7 @@ def load_body(paths: list[Path], body: str, bins: int, norm, device: str) -> Bod
         phase = np.clip((data["biped_phase"] * bins).astype(np.int64), 0, bins - 1)
         parts["x"].append(data["encoder_input"][keep])
         parts["z"].append(data["skill_state"][keep])
-        parts["b"].append(data["balance"][keep])
+        parts["b"].append(polygon_fraction(data["balance"], body, float(data["leg_length"]))[keep])
         parts["f"].append(soon[keep])
         parts["p"].append(probe[keep])
         parts["k"].append(phase[keep])
@@ -247,6 +282,25 @@ def bootstrap_se(diff: np.ndarray, draws: int, seed: int) -> float:
     return float(diff[picks].mean(axis=1).std())
 
 
+def standardise(data: BodyData, rows: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Each body's balance in units of its own spread over its training steps."""
+    mean = data.balance[rows].mean(dim=0)
+    std = data.balance[rows].std(dim=0).clamp(min=1e-6)
+    data.balance = (data.balance - mean) / std
+    return mean, std
+
+
+def paired_rows(cells: dict, generator: torch.Generator, device: str):
+    """One pair per cell: the held-out pairs the alignment and carry checks are scored on."""
+    left, right, cell_ids = [], [], []
+    for cell, (rows_a, rows_b) in cells.items():
+        count = min(len(rows_a), len(rows_b), 8)
+        left.append(rows_a[torch.randperm(len(rows_a), generator=generator)[:count]])
+        right.append(rows_b[torch.randperm(len(rows_b), generator=generator)[:count]])
+        cell_ids.append(torch.full((count,), cell))
+    return torch.cat(left).to(device), torch.cat(right).to(device), torch.cat(cell_ids).to(device)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--g1", type=Path, action="append", required=True)
@@ -274,51 +328,67 @@ def main() -> int:
     torch.manual_seed(args.seed)
     device = args.device
     norm = load_contract(args.contract, device).generator.skill_norm
-    g1 = load_body(args.g1, "g1", args.phase_bins, norm, device)
-    nao = load_body(args.nao, "nao", args.phase_bins, norm, device)
+    bodies = {
+        "g1": load_body(args.g1, "g1", args.phase_bins, norm, device),
+        "nao": load_body(args.nao, "nao", args.phase_bins, norm, device),
+    }
+    g1, nao = bodies["g1"], bodies["nao"]
     held = held_out_probes(g1, args.held_out, args.seed).to(device)
-    train_g1 = (~torch.isin(g1.probe, held)).nonzero().squeeze(-1)
-    test_g1 = torch.isin(g1.probe, held).nonzero().squeeze(-1)
-    test_nao = torch.isin(nao.probe, held).nonzero().squeeze(-1)
-    # The balance in units of its spread over the G1's training steps, on both bodies (it is
-    # dimensionless already, so the NAO's is read in the same units).
-    balance_mean = g1.balance[train_g1].mean(dim=0)
-    balance_std = g1.balance[train_g1].std(dim=0).clamp(min=1e-6)
-    for data in (g1, nao):
-        data.balance = (data.balance - balance_mean) / balance_std
-    cells = pair_index(g1, nao, args.phase_bins)
-    cells = {c: v for c, v in cells.items() if not bool(torch.isin(c // args.phase_bins, held))}
+    train = {k: (~torch.isin(d.probe, held)).nonzero().squeeze(-1) for k, d in bodies.items()}
+    test = {k: torch.isin(d.probe, held).nonzero().squeeze(-1) for k, d in bodies.items()}
+    stats = {k: standardise(d, train[k]) for k, d in bodies.items()}
+    all_cells = pair_index(g1, nao, args.phase_bins)
+    held_cell = {
+        c: bool(torch.isin(torch.tensor(c // args.phase_bins), held.cpu())) for c in all_cells
+    }
+    cells = {c: v for c, v in all_cells.items() if not held_cell[c]}
+    test_cells = {c: v for c, v in all_cells.items() if held_cell[c]}
     print(
-        f"g1 {len(g1.skill)} steps, nao {len(nao.skill)}, paired cells {len(cells)}, "
-        f"held-out probes {len(held)}"
+        f"g1 {len(g1.skill)} steps, nao {len(nao.skill)}, paired cells {len(cells)} "
+        f"(+{len(test_cells)} held out), held-out probes {len(held)}"
     )
 
     dims = FreeLatentDims(balance=g1.balance.shape[-1])
     stems = torch.nn.ModuleDict(
         {
             name: BodyStems({k: v.shape[-1] for k, v in data.features.items()}, dims.width)
-            for name, data in (("g1", g1), ("nao", nao))
+            for name, data in bodies.items()
         }
     ).to(device)
     encoder = FreeLatentEncoder(dims).to(device)
-    predictor = PhysicsPredictor(dims).to(device)
-    baseline = PhysicsPredictor(dims).to(device)
+    heads = torch.nn.ModuleDict({name: PhysicsPredictor(dims) for name in bodies}).to(device)
+    baselines = torch.nn.ModuleDict({name: PhysicsPredictor(dims) for name in bodies}).to(device)
     classifier = BodyClassifier(dims).to(device)
-    model_params = [*stems.parameters(), *encoder.parameters(), *predictor.parameters()]
-    optimiser = torch.optim.Adam(model_params, lr=args.learning_rate)
+    optimiser = torch.optim.Adam(
+        [*stems.parameters(), *encoder.parameters(), *heads.parameters()], lr=args.learning_rate
+    )
     side = torch.optim.Adam(
-        [*baseline.parameters(), *classifier.parameters()], lr=args.learning_rate
+        [*baselines.parameters(), *classifier.parameters()], lr=args.learning_rate
     )
     kl_multiplier, body_multiplier = DualAscent(rate=0.01, value=0.1), DualAscent(rate=0.05)
     generator = torch.Generator().manual_seed(args.seed)
     log = []
     for step in range(args.steps):
-        rows = train_g1[torch.randint(len(train_g1), (args.batch,), generator=generator).to(device)]
-        batch = take(g1, rows)
-        mean, log_variance = encoder(stems["g1"](batch["features"]))
-        free = mean + torch.randn_like(mean) * (0.5 * log_variance).exp()
-        losses = prediction_loss(predictor, batch["skill"], free, batch["balance"], batch["falls"])
-        kl = gaussian_kl(mean, log_variance).mean()
+        total = torch.zeros((), device=device)
+        base_total = torch.zeros((), device=device)
+        row = {"step": step}
+        for name, data in bodies.items():
+            pick = torch.randint(len(train[name]), (args.batch,), generator=generator)
+            batch = take(data, train[name][pick.to(device)])
+            mean, log_variance = encoder(stems[name](batch["features"]))
+            free = mean + torch.randn_like(mean) * (0.5 * log_variance).exp()
+            losses = prediction_loss(
+                heads[name], batch["skill"], free, batch["balance"], batch["falls"]
+            )
+            kl = gaussian_kl(mean, log_variance).mean()
+            total = total + losses["balance"] + losses["falls"] + kl_multiplier.value * kl
+            base = prediction_loss(
+                baselines[name], batch["skill"], torch.zeros_like(free), batch["balance"],
+                batch["falls"],
+            )  # fmt: skip
+            base_total = base_total + base["balance"] + base["falls"]
+            row[f"{name}_balance"] = float(losses["balance"])
+            row[f"{name}_kl"] = float(kl)
         pair_a, pair_b = sample_pairs(cells, args.batch, generator, device)
         free_a, _ = encoder(stems["g1"](take(g1, pair_a)["features"]))
         free_b, _ = encoder(stems["nao"](take(nao, pair_b)["features"]))
@@ -326,31 +396,19 @@ def main() -> int:
         logits = classifier(reverse_gradient(torch.cat([free_a, free_b]), body_multiplier.value))
         labels = torch.cat([torch.ones(len(free_a)), torch.zeros(len(free_b))]).to(device)
         body_loss = F.binary_cross_entropy_with_logits(logits, labels)
-        total = losses["balance"] + losses["falls"] + kl_multiplier.value * kl + align + body_loss
+        total = total + align + body_loss
         optimiser.zero_grad(set_to_none=True)
         side.zero_grad(set_to_none=True)
-        total.backward()
+        (total + base_total).backward()
         optimiser.step()
-        # The z*-alone baseline, on the same batches.
-        base = prediction_loss(
-            baseline, batch["skill"], torch.zeros_like(free), batch["balance"], batch["falls"]
-        )
-        (base["balance"] + base["falls"]).backward()
         side.step()
-        kl_multiplier.step(float(kl) - args.kl_budget)
+        kl_multiplier.step((row["g1_kl"] + row["nao_kl"]) / 2 - args.kl_budget)
         excess, se = accuracy_excess(logits.detach(), labels)
         body_multiplier.step(excess - 2 * se)
         if step % 500 == 0 or step == args.steps - 1:
-            row = {
-                "step": step,
-                "balance": float(losses["balance"]),
-                "falls": float(losses["falls"]),
-                "kl": float(kl),
-                "align": float(align),
-                "body_excess": excess,
-                "kl_multiplier": kl_multiplier.value,
-                "body_multiplier": body_multiplier.value,
-            }
+            row.update({"align": float(align), "body_excess": excess,
+                        "kl_multiplier": kl_multiplier.value,
+                        "body_multiplier": body_multiplier.value})  # fmt: skip
             log.append(row)
             print(" ".join(f"{k} {v:.4g}" for k, v in row.items()))
 
@@ -360,45 +418,72 @@ def main() -> int:
             "dims": asdict(dims),
             "stems": stems.state_dict(),
             "encoder": encoder.state_dict(),
-            "predictor": predictor.state_dict(),
-            "baseline": baseline.state_dict(),
-            "balance_mean": balance_mean,
-            "balance_std": balance_std,
+            "heads": heads.state_dict(),
+            "baselines": baselines.state_dict(),
+            "balance": {k: [v.cpu() for v in s] for k, s in stats.items()},
+            "polygons": POLYGONS,
         },
         args.output,
     )
     encoder.eval()
-    nao_test, g1_test = take(nao, test_nao), take(g1, test_g1)
-    free_nao = encode_all(encoder, stems["nao"], nao_test["features"])
-    free_g1 = encode_all(encoder, stems["g1"], g1_test["features"])
-    verdicts = verdict(predictor, baseline, nao_test, free_nao, nao.probe[test_nao], args.seed)
-    own = verdict(predictor, baseline, g1_test, free_g1, g1.probe[test_g1], args.seed)
-    final_excess = log[-1]["body_excess"]
-    report = {
+    report: dict = {
         "g1": [str(p) for p in args.g1],
         "nao": [str(p) for p in args.nao],
         "dims": asdict(dims),
         "held_out_probes": held.cpu().tolist(),
-        "nao_held_out": verdicts,
-        "g1_held_out": own,
-        "fall_rate": {
-            "g1": float(g1.falls.float().mean()),
-            "nao": float(nao.falls.float().mean()),
-        },
-        "body_classifier_excess": final_excess,
         "log": log,
-        "carries_physics_across_bodies": all(v["better"] for v in verdicts.values()),
     }
+    # 2. Informative, on each body's held-out probes.
+    informative = {}
+    for name, data in bodies.items():
+        part = take(data, test[name])
+        free = encode_all(encoder, stems[name], part["features"])
+        informative[name] = verdict(
+            heads[name], baselines[name], part, free, data.probe[test[name]], args.seed
+        )
+    report["informative"] = informative
+    # 1. Shared, and 3. carried, on held-out pairs.
+    rows_a, rows_b, cell_ids = paired_rows(test_cells, generator, device)
+    pair_a, pair_b = take(g1, rows_a), take(nao, rows_b)
+    free_a = encode_all(encoder, stems["g1"], pair_a["features"])
+    free_b = encode_all(encoder, stems["nao"], pair_b["features"])
+    with torch.no_grad():
+        logits = classifier(torch.cat([free_a, free_b]))
+    labels = torch.cat([torch.ones(len(free_a)), torch.zeros(len(free_b))]).to(device)
+    excess, se = accuracy_excess(logits, labels)
+    report["shared"] = {
+        "alignment": float(alignment_loss(free_a, free_b)),
+        "classifier_excess": excess,
+        "classifier_se": se,
+        "body_blind": bool(excess <= 2 * se),
+        "pairs": len(rows_a),
+    }
+    probes = cell_ids // args.phase_bins
+    carried = verdict(heads["nao"], baselines["nao"], pair_b, free_a, probes, args.seed)
+    own = verdict(heads["nao"], baselines["nao"], pair_b, free_b, probes, args.seed)
+    report["carried"] = {"g1_zeta": carried, "nao_zeta": own}
+    report["passes"] = {
+        "shared": report["shared"]["body_blind"],
+        "informative": all(v["balance_mse"]["better"] for v in informative.values()),
+        "carried": carried["balance_mse"]["better"],
+    }
+    report["fall_rate"] = {k: float(d.falls.float().mean()) for k, d in bodies.items()}
     args.results.parent.mkdir(parents=True, exist_ok=True)
     args.results.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    for name, v in verdicts.items():
+    for name, v in informative.items():
+        b = v["balance_mse"]
         print(
-            f"NAO held-out {name}: z* alone {v['z_star_alone']:.4f}, with zeta "
-            f"{v['with_free']:.4f} ({v['difference']:+.4f} ± {v['se']:.4f}) "
-            f"{'better' if v['better'] else 'not better'}"
+            f"{name} held-out: z* alone {b['z_star_alone']:.4f}, with zeta {b['with_free']:.4f} "
+            f"({b['difference']:+.4f} ± {b['se']:.4f})"
         )
-    print(f"body classifier beyond chance by {final_excess:+.3f}; written {args.results}")
-    return 0 if math.isfinite(log[-1]["balance"]) else 1
+    for name, v in report["carried"].items():
+        b = v["balance_mse"]
+        print(
+            f"NAO head on held-out pairs, {name}: z* alone {b['z_star_alone']:.4f}, "
+            f"with {b['with_free']:.4f} ({b['difference']:+.4f} ± {b['se']:.4f})"
+        )
+    print(f"classifier on held-out pairs: {excess:+.3f} ± {se:.3f}; passes {report['passes']}")
+    return 0 if math.isfinite(log[-1]["g1_balance"]) else 1
 
 
 if __name__ == "__main__":

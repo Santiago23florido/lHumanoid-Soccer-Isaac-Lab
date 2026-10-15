@@ -63,7 +63,9 @@ def test_the_script_trains_and_reports_the_cross_body_test(tmp_path: Path, monke
     spec.loader.exec_module(module)
     assert module.main() == 0
     report = json.loads(results.read_text(encoding="utf-8"))
-    assert set(report["nao_held_out"]) == {"balance_mse", "fall_cross_entropy"}
+    assert set(report["passes"]) == {"shared", "informative", "carried"}
+    assert set(report["informative"]) == {"g1", "nao"}
+    assert set(report["carried"]) == {"g1_zeta", "nao_zeta"}
     assert (tmp_path / "model.pt").is_file()
 
 

@@ -1528,6 +1528,44 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
 | F5, a learned latent ζ | entity tokens with attention, bottlenecked to predict balance and falls and aligned across bodies on paired procedural data, carry what z* leaves out without encoding the body | the NAO's falls and CoP predicted by heads trained on the G1 alone; a body classifier at chance |
 | F6 (optional) | projecting a plan towards mastered cells when predicted competence drops reduces falls | falls, at no cost in fidelity |
 
+### 9.1 Log
+
+- **F1, B4 trained** (`contract_{rough,flat}_b4.json`, `chain_fidelity_{rough,flat}_b{3,4}_x*.json`):
+  one generator per task across history noise levels from 0.125 to 32 times the body
+  encoder's precision, the level read as an input. Each chain is scored against the teacher at
+  multiples of that precision:
+
+  | generator | x1 | x3 | x10 | x20 |
+  | --- | --- | --- | --- | --- |
+  | `rough_b3` | **0.033 ± 0.005** | **0.041 ± 0.004** | 0.233 ± 0.016 | 0.609 ± 0.027 |
+  | `rough_b4` | 0.090 ± 0.005 | 0.079 ± 0.005 | **0.096 ± 0.006** | **0.108 ± 0.006** |
+  | `flat_b3` | 0.093 ± 0.008 | 0.127 ± 0.009 | 0.396 ± 0.021 | 1.009 ± 0.108 (5 of 32 chains) |
+  | `flat_b4` | 0.088 ± 0.007 | **0.079 ± 0.006** | **0.055 ± 0.006** | **0.061 ± 0.008** |
+
+  - *B4 holds at any noise level, as designed.* From x1 to x20 its fidelity hardly changes,
+    where B3's falls apart above x3.
+  - *Rough pays for it at the body's own precision:* 0.090 against 0.033.
+  - *Flat is no worse than B3 at any level.*
+  - The bodies decide (L4 next, `b4_on_bodies.sh`).
+- **F2, the encoder's coverage, diagnosed** (`encoder_error.py`,
+  `encoder_error_g1_r3_6194_sym.json`). The G1's encoder error, in units of its precision:
+
+  | states | error |
+  | --- | --- |
+  | its own, practised (walk, procedural family) | 0.4–1.2 |
+  | the published policies' gaits, true state | 4–7 (height 12–21) |
+  | the same, through the encoder | 12–18 |
+
+  - *Not height alone.* At the same CoM height, 0.85–0.90 L, the error is 0.8 on procedural
+    states and 13–34 on the tasks' states. The network learned shortcuts on the manifold it
+    was fitted on, not the kinematics.
+  - *Widening the family's ranges would not be enough,* so the correction is structural.
+    Everything in `z*` but the feet's loads is kinematics: the body computes it from its joint
+    encoders, IMU and model (`proprioceptive_skill_state`). The ground is under the lower sole.
+    Without a base velocity, the more loaded foot is taken as still (leg odometry). The
+    learned encoder supplies only the loads.
+  - L4 with the incumbents under this estimator: `estimator_study.sh`.
+
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:
 
 - flat is semi-blind;

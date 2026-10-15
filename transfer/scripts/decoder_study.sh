@@ -39,6 +39,16 @@ class Zero(torch.nn.Module):
 
 torch.jit.script(Zero()).save("logs/contract/zero_policy_g1.pt")
 PYEOF
+  # The reconstructed ground reactions against Newton and the contact sensor, both bodies.
+  "$python" -u transfer/scripts/check_balance.py --headless --task-id G1Track-Play-v0 \
+    --driver-policy logs/rsl_rl/g1_track/2026-10-14_15-38-39_zs_g1_r3_loss/exported/model_6194.pt \
+    --output transfer/results/check_balance_g1.json > logs/contract/check_balance_g1.log 2>&1
+  HUMANOID_CONTRACT="$root/logs/contract/walk_dagger2e/generator.pt" \
+    "$python" -u transfer/scripts/check_balance.py --headless --task-id NaoTrack-Play-v0 \
+    --driver-policy logs/rsl_rl/nao_track/2026-10-14_19-59-50_zs_nao_r1/exported/model_3498.pt \
+    --output transfer/results/check_balance_nao.json > logs/contract/check_balance_nao.log 2>&1
+  echo "balance g1: $(tr -d '\n ' < transfer/results/check_balance_g1.json | head -c 300)" >> "$status"
+  echo "balance nao: $(tr -d '\n ' < transfer/results/check_balance_nao.json | head -c 300)" >> "$status"
   for task in G1Track-Play-v0 G1TrackPhysics-Play-v0; do
     "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task" \
       --driver-policy logs/contract/zero_policy_g1.pt --num-envs 32 --steps 600 --settle-steps 0 \

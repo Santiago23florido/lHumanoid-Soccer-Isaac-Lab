@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import os
 
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils import configclass
 
+from ....transfer.tasks.tracking.balance import balance_state
 from ....transfer.tasks.tracking.physics_prior import PhysicsPriorActionCfg, prior_offset
 from .g1_track_env_cfg import (
     BASE_BODY,
@@ -36,6 +38,21 @@ prior carries the legs' motion."""
 
 PRIOR = os.environ.get("HUMANOID_PRIOR", "full")
 """Ablations: ``full``; ``kinematic`` (no feed-forward); ``static`` (feed-forward only)."""
+
+HEADS = os.environ.get("HUMANOID_HEADS", "0") == "1"
+"""The second layer: the critic reads the body's measured balance, and the actor's features
+must predict it (:class:`~humanoid_transfer.transfer.latent.physics_model.PhysicsActor`)."""
+
+
+@configclass
+class PhysicsTargetsCfg(ObsGroup):
+    """What the actor's physics heads predict: each foot's centre of pressure and ground force."""
+
+    balance = ObsTerm(func=balance_state, params={"command_name": COMMAND})
+
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
 
 
 def _prior_action() -> PhysicsPriorActionCfg:
@@ -59,6 +76,11 @@ def _show_prior(cfg) -> None:
     prior = ObsTerm(func=prior_offset, params={"action_name": "joint_pos"})
     cfg.observations.policy.prior = prior
     cfg.observations.critic.prior = prior
+    if HEADS:
+        cfg.observations.critic.balance = ObsTerm(
+            func=balance_state, params={"command_name": COMMAND}
+        )
+        cfg.observations.physics = PhysicsTargetsCfg()
 
 
 @configclass

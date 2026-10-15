@@ -125,7 +125,53 @@ def leg_forces(load: torch.Tensor, foot_position: torch.Tensor, weight: float) -
     return torch.cat([horizontal, vertical[..., None]], dim=-1)
 
 
+def ground_reaction(
+    joint_force: torch.Tensor,
+    joint_moment: torch.Tensor,
+    joint_pos: torch.Tensor,
+    foot_com: torch.Tensor,
+    foot_mass: torch.Tensor,
+    gravity: float = 9.81,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """``(force, moment about the joint)`` the ground exerts on each foot, world frame.
+
+    A simulator reports the wrench the leg transmits to the foot through its joint;
+    under the quasi-static assumption the ground balances it and the foot's weight
+    (as ``nao/scripts/run_baseline.py`` reconstructs the NAO's)::
+
+        f = -f_joint - m g,     m_joint = -m_joint - (c_foot - a) x (m g)
+
+    Args:
+        joint_force, joint_moment: ``(N, 2, 3)`` the incoming joint wrench, world frame.
+        joint_pos: ``(N, 2, 3)`` where the joint is (the foot link's origin).
+        foot_com: ``(N, 2, 3)``; foot_mass: ``(2,)`` or ``(N, 2)``.
+    """
+    weight = torch.zeros_like(joint_force)
+    weight[..., 2] = -foot_mass * gravity
+    force = -joint_force - weight
+    moment = -joint_moment - torch.linalg.cross(foot_com - joint_pos, weight, dim=-1)
+    return force, moment
+
+
+def centre_of_pressure(
+    force: torch.Tensor, moment: torch.Tensor, about: torch.Tensor, ground: torch.Tensor
+) -> torch.Tensor:
+    """``(N, 2, 2)``: where on the ground each foot's reaction has no horizontal moment.
+
+    Slides the wrench, given about ``about`` ``(N, 2, 3)``, down to the plane at height
+    ``ground`` ``(N,)``. Meaningless where the normal force vanishes; callers mask it.
+    """
+    normal = force[..., 2]
+    safe = torch.where(normal.abs() > 1e-6, normal, torch.ones_like(normal))
+    height = about[..., 2] - ground[:, None]
+    x = about[..., 0] - (moment[..., 1] + height * force[..., 0]) / safe
+    y = about[..., 1] + (moment[..., 0] - height * force[..., 1]) / safe
+    return torch.stack([x, y], dim=-1)
+
+
 __all__ = [
+    "centre_of_pressure",
+    "ground_reaction",
     "com_jacobian",
     "damped_least_squares",
     "leg_forces",

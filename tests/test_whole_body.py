@@ -107,3 +107,37 @@ def test_leg_forces_carry_the_load_through_the_com() -> None:
     # Along the leg: no moment about the CoM.
     moment = torch.linalg.cross(feet, forces, dim=-1)
     assert moment.abs().max() < 1e-9
+
+
+def test_the_centre_of_pressure_is_where_a_point_force_acts() -> None:
+    from humanoid_transfer.transfer.latent.whole_body import centre_of_pressure
+
+    gen = torch.Generator().manual_seed(4)
+    point = torch.randn(5, 2, 3, generator=gen)
+    point[..., 2] = 0.02  # the ground
+    force = torch.randn(5, 2, 3, generator=gen)
+    force[..., 2] = 50.0 + 10.0 * torch.rand(5, 2, generator=gen)
+    about = point + torch.randn(5, 2, 3, generator=gen) * 0.1
+    about[..., 2] = 0.08
+    moment = torch.linalg.cross(point - about, force, dim=-1)
+    cop = centre_of_pressure(force, moment, about, torch.full((5,), 0.02))
+    torch.testing.assert_close(cop, point[..., :2])
+
+
+def test_the_ground_reaction_balances_the_joint_and_the_foot_weight() -> None:
+    from humanoid_transfer.transfer.latent.whole_body import ground_reaction
+
+    gen = torch.Generator().manual_seed(5)
+    ground_force = torch.randn(3, 2, 3, generator=gen)
+    ground_moment = torch.randn(3, 2, 3, generator=gen)
+    joint = torch.randn(3, 2, 3, generator=gen)
+    com = joint + 0.05 * torch.randn(3, 2, 3, generator=gen)
+    mass = torch.tensor([0.6, 0.6])
+    weight = torch.zeros(3, 2, 3)
+    weight[..., 2] = -mass * 9.81
+    # Static foot: joint wrench + ground wrench + weight = 0 (moments about the joint).
+    joint_force = -ground_force - weight
+    joint_moment = -ground_moment - torch.linalg.cross(com - joint, weight, dim=-1)
+    force, moment = ground_reaction(joint_force, joint_moment, joint, com, mass)
+    torch.testing.assert_close(force, ground_force)
+    torch.testing.assert_close(moment, ground_moment)

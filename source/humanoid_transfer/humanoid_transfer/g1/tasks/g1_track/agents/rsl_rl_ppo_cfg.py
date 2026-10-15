@@ -85,8 +85,32 @@ class G1TrackPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     )
 
 
+HEADS = os.environ.get("HUMANOID_HEADS", "0") == "1"
+"""The actor's features must also predict the body's measured balance (physics heads)."""
+
+
+@configclass
+class PhysicsActorCfg(RslRlMLPModelCfg):
+    """An MLP actor whose last hidden layer also predicts the ``physics`` observation group."""
+
+    class_name: str = "humanoid_transfer.transfer.latent.physics_model:PhysicsActor"
+    physics_group: str = "physics"
+    head_dims: list[int] = [128]
+
+
 @configclass
 class G1TrackPhysicsPPORunnerCfg(G1TrackPPORunnerCfg):
     """The same algorithm for the tracker whose action is a residual on its body's physics."""
 
     experiment_name = "g1_track_physics"
+
+    def __post_init__(self) -> None:
+        if not HEADS:
+            return
+        self.actor = PhysicsActorCfg(
+            hidden_dims=[512, 256, 128],
+            activation="elu",
+            obs_normalization=True,
+            distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
+        )
+        self.algorithm.class_name = "humanoid_transfer.transfer.latent.physics_model:PhysicsPPO"

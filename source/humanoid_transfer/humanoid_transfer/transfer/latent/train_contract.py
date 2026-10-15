@@ -16,6 +16,9 @@ is, and the same check applies to whatever events another task has.
 
 from __future__ import annotations
 
+import copy
+import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -138,6 +141,203 @@ def train_generator(
     history = _optimise(list(generator.parameters()), steps, loss, config.epochs, config)
     generator.eval()
     return history
+
+
+@dataclass(frozen=True)
+class ChainConfig:
+    """Training on the generator's own chains (Data as Demonstrator)."""
+
+    rounds: int = 0
+    """At most this many rounds of chains, each aggregated with the ones before; 0 trains on
+    the data alone. With a measure, rounds stop as soon as one fails to improve it beyond
+    its own standard error, and the best generator is kept."""
+
+    plans: int = 6
+    """Plans per chain, each held for the commitment, as deployed."""
+
+    starts: int = 8192
+    """Chains drawn per round, from the data's own windows."""
+
+    epochs: int = 300
+    """Epochs of training after each round, on the data and every chain so far."""
+
+
+def chain_starts(
+    streams: Streams, steps: torch.Tensor, plans: int, commit: int, horizon: int
+) -> torch.Tensor:
+    """Training steps from which a chain keeps the data's real future at every plan boundary."""
+    span = plans * commit + horizon
+    # Inside the episode first: only then can the chain's steps be looked up at all.
+    steps = steps[steps + span <= streams.end[steps]]
+    boundaries = steps[:, None] + commit * torch.arange(1, plans + 1, device=steps.device)
+    keep = ~streams.falling[boundaries + horizon].any(dim=1)
+    if streams.target is not None:
+        keep &= streams.target[boundaries].all(dim=1)
+    return steps[keep]
+
+
+@torch.no_grad()
+def chain_from(
+    generator: ContractGenerator,
+    streams: Streams,
+    starts: torch.Tensor,
+    sigma: torch.Tensor,
+    plans: int,
+    commit: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """The generator's own chains from the data's windows.
+
+    Returns, for every plan boundary of every chain, the clean history the
+    generator wrote up to it (normalised) and the data's step at that instant,
+    whose real future is where the teacher went from there.
+    """
+    clean = windows(generator, streams, starts, None)
+    histories, steps = [], []
+    for k in range(plans):
+        noisy = clean + sigma * torch.randn_like(clean)
+        noise = torch.randn(len(starts), generator.noise_size, device=clean.device)
+        plan = generator.sample(noisy, streams.command[starts + k * commit], noise)[:, :commit]
+        clean = torch.cat([clean[:, commit:], plan], dim=1)
+        histories.append(clean)
+        steps.append(starts + (k + 1) * commit)
+    return torch.cat(histories), torch.cat(steps)
+
+
+@torch.no_grad()
+def data_loss(
+    generator: ContractGenerator,
+    streams: Streams,
+    steps: torch.Tensor,
+    sigma: torch.Tensor,
+    config: ContractConfig,
+    batch: int = 1024,
+) -> tuple[float, float]:
+    """The generator's loss on the data at ``steps``, fixed draws: mean and standard error."""
+    device = steps.device
+    devices = [device.index or 0] if device.type == "cuda" else []
+    values = []
+    with torch.random.fork_rng(devices=devices):
+        torch.manual_seed(config.seed)
+        for chunk in steps.split(batch):
+            window = windows(generator, streams, chunk, sigma)
+            future = futures(generator, streams, chunk)
+            losses = contract_loss(
+                generator, window, streams.command[chunk], future, config.free_bits
+            )
+            values.append(float(losses["total"]))
+    values = np.asarray(values)
+    return float(values.mean()), float(values.std(ddof=1) / np.sqrt(len(values)))
+
+
+def train_on_chains(
+    streams: Streams,
+    steps: torch.Tensor,
+    generator: ContractGenerator,
+    sigma: torch.Tensor,
+    config: ContractConfig,
+    chain: ChainConfig,
+    measure: Callable[[], dict] | None = None,
+    held_out: torch.Tensor | None = None,
+) -> list[dict[str, float]]:
+    """Teach the generator to come back from its own drift, as a constrained problem.
+
+    A generator trained on one plan of data at a time is used on a chain of its
+    own plans, and its small errors compound: the rough-terrain policy's
+    generator stepped 17-20 % fast on its own chain while each plan was
+    calibrated. From the data's own windows the generator writes chains of plans
+    as deployed, and each history it wrote is paired with the *real* future the
+    teacher went on to from that instant (Data as Demonstrator; Venkatraman,
+    Hebert and Bagnell, 2015). Rounds aggregate, as DAgger does.
+
+    How much those chains weigh is not fixed. The generator minimises its loss
+    on its own chains subject to not becoming measurably worse on the data:
+
+        min  L_chain(θ)   s.t.  L_data(θ) <= L_data(θ₀) + 2 SE
+
+    the bound being its held-out data loss before this training plus twice that
+    loss's own standard error -- what the measurement cannot tell apart. The
+    Lagrangian ``L_chain + μ L_data`` is minimised while ``μ`` rises by dual
+    ascent when the held-out loss exceeds the bound and falls toward zero when
+    it does not. A round is kept only if it improves ``measure`` by more than
+    twice the best one's standard error; the best generator is returned.
+    """
+    commit = generator.commit
+    device = steps.device
+    pool = chain_starts(streams, steps, chain.plans, commit, generator.horizon)
+    reference = held_out if held_out is not None else steps
+    generator.eval()
+    base, base_se = data_loss(generator, streams, reference, sigma, config)
+    bound = base + 2.0 * base_se
+    multiplier = 1.0
+    best = measure() if measure is not None else None
+    best_state = copy.deepcopy(generator.state_dict())
+    order = torch.Generator(device="cpu").manual_seed(config.seed + 1)
+    histories: list[torch.Tensor] = []
+    chained: list[torch.Tensor] = []
+    log: list[dict] = [{"round": -1, "data_loss": base, "data_loss_se": base_se, "bound": bound}]
+    for round_index in range(chain.rounds):
+        pick = pool[torch.randperm(len(pool), generator=order)[: chain.starts].to(device)]
+        generator.eval()
+        history, at = chain_from(generator, streams, pick, sigma, chain.plans, commit)
+        histories.append(history)
+        chained.append(at)
+        own_history, own_steps = torch.cat(histories), torch.cat(chained)
+
+        optimiser = torch.optim.Adam(generator.parameters(), lr=config.learning_rate)
+        per_epoch = max(1, math.ceil(len(own_steps) / config.batch_size))
+        schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimiser, T_max=chain.epochs * per_epoch
+        )
+        for _ in range(chain.epochs):
+            generator.train()
+            shuffled = torch.randperm(len(own_steps), generator=order).to(device)
+            for start in range(0, len(shuffled), config.batch_size):
+                own = shuffled[start : start + config.batch_size]
+                real = steps[torch.randint(len(steps), (len(own),), generator=order).to(device)]
+                own_window = own_history[own]
+                chain_term = contract_loss(
+                    generator,
+                    own_window + sigma * torch.randn_like(own_window),
+                    streams.command[own_steps[own]],
+                    futures(generator, streams, own_steps[own]),
+                    config.free_bits,
+                )["total"]
+                data_term = contract_loss(
+                    generator,
+                    windows(generator, streams, real, sigma),
+                    streams.command[real],
+                    futures(generator, streams, real),
+                    config.free_bits,
+                )["total"]
+                optimiser.zero_grad(set_to_none=True)
+                (chain_term + multiplier * data_term).backward()
+                optimiser.step()
+                schedule.step()
+            generator.eval()
+            held, _ = data_loss(generator, streams, reference, sigma, config)
+            # Dual ascent on the bound's relative violation.
+            multiplier = max(0.0, multiplier + (held - bound) / bound)
+        entry = {
+            "round": round_index,
+            "chain_pairs": len(own_steps),
+            "chain_loss": float(chain_term),
+            "data_loss": held,
+            "bound": bound,
+            "multiplier": multiplier,
+        }
+        if measure is not None:
+            fidelity = measure()
+            entry["fidelity"] = fidelity
+            log.append(entry)
+            if fidelity["score"] < best["score"] - 2.0 * best["score_se"]:
+                best, best_state = fidelity, copy.deepcopy(generator.state_dict())
+            else:
+                break
+        else:
+            log.append(entry)
+    if measure is not None:
+        generator.load_state_dict(best_state)
+    return log
 
 
 @torch.no_grad()
@@ -328,6 +528,36 @@ def _describe(contact: np.ndarray) -> dict:
 
 
 @torch.no_grad()
+def chain_states(
+    generator: ContractGenerator,
+    start: torch.Tensor,
+    command: torch.Tensor,
+    sigma: torch.Tensor,
+    steps: int,
+    commit: int,
+    seed: int = 0,
+) -> np.ndarray:
+    """``(steps, N, skill)`` the generator's own chain from ``start``, unstable chains dropped.
+
+    From ``start`` -- ``(N, history, skill)`` normalised windows of real ``z*`` -- a
+    plan is drawn, its first ``commit`` samples appended to the history (with the
+    training noise ``sigma``, which is what the generator reads in a closed loop),
+    and so on for ``steps``.
+    """
+    torch.manual_seed(seed)
+    clean, out = start, []
+    while len(out) * commit < steps:
+        window = clean + sigma * torch.randn_like(clean)
+        noise = torch.randn(len(window), generator.noise_size, device=window.device)
+        chunk = generator.sample(window, command, noise)[:, :commit]
+        out.append(chunk)
+        clean = torch.cat([clean[:, commit:], chunk], dim=1)
+    z = generator.skill_norm.inverse(torch.cat(out, dim=1)[:, :steps]).transpose(0, 1)
+    z = z.cpu().numpy().astype(float)
+    finite = np.isfinite(z).all(axis=(0, 2)) & (np.abs(z).max(axis=(0, 2)) < 10.0)
+    return z[:, finite]
+
+
 def chained_gait(
     generator: ContractGenerator,
     start: torch.Tensor,
@@ -341,33 +571,75 @@ def chained_gait(
 ) -> dict:
     """The gait of the generator run on its own plans: what a perfect tracker would walk.
 
-    From ``start`` -- ``(N, history, skill)`` normalised windows of real ``z*`` -- a
-    plan is drawn, its first ``commit`` samples appended to the history (with the
-    training noise ``sigma``, which is what the generator reads in a closed loop),
-    and so on for ``steps``. Each plan is calibrated on its own; this asks whether
-    their chain keeps the teacher's gait, which no single plan can show.
+    Each plan is calibrated on its own; this asks whether their chain keeps the
+    teacher's gait, which no single plan can show (:func:`chain_states`).
     """
-    torch.manual_seed(seed)
-    clean, out = start, []
-    while len(out) * commit < steps:
-        window = clean + sigma * torch.randn_like(clean)
-        noise = torch.randn(len(window), generator.noise_size, device=window.device)
-        chunk = generator.sample(window, command, noise)[:, :commit]
-        out.append(chunk)
-        clean = torch.cat([clean[:, commit:], chunk], dim=1)
-    z = generator.skill_norm.inverse(torch.cat(out, dim=1)[:, :steps]).transpose(0, 1)
-    z = z.cpu().numpy().astype(float)
-    finite = np.isfinite(z).all(axis=(0, 2)) & (np.abs(z).max(axis=(0, 2)) < 10.0)
-    z = z[:, finite]
+    z = chain_states(generator, start, command, sigma, steps, commit, seed)
     done = np.zeros(z.shape[:2], dtype=bool)
     signature = gait_signature(z, done, dt_star).as_dict()
     return {
-        "environments_stable": int(finite.sum()),
-        "environments": int(len(finite)),
+        "environments_stable": int(z.shape[1]),
+        "environments": int(len(start)),
         "signature": signature,
         "rhythm_period": float(dominant_rhythm(z, dt_star).period),
         "segments": _describe(z[..., LOAD] > threshold),
         "min_load": float(z[..., LOAD].min()),
+    }
+
+
+def per_episode(z: np.ndarray, dt_star: float) -> np.ndarray:
+    """``(N, 2)``: each column's stride period and stride length (``z`` is ``(T, N, skill)``)."""
+    done = np.zeros((z.shape[0], 1), dtype=bool)
+    rows = []
+    for column in range(z.shape[1]):
+        signature = gait_signature(z[:, column : column + 1], done, dt_star)
+        rows.append((signature.stride_period, signature.stride_length))
+    return np.asarray(rows, dtype=float)
+
+
+def chain_fidelity(
+    generator: ContractGenerator,
+    start: torch.Tensor,
+    command: torch.Tensor,
+    sigma: torch.Tensor,
+    steps: int,
+    commit: int,
+    dt_star: float,
+    reference: np.ndarray,
+    seed: int = 0,
+    draws: int = 1000,
+) -> dict:
+    """How far the generator's chain walks from its teacher, and how well that is known.
+
+    The deviation is relative, for stride period and stride length, and the
+    score is the larger of the two. Its standard error comes from resampling
+    the chains and the teacher's episodes (bootstrap): no tolerance is fixed
+    here -- a change in the score is real when it exceeds its own error.
+    """
+    chain = per_episode(
+        chain_states(generator, start, command, sigma, steps, commit, seed), dt_star
+    )
+    teacher = per_episode(reference, dt_star)
+    chain, teacher = chain[np.isfinite(chain).all(1)], teacher[np.isfinite(teacher).all(1)]
+
+    def score(c: np.ndarray, t: np.ndarray) -> tuple[np.ndarray, float]:
+        deviation = np.abs(c.mean(0) - t.mean(0)) / t.mean(0)
+        return deviation, float(deviation.max())
+
+    deviation, value = score(chain, teacher)
+    rng = np.random.default_rng(seed)
+    resampled = [
+        score(
+            chain[rng.integers(len(chain), size=len(chain))],
+            teacher[rng.integers(len(teacher), size=len(teacher))],
+        )[1]
+        for _ in range(draws)
+    ]
+    return {
+        "deviation": {"stride_period": float(deviation[0]), "stride_length": float(deviation[1])},
+        "score": value,
+        "score_se": float(np.std(resampled)),
+        "chains": int(len(chain)),
     }
 
 
@@ -385,7 +657,13 @@ def gait_reference(
 
 
 __all__ = [
+    "ChainConfig",
     "ContractConfig",
+    "chain_fidelity",
+    "chain_from",
+    "chain_starts",
+    "data_loss",
+    "chain_states",
     "chained_gait",
     "gait_reference",
     "change_times",
@@ -395,7 +673,9 @@ __all__ = [
     "fit_tolerance",
     "futures",
     "new_generator",
+    "per_episode",
     "population_scores",
     "train_generator",
+    "train_on_chains",
     "windows",
 ]

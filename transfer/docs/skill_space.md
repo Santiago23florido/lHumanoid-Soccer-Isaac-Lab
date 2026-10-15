@@ -1352,6 +1352,62 @@ Limits and stopping rules:
   one did not. The body side's competence is not what is tested first. The NAO's partial
   pass is on plans its own control rate slows toward the policy's gait — not a property
   claimed for the method.
+- **The task side's correction, pre-registered before it is trained.** Rough is no longer
+  blind: its result has been read. What follows is a fix of the first failing condition,
+  judged on criteria fixed here, and stopped at the first step that fails.
+  - *Chain fidelity, measured for every generator* (`train_contract.py`,
+    `chain_fidelity.py`). The score is the larger relative deviation of its chained stride
+    period and stride length from its teacher's, with a bootstrap standard error over
+    chains and teacher episodes. It is a measurement, not a gate: no tolerance is fixed
+    for it. The teachers vary by only 0.1–1 % between their own episodes, so "within the
+    expert's own variability" would reject even the flat generator, which transfers to
+    both bodies.
+
+    | generator | score |
+    | --- | --- |
+    | `rough_h20` | 0.202 ± 0.005 |
+    | `rough_dagger2` | 0.162 ± 0.004 |
+    | `flat_dagger2` | 0.055 ± 0.006 |
+  - *Step 1 — training on the generator's own chains* (Data as Demonstrator; Venkatraman,
+    Hebert and Bagnell, 2015; `--chain-rounds`).
+    - *Pairs:* from the data's windows the generator writes chains of six plans as
+      deployed, and each history it wrote is paired with the real future its teacher went
+      on to from that instant.
+    - *How much those pairs weigh is not fixed; it is a constrained problem.* Minimise the
+      loss on the generator's own chains subject to the held-out data loss staying within
+      its pre-training value plus twice its own standard error, by a Lagrangian whose
+      multiplier follows dual ascent.
+    - *Rounds:* they aggregate and stop by themselves. A round is kept only if it improves
+      the chain score by more than twice the best score's standard error (8 at most).
+    - *It works if* rough's chain score improves on `rough_dagger2`'s by more than twice
+      their combined standard error, and flat's does not get worse by as much. No target
+      value is set; the robots' gates decide in step 3.
+  - *Step 2 — attention.* A generator that reads a longer history through causal
+    attention and attends to a bank of its teacher's segments, trained as in step 1. It
+    works if it meets step 1's criterion on rough and flat, and its scores are not
+    significantly worse than step 1's.
+  - *Step 3 — L4 again,* amended, on the G1 and the NAO, frozen, with the best generator.
+    Reported as a fix tested on a task already seen, not as a blind result.
+- **Step 1, run: it does not work** (`contract_rough_dad.json`, `contract_flat_dad.json`).
+  The study stops here, as agreed, for review.
+
+  | generator | before training on its chains | after round 1 | kept |
+  | --- | --- | --- | --- |
+  | rough | 0.162 ± 0.004 | 0.164 ± 0.005, no improvement | the one before |
+  | flat | 0.078 ± 0.004 | 0.094 ± 0.003, worse | the one before |
+
+  - *What the constraint did.* The bound — the held-out data loss plus twice its standard
+    error — sat only 1.6 % above that loss. The multiplier rose to 18–20 within the round,
+    so the chains weighed about a twentieth of the data. Under "not measurably worse plan
+    by plan", the chain could not be moved.
+  - *What the chains cost.* On its own chains the generator's loss is 0.58–0.63, against
+    0.49–0.53 on the data. The histories it writes are harder to answer from than its
+    teacher's.
+  - *A side finding.* flat's generator retrained on round 3's encoder chains at 0.078,
+    against `flat_dagger2`'s 0.055 on round 2's. Chain fidelity depends on the training
+    noise the encoder sets, not only on the method.
+  - *Nothing in use changed.* No generator was replaced: the G1 and the NAO keep
+    `flat_dagger2`.
 
 ## What this stage hands to the next
 

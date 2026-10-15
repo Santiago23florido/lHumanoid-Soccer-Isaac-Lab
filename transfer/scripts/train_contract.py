@@ -47,7 +47,9 @@ from humanoid_transfer.transfer.latent.events import contact_events  # noqa: E40
 from humanoid_transfer.transfer.latent.model import G1_OBSERVATION  # noqa: E402
 from humanoid_transfer.transfer.latent.sequences import load_streams  # noqa: E402
 from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
+    ChainConfig,
     ContractConfig,
+    chain_fidelity,
     chained_gait,
     contract_steps,
     evaluate_generator,
@@ -57,6 +59,7 @@ from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
     new_generator,
     population_scores,
     train_generator,
+    train_on_chains,
 )
 from humanoid_transfer.transfer.latent.train_memory import (  # noqa: E402
     MemoryConfig,
@@ -124,6 +127,15 @@ def main() -> int:
         default=1.0,
         help="Multiplies the encoder error used as training noise; 0 trains on clean history.",
     )
+    parser.add_argument(
+        "--chain-rounds",
+        type=int,
+        default=0,
+        help="Rounds of training on the generator's own chains (Data as Demonstrator); 0: none.",
+    )
+    parser.add_argument("--chain-plans", type=int, default=6, help="Plans per chain.")
+    parser.add_argument("--chain-starts", type=int, default=8192, help="Chains per round.")
+    parser.add_argument("--chain-epochs", type=int, default=300, help="Epochs after each round.")
     parser.add_argument("--samples", type=int, default=32)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -196,8 +208,42 @@ def main() -> int:
     encoder_seconds = time.time() - started
     print(f"[encoder] {encoder_seconds:.0f} s, sigma median {float(sigma.median()):.3f}")
 
+    # What a perfect tracker would walk: the generator chained on its own plans
+    # from 32 of the teacher's histories, at the teacher's command. Added after
+    # the first closed loop showed that calibrated plans can chain into a gait
+    # that steps a quarter faster than the teacher's.
+    gait_z = np.load(args.gait)["skill_state"].astype(np.float32)
+    start = torch.as_tensor(gait_z[100 : 100 + clock.history], device=args.device)
+    start = generator.skill_norm(start.transpose(0, 1))
+    command = gait.command[: start.shape[0]].mean(dim=0, keepdim=True).expand(len(start), 3)
+    teacher_z = gait_z[100 + clock.history :].astype(float)
+
+    def fidelity() -> dict:
+        return chain_fidelity(
+            generator, start, command, sigma, 900, clock.commit, dt_star, teacher_z, args.seed
+        )
+
     started = time.time()
     history = train_generator(streams, train_steps, generator, args.noise_scale * sigma, config)
+    chain = ChainConfig(
+        rounds=args.chain_rounds,
+        plans=args.chain_plans,
+        starts=args.chain_starts,
+        epochs=args.chain_epochs,
+    )
+    chain_log = []
+    if chain.rounds:
+        chain_log = train_on_chains(
+            streams,
+            train_steps,
+            generator,
+            args.noise_scale * sigma,
+            config,
+            chain,
+            fidelity,
+            val_steps,
+        )
+        print(f"[chains] {chain_log[-1]}")
     seconds = time.time() - started
     tolerance = fit_tolerance(generator, streams, val_steps, sigma, seed=args.seed)
     print(f"[generator] {seconds:.0f} s, final {history[-1]}")
@@ -219,14 +265,6 @@ def main() -> int:
         "gait": measure(gait, gait_steps, gait_events, None),
         "gait_noisy_history": measure(gait, gait_steps, gait_events, sigma),
     }
-    # What a perfect tracker would walk: the generator chained on its own plans
-    # from 32 of the teacher's histories, at the teacher's command. Added after
-    # the first closed loop showed that calibrated plans can chain into a gait
-    # that steps a quarter faster than the teacher's.
-    gait_z = np.load(args.gait)["skill_state"].astype(np.float32)
-    start = torch.as_tensor(gait_z[100 : 100 + clock.history], device=args.device)
-    start = generator.skill_norm(start.transpose(0, 1))
-    command = gait.command[: start.shape[0]].mean(dim=0, keepdim=True).expand(len(start), 3)
     chained = chained_gait(
         generator, start, command, sigma, 900, clock.commit, dt_star, seed=args.seed
     )
@@ -241,6 +279,10 @@ def main() -> int:
     )
     calibration = evaluation["validation_walking"]["calibration_error"]
     passes = all(value <= CALIBRATION_LIMIT for value in calibration)
+    # Added after the blind test, where every plan was calibrated while their chain
+    # stepped 17-20 % fast: how far the chain walks from the teacher, with its own
+    # standard error. A measurement, not a gate; the body's gates decide.
+    chain_measured = fidelity()
 
     path = args.logdir / args.name / "generator.pt"
     meta = {
@@ -308,6 +350,7 @@ def main() -> int:
         "generator": {
             "seconds": seconds,
             "final": history[-1],
+            "chains": {"config": vars(chain), "rounds": chain_log},
             "kind": generator.kind,
             "tolerance_by_k": tolerance.mean(dim=-1).tolist(),
             "tolerance": tolerance.tolist(),
@@ -320,6 +363,7 @@ def main() -> int:
             "calibration_error": calibration,
             "passes": passes,
         },
+        "chain_fidelity": chain_measured,
         "artifact": _display(path),
     }
     results.parent.mkdir(parents=True, exist_ok=True)
@@ -339,6 +383,12 @@ def main() -> int:
         f"{chained['rhythm_period']:.3f} ({reference['rhythm_period']:.3f}), swing median "
         f"{chained['segments']['swing']['median']} ({reference['segments']['swing']['median']}), "
         f"stable {chained['environments_stable']}/{chained['environments']}"
+    )
+    print(
+        f"  chain fidelity: score {chain_measured['score']:.3f} +- "
+        f"{chain_measured['score_se']:.3f} (period "
+        f"{chain_measured['deviation']['stride_period']:.3f}, stride "
+        f"{chain_measured['deviation']['stride_length']:.3f})"
     )
     print(f"gate {'PASSES' if passes else 'FAILS'}; written {_display(results)}")
     return 0

@@ -107,6 +107,7 @@ import torch
 
 import humanoid_transfer.tasks  # noqa: F401
 from humanoid_transfer.common.skill_state import SKILL_LAYOUT
+from humanoid_transfer.transfer.tasks.tracking.balance import balance_state
 
 COMMAND = "base_velocity"
 
@@ -165,6 +166,7 @@ def main() -> int:
         "base_quat", "base_pos", "contract_due", "contract_error", "contract_error_other",
         "contract_error_state", "contract_fields", "contract_age", "done", "terminated",
         "encoder_input", "procedural", "biped_fallen", "biped_recovering", "estimate",
+        "balance", "biped_phase",
     )  # fmt: skip
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
@@ -184,6 +186,11 @@ def main() -> int:
         none = np.zeros(inner.num_envs, dtype=bool)
         record["biped_fallen"].append(none if biped is None else biped.fallen.cpu().numpy())
         record["biped_recovering"].append(none if biped is None else biped.recovering.cpu().numpy())
+        # How the body is held up (each foot's centre of pressure and ground force), and where
+        # in its gait the biped is: what pairs the same gait's states across bodies.
+        record["balance"].append(balance_state(inner, COMMAND).cpu().numpy())
+        phase = np.zeros(inner.num_envs, dtype=np.float32)
+        record["biped_phase"].append(phase if biped is None else biped.phase.cpu().numpy())
         with torch.inference_mode():
             action = driver(obs["policy"])
         record["action_executed"].append(action.cpu().numpy())

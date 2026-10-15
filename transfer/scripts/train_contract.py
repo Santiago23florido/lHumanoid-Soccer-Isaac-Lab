@@ -111,6 +111,9 @@ def main() -> int:
     parser.add_argument("--kind", choices=("flow", "cvae"), default="flow")
     parser.add_argument("--flow-steps", type=int, default=32)
     parser.add_argument("--horizon", type=int, default=13, help="Samples of future per plan.")
+    parser.add_argument(
+        "--history", type=int, default=26, help="Samples of history the generator reads."
+    )
     parser.add_argument("--commit", type=int, default=6, help="Samples a plan is held.")
     parser.add_argument("--view", type=int, default=8, help="Samples a tracker sees ahead.")
     parser.add_argument("--solver", choices=("euler", "midpoint"), default="euler")
@@ -195,7 +198,13 @@ def main() -> int:
         ),
         seed=args.seed,
     )
-    clock = ContractClock(step=dt_star, horizon=args.horizon, commit=args.commit, view=args.view)
+    clock = ContractClock(
+        step=dt_star,
+        history=args.history,
+        horizon=args.horizon,
+        commit=args.commit,
+        view=args.view,
+    )
     planned = contract_steps(streams, clock.horizon)
     train_steps = planned[~held_out[planned]]
     val_steps = planned[held_out[planned]]

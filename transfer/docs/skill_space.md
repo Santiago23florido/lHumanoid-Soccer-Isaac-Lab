@@ -1319,6 +1319,39 @@ Limits and stopping rules:
 
   It is run once and reported as it comes out: nothing is changed after its results are
   read.
+- **The blind test, run once** (`zero_shot_*_rough_dagger2_auto_l4_*.json`,
+  `contract_rough_*.json`). One stop on the way: the policy's rollouts carry its 187-value
+  height scan, which the G1's frozen encoder was handed. Fixed before any result existed —
+  the encoder reads its own layout's width — and resumed with the rollouts kept.
+  - **It fails on the G1.** At forward, fast and turning: 41, 152 and 47 falls (in 79, 184
+    and 83 episodes), speed 0.69, −0.09 and 0.67. The plans are used at forward and
+    turning (0.41–0.42); the falls come throughout the episodes, median 3–6 s, not at the
+    start.
+  - **It fails on the NAO, more narrowly.**
+    - *Forward and turning:* no falls, speed 1.04, stride within 8.3 %, period within 2.5 %,
+      plans used (0.48). At the NAO's control rate only the left foot's duty misses, by
+      10.2 % and 13.7 %. At the G1's rate both duties miss.
+    - *Fast:* 10 falls in 63 episodes, plans not used (0.56).
+  - *True state:* 123–265 falls on both bodies, with the inflated-noise caveat of §8.4's
+    other true-state paths.
+- **Where it fails, read after the fact — nothing was changed for it:**
+  - *The task side first.* The rough policy's generator, chained on its own plans with no
+    body involved, steps 17–20 % fast (period 0.81–0.85 `T` against its policy's 1.02).
+    The two DAgger rounds moved it from 0.81 to 0.83 to 0.85. The flat generator's chain
+    was within 4 %. Condition (v) fails before any body is involved.
+  - *On the G1*, the plans ask that fast gait (period 0.84, stride −13 %), and the G1's
+    tracker falls following it.
+  - *On the NAO*, the same generator asks period 1.04–1.11, at its coarser rate, and the
+    NAO follows without falling at two commands of three.
+  - *The relabels:* in both DAgger rounds the published policy itself fell in 13–15 % of
+    the G1 loop's states it was started from (157 and 136 of 1024).
+- **What the blind test says.** Zero-shot by coverage carried the semi-blind task to both
+  bodies; it did not carry the blind one. The first condition that fails is on the task
+  side: a generator trained on its expert's rollouts that does not chain into its
+  expert's gait, which the walk's generator also did (§7.1, period −21 %) and the flat
+  one did not. The body side's competence is not what is tested first. The NAO's partial
+  pass is on plans its own control rate slows toward the policy's gait — not a property
+  claimed for the method.
 
 ## What this stage hands to the next
 

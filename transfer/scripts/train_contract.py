@@ -141,6 +141,20 @@ def main() -> int:
     parser.add_argument("--chain-starts", type=int, default=8192, help="Chains per round.")
     parser.add_argument("--chain-epochs", type=int, default=300, help="Epochs after each round.")
     parser.add_argument(
+        "--noise-conditional",
+        action="store_true",
+        help="Train across history noise levels and read the level as an input; deployed at "
+        "the encoder's own error (level 0).",
+    )
+    parser.add_argument(
+        "--noise-range",
+        type=float,
+        nargs=2,
+        default=(0.125, 32.0),
+        metavar=("LOW", "HIGH"),
+        help="Noise levels, in multiples of the encoder's error, drawn log-uniformly.",
+    )
+    parser.add_argument(
         "--chain-objective",
         choices=("chains", "rhythm"),
         default="chains",
@@ -192,11 +206,13 @@ def main() -> int:
             flow_steps=args.flow_steps,
             flow_solver=args.solver,
             warp_loads=args.warp_loads,
+            noise_conditional=args.noise_conditional,
             memory=args.memory,
             channels=args.channels,
             flow_hidden=args.flow_hidden,
         ),
         seed=args.seed,
+        noise_range=tuple(args.noise_range),
     )
     clock = ContractClock(
         step=dt_star,

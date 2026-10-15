@@ -110,6 +110,9 @@ class ContractDims:
     warp_loads: bool = False
     """Model the feet's load shares as ``log(load + 0.01)`` (see :class:`ContractGenerator`)."""
 
+    noise_conditional: bool = False
+    """Read the history's noise level as an input (see :class:`ContractGenerator`)."""
+
 
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
 _LOAD_EPS = 0.01
@@ -175,6 +178,11 @@ class ContractGenerator(nn.Module):
         self.flow_steps = dims.flow_steps
         self.flow_solver = dims.flow_solver
         self.warp_loads = dims.warp_loads
+        self.noise_conditional = dims.noise_conditional
+        if self.noise_conditional:
+            # log of the history noise's scale, in units of the encoder's own error: zero is
+            # what a deployed body's encoder reads with (see :meth:`condition`).
+            self.register_buffer("noise_level", torch.zeros(1))
         self.register_buffer("warp_mean", torch.zeros(2))
         self.register_buffer("warp_std", torch.ones(2))
         self.register_buffer("grid_step", torch.tensor(clock.step))
@@ -184,7 +192,7 @@ class ContractGenerator(nn.Module):
         self.command_norm = Normaliser(dims.command)
         self.residual_norm = Normaliser(clock.horizon * dims.skill)
         self.memory = SkillMemory(dims.skill, clock.history, dims.memory, dims.channels)
-        condition = dims.skill + dims.memory + dims.command
+        condition = dims.skill + dims.memory + dims.command + int(dims.noise_conditional)
         size = clock.horizon * dims.skill
         if self.kind == "flow":
             self.velocity = mlp(size + _TIME_FEATURES + condition, size, dims.flow_hidden, 3)
@@ -228,9 +236,25 @@ class ContractGenerator(nn.Module):
         self.warp_mean.copy_(logged.mean(dim=0))
         self.warp_std.copy_(logged.std(dim=0).clamp(min=1e-3))
 
-    def condition(self, window: torch.Tensor, command: torch.Tensor) -> torch.Tensor:
-        """``(B, history, skill)`` window in the generator's space -> conditioning."""
-        return torch.cat([window[:, -1], self.memory(window), self.command_norm(command)], dim=-1)
+    def condition(
+        self, window: torch.Tensor, command: torch.Tensor, level: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """``(B, history, skill)`` window in the generator's space -> conditioning.
+
+        A noise-conditional generator also reads how noisy the history is: ``level``
+        is the log of the noise's scale in units of the encoder's error, ``(B, 1)``;
+        omitted, it is :attr:`noise_level`, the deployed one. Trained across levels
+        (log-uniform, scale unknown a priori), one generator denoises a history as
+        far as its noise allows -- reading the gait's phase where the noise is the
+        encoder's, staying robust where a body or a state reads worse -- with no
+        level fixed in training.
+        """
+        parts = [window[:, -1], self.memory(window), self.command_norm(command)]
+        if self.noise_conditional:
+            if level is None:
+                level = self.noise_level.expand(len(window), 1)
+            parts.append(level)
+        return torch.cat(parts, dim=-1)
 
     def flow_velocity(
         self, x: torch.Tensor, t: torch.Tensor, condition: torch.Tensor
@@ -255,7 +279,11 @@ class ContractGenerator(nn.Module):
         return out.reshape(-1, self.horizon, self.skill)
 
     def sample(
-        self, window: torch.Tensor, command: torch.Tensor, noise: torch.Tensor
+        self,
+        window: torch.Tensor,
+        command: torch.Tensor,
+        noise: torch.Tensor,
+        level: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """One plan per row, ``(B, horizon, skill)`` absolute and normalised.
 
@@ -263,7 +291,7 @@ class ContractGenerator(nn.Module):
         plausible future is drawn.
         """
         window = self.warp(window)
-        condition = self.condition(window, command)
+        condition = self.condition(window, command, level)
         if self.kind == "cvae":
             mean, log_std = self.prior_params(condition)
             residual = self.decode(condition, mean + torch.exp(log_std) * noise)
@@ -322,8 +350,10 @@ def contract_loss(
     command: torch.Tensor,
     future: torch.Tensor,
     free_bits: float,
+    level: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
-    """The generator's training loss on the true future.
+    """The generator's training loss on the true future (``level``: a noise-conditional
+    generator's history noise level, see :meth:`ContractGenerator.condition`).
 
     ``window`` may be noisy (it stands in for an encoder); ``future`` is the
     clean ``z*`` that followed, normalised. For ``flow``, conditional flow
@@ -332,7 +362,7 @@ def contract_loss(
     floor on the KL of each intent dimension so the intent cannot collapse.
     """
     window, future = generator.warp(window), generator.warp(future)
-    condition = generator.condition(window, command)
+    condition = generator.condition(window, command, level)
     residual = future - window[:, -1:]
     if generator.kind == "flow":
         target = generator.residual_norm(residual.flatten(1))

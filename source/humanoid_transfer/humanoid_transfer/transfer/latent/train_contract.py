@@ -166,9 +166,11 @@ def chain_starts(
     streams: Streams, steps: torch.Tensor, plans: int, commit: int, horizon: int
 ) -> torch.Tensor:
     """Training steps from which a chain keeps the data's real future at every plan boundary."""
+    span = plans * commit + horizon
+    # Inside the episode first: only then can the chain's steps be looked up at all.
+    steps = steps[steps + span <= streams.end[steps]]
     boundaries = steps[:, None] + commit * torch.arange(1, plans + 1, device=steps.device)
-    ends = boundaries + horizon
-    keep = (ends[:, -1] <= streams.end[steps]) & ~streams.falling[ends].any(dim=1)
+    keep = ~streams.falling[boundaries + horizon].any(dim=1)
     if streams.target is not None:
         keep &= streams.target[boundaries].all(dim=1)
     return steps[keep]

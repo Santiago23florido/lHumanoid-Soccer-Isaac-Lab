@@ -154,6 +154,6 @@ if want l4; then
       --run "encoder=$rollouts/zs_${tag}_${generator_name}${mode}_${name}_encoder.npz" \
       --run "truth=$rollouts/zs_${tag}_${generator_name}${mode}_${name}_truth.npz" \
       --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${mode}_l4_${name}.json" \
-      | grep -v "^  "
+      | grep -v "^  [^a]"
   done <<< "$commands"
 fi

@@ -165,3 +165,15 @@ def test_the_exported_policy_is_the_eager_one() -> None:
     policy = model.policy(UNITS.velocity, UNITS.time).eval()
     traced = torch.jit.trace(policy, data.obs[:4])
     assert torch.allclose(traced(data.obs[:16]), policy(data.obs[:16]), atol=1e-6)
+
+
+def test_the_encoder_reads_only_the_body_from_a_wider_observation() -> None:
+    # A teacher that also reads a height scan appends it after the body's own terms.
+    import torch
+    from humanoid_transfer.transfer.latent.model import G1_OBSERVATION
+
+    body = torch.randn(4, G1_OBSERVATION.size)
+    scan = torch.randn(4, 187)
+    wide = torch.cat([body, scan], dim=-1)
+    assert torch.equal(G1_OBSERVATION.encoder_input(wide), G1_OBSERVATION.encoder_input(body))
+    assert G1_OBSERVATION.encoder_input(wide).shape[-1] == G1_OBSERVATION.encoder_size

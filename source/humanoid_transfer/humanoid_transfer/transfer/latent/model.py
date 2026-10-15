@@ -173,7 +173,13 @@ class ObservationLayout:
         return self.context[1] - self.context[0]
 
     def encoder_input(self, observation: torch.Tensor) -> torch.Tensor:
-        """The observation without the command: the encoder describes state, not intent."""
+        """The observation without the command: the encoder describes state, not intent.
+
+        Anything past the layout's own width is dropped: a height scan another task's
+        teacher reads (Isaac Lab's rough-terrain G1 appends 187 values) is not the
+        body's proprioception.
+        """
+        observation = observation[..., : self.size]
         return torch.cat(
             [observation[..., : self.command[0]], observation[..., self.command[1] :]], dim=-1
         )

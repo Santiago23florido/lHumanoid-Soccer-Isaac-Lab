@@ -6,6 +6,7 @@
 # Stages, all of them by default:
 #   l1       random procedural schedules, as in training (true state):  competence_<body>_<tag>_random
 #   map      the pre-registered probes (true state):                    competence_<body>_<tag>
+#   corners  the family's corners, some beyond its ranges (true state):  competence_<body>_<tag>_corners
 #   encoder  the body's encoder refitted on its own new states -- walk (body's history,
 #            autonomous, starts) and procedural from the spawn pose: logs/contract/walk_zs_<body>_<tag>
 #   walk     L1b, the walk on every path (deployed through the refitted encoder)
@@ -106,6 +107,13 @@ if want map; then
     --gait-probes transfer/probes/gait_probes.json
   "$python" transfer/scripts/evaluate_competence.py --capture "$rollouts/zs_${tag}_map.npz" \
     --output "transfer/results/competence_${body}_${tag}.json" | head -20
+fi
+if want corners; then
+  # The family's corners, some beyond its ranges (make_gait_probes.py --corners), three envs each.
+  capture corners --num-envs 108 --contract-from-truth --reference autonomous \
+    --gait-probes transfer/probes/corner_probes.json
+  "$python" transfer/scripts/evaluate_competence.py --capture "$rollouts/zs_${tag}_corners.npz" \
+    --output "transfer/results/competence_${body}_${tag}_corners.json" | head -20
 fi
 if want encoder; then
   capture walk_truth --num-envs 32 --contract-from-truth --reference physical

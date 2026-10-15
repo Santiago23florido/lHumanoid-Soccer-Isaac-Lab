@@ -79,7 +79,7 @@ if [ "$stage" = evaluate ]; then
       if [ "$task" = rough ]; then generator=rough_b3; else generator=flat_dagger2; fi
       export ZS_GENERATOR="logs/contract/${generator}/generator.pt"
       stages=(l4)
-      if [ "$task" = rough ]; then stages=(l1 map encoder walk l4); fi
+      if [ "$task" = rough ]; then stages=(l1 map corners encoder walk l4); fi
       bash transfer/scripts/zero_shot_ladder.sh g1 "$run" "$checkpoint" "dec_${variant}" \
         "${stages[@]}" > "logs/contract/ladder_decoder_${variant}_${task}.log" 2>&1
       echo "evaluate ${variant} ${task} $(date +%H:%M)" >> "$status"

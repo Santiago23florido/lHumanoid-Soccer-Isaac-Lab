@@ -1587,7 +1587,26 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
 
   - *Why the height errs.* The ground was taken under the lower sole point, but a pitched foot touches the ground with its heel or toe, its sole point centimetres above it. The fix, the lowest sole corner, comes with the decoder branch.
   - *The captures needed a fix too.* They recorded each estimate one step after its state. The first figures of this table's runs were computed so and are superseded; only those runs were affected.
-  - *The NAO's remaining failure is its tracker's:* its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
+  - *The NAO's remaining failure is in its tracker, not the estimator.* Details below.
+- **F1, B4 on both bodies** (`zero_shot_*_sym_{rough,flat}_b4_auto_l4_*.json`; the learned
+  encoder, as step 3 ran). Falls, forward / fast / turning:
+
+  | | G1, encoder | G1, true state | NAO, at the body's rate |
+  | --- | --- | --- | --- |
+  | `rough_b3` | 45/83, 94/127, 24/68 | 5/62, 1/61, 7/65 | 0 falls; fails ×3 |
+  | `rough_b4` | 34/75, 89/122, 27/72 | **0/64 ×3** | 1 fall in 62; **forward passes** |
+  | `flat_dagger2` | 0/64 ×3, passes | 9/65, 4/65, 6/64 | 0 falls; passes ×3 |
+  | `flat_b4` | 0/64 ×3, passes | **0/64 ×3** | 0 falls; forward fails (stride +12.5 %) |
+
+  - *The hypothesis holds where it was aimed.* A generator that reads its noise level no longer
+    collapses on a clean history: none of 384 true-state episodes falls.
+  - *On the G1's encoder path it changes nothing beyond its standard error.*
+  - *The rule keeps both incumbents:*
+    - `flat_b4` fails one check of S0 that `flat_dagger2` passes;
+    - `rough_b4`'s target metric does not improve by more than twice its standard error.
+  - *The deployed estimator is now kinematic,* so the comparison that decides is under it. It
+    is queued with the incumbents' re-baseline.
+- **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
 
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:
 

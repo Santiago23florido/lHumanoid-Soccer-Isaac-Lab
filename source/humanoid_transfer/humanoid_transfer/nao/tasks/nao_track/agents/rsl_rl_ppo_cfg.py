@@ -20,6 +20,7 @@ from isaaclab_rl.rsl_rl import (
     RslRlSymmetryCfg,
 )
 
+from ....transfer.tasks.tracking.physics_cfg import with_physics_heads
 from ..mirror import augment
 
 SYMMETRY = os.environ.get("HUMANOID_SYMMETRY", "")
@@ -75,3 +76,13 @@ class NaoTrackPPORunnerCfg(RslRlOnPolicyRunnerCfg):
             else None
         ),
     )
+
+
+@configclass
+class NaoTrackPhysicsPPORunnerCfg(NaoTrackPPORunnerCfg):
+    """The same algorithm for the tracker whose action is a residual on its body's physics."""
+
+    experiment_name = "nao_track_physics"
+
+    def __post_init__(self) -> None:
+        with_physics_heads(self)

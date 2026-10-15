@@ -79,6 +79,13 @@ class PhysicsPriorAction(JointPositionAction):
         # Jacobian columns: a floating base's six first.
         self._ik_columns = self._ik_joints + 6
         self._joint_columns = self._action_joints + 6
+        # A mimic joint follows its driver one-to-one (the NAO's RHipYawPitch): the driver's
+        # column carries both, and so does its torque.
+        self._folds: list[tuple[int, int]] = []
+        for follower, leader in (cfg.mimic or {}).items():
+            follower_ids, _ = robot.find_joints(follower)
+            leader_ids, _ = robot.find_joints(leader)
+            self._folds.append((int(leader_ids[0]) + 6, int(follower_ids[0]) + 6))
         # The default pose stays the offset where the prior does not act; on the prior's
         # joints the residual is added to the prior's targets instead.
         offset = robot.data.default_joint_pos[:, joints].clone()
@@ -113,7 +120,7 @@ class PhysicsPriorAction(JointPositionAction):
         robot, data = self._asset, self._asset.data
         term = self._env.command_manager.get_term(self.cfg.command_name)
         length = term.units.length
-        jacobian = robot.root_physx_view.get_jacobians()
+        jacobian = self._fold(robot.root_physx_view.get_jacobians())
         link_pos, com = data.body_link_pos_w, data.body_com_pos_w
         rotation = matrix_from_quat(data.body_link_quat_w)
         masses = self._masses
@@ -162,14 +169,23 @@ class PhysicsPriorAction(JointPositionAction):
         if self.cfg.feedforward:
             forces = leg_forces(load, length * planned_feet, self._weight)
             world = (heading[:, None] @ forces[..., None])[..., 0]
-            gravity = robot.root_physx_view.get_gravity_compensation_forces()
-            gravity = gravity.to(self.device)[:, self._joint_columns]
+            gravity = robot.root_physx_view.get_gravity_compensation_forces().to(self.device)
+            gravity = self._fold(gravity)[:, self._joint_columns]
             contact = torch.einsum("nfid,nfi->nd", sole_jac[..., self._joint_columns], world)
             torque = self.cfg.feedforward_gain * (gravity - contact)
             limit = data.joint_effort_limits[:, self._action_joints]
             torque = torch.maximum(torch.minimum(torque, limit), -limit)
             feedforward = torch.where(has_plan[:, None], torque, 0.0)
         self._feedforward = feedforward
+
+    def _fold(self, columns: torch.Tensor) -> torch.Tensor:
+        """Each mimic follower's last-axis column added to its driver's."""
+        if not self._folds:
+            return columns
+        columns = columns.clone()
+        for leader, follower in self._folds:
+            columns[..., leader] += columns[..., follower]
+        return columns
 
     # -- action term hooks --------------------------------------------------
 
@@ -213,6 +229,9 @@ class PhysicsPriorActionCfg(JointPositionActionCfg):
 
     base_body: str = MISSING
     """The body whose yaw is the heading frame (the command's)."""
+
+    mimic: dict[str, str] | None = None
+    """Mimic joints the action does not drive, ``{follower: driver}``, one-to-one."""
 
     kinematic: bool = True
     """Move the legs' targets by the least-squares step towards the plan's feet."""

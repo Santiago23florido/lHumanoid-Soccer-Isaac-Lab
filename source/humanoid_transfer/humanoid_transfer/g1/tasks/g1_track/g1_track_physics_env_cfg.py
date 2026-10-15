@@ -6,19 +6,19 @@ residual on the physics prior of
 :class:`~humanoid_transfer.transfer.tasks.tracking.physics_prior.PhysicsPriorAction`
 (the legs' targets from a least-squares step towards the plan's feet, the
 plan's leg forces and gravity as feed-forward effort), and the policy and its
-critic see how far that prior is from the joints.
+critic see how far that prior is from the joints. ``HUMANOID_HEADS=1`` adds the
+physics heads' targets and the critic's balance
+(:mod:`~humanoid_transfer.transfer.tasks.tracking.physics_cfg`).
 """
 
 from __future__ import annotations
 
 import os
 
-from isaaclab.managers import ObservationGroupCfg as ObsGroup
-from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils import configclass
 
-from ....transfer.tasks.tracking.balance import balance_state
-from ....transfer.tasks.tracking.physics_prior import PhysicsPriorActionCfg, prior_offset
+from ....transfer.tasks.tracking.physics_cfg import add_physics_observations, prior_switches
+from ....transfer.tasks.tracking.physics_prior import PhysicsPriorActionCfg
 from .g1_track_env_cfg import (
     BASE_BODY,
     COMMAND,
@@ -36,24 +36,6 @@ RESIDUAL_SCALE = float(os.environ.get("HUMANOID_RESIDUAL_SCALE", "0.25"))
 """The policy's residual in radians per unit action: half the plain tracker's 0.5, since the
 prior carries the legs' motion."""
 
-PRIOR = os.environ.get("HUMANOID_PRIOR", "full")
-"""Ablations: ``full``; ``kinematic`` (no feed-forward); ``static`` (feed-forward only)."""
-
-HEADS = os.environ.get("HUMANOID_HEADS", "0") == "1"
-"""The second layer: the critic reads the body's measured balance, and the actor's features
-must predict it (:class:`~humanoid_transfer.transfer.latent.physics_model.PhysicsActor`)."""
-
-
-@configclass
-class PhysicsTargetsCfg(ObsGroup):
-    """What the actor's physics heads predict: each foot's centre of pressure and ground force."""
-
-    balance = ObsTerm(func=balance_state, params={"command_name": COMMAND})
-
-    def __post_init__(self) -> None:
-        self.enable_corruption = False
-        self.concatenate_terms = True
-
 
 def _prior_action() -> PhysicsPriorActionCfg:
     card = _body_card()
@@ -67,20 +49,8 @@ def _prior_action() -> PhysicsPriorActionCfg:
         foot_bodies=list(FOOT_BODIES),
         sole_points=[list(card["foot"][name]["sole_point_link"]) for name in FOOT_BODIES],
         base_body=BASE_BODY,
-        kinematic=PRIOR in ("full", "kinematic"),
-        feedforward=PRIOR in ("full", "static"),
+        **prior_switches(),
     )
-
-
-def _show_prior(cfg) -> None:
-    prior = ObsTerm(func=prior_offset, params={"action_name": "joint_pos"})
-    cfg.observations.policy.prior = prior
-    cfg.observations.critic.prior = prior
-    if HEADS:
-        cfg.observations.critic.balance = ObsTerm(
-            func=balance_state, params={"command_name": COMMAND}
-        )
-        cfg.observations.physics = PhysicsTargetsCfg()
 
 
 @configclass
@@ -90,7 +60,7 @@ class G1TrackPhysicsEnvCfg(G1TrackEnvCfg):
     def __post_init__(self) -> None:
         super().__post_init__()
         self.actions.joint_pos = _prior_action()
-        _show_prior(self)
+        add_physics_observations(self.observations, COMMAND)
 
 
 @configclass
@@ -98,4 +68,4 @@ class G1TrackPhysicsEnvCfg_PLAY(G1TrackEnvCfg_PLAY):
     def __post_init__(self) -> None:
         super().__post_init__()
         self.actions.joint_pos = _prior_action()
-        _show_prior(self)
+        add_physics_observations(self.observations, COMMAND)

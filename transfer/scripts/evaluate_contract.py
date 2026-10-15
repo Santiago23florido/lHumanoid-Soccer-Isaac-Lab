@@ -15,6 +15,13 @@ was held to, from ``evaluate_latent.py``: speed at least 0.90 of the
 teacher's, fall rate at most 2 points above it, and stride length, stride
 period and both duty factors within 10 %.
 
+**Across bodies** (pre-registered for the blind test, ``skill_space.md`` §8.4). A
+body samples a gait at its own control rate, and a coarser rate lengthens every
+stance it can represent: the NAO's step is 1.62 times the G1's in body time. When
+a run's rate differs from the teacher's, ``verdict_at_body_rate`` also holds it
+to the teacher's gait resampled, in body time, to the run's rate. Both verdicts
+are reported; within one body they coincide.
+
 **Where a miss comes from** (captures that record the plan). The plans' own
 due states, stitched in time, are the motion the body was asked for: its gait
 against the teacher's is the generator's share of a miss, the body's gait
@@ -102,6 +109,32 @@ def asked(path: Path) -> dict | None:
     }
 
 
+def dt_star(path: Path) -> float:
+    data = np.load(path)
+    units = UnitSystem(float(data["leg_length"]), float(data["total_mass"]))
+    return float(data["control_dt"]) / units.time
+
+
+def signature_at_rate(path: Path, rate: float) -> dict:
+    """The gait of a capture as a body controlled every ``rate`` body times would sample it."""
+    data = np.load(path)
+    z = data["skill_state"].astype(float)
+    done = data["done"]
+    source = np.arange(z.shape[0]) * dt_star(path)
+    target = np.arange(0.0, source[-1], rate)
+    resampled = np.empty((len(target), z.shape[1], z.shape[2]))
+    for env in range(z.shape[1]):
+        for k in range(z.shape[2]):
+            resampled[:, env, k] = np.interp(target, source, z[:, env, k])
+    # A new sample ends an episode if any original step since the previous one did.
+    ended = np.cumsum(done, axis=0)
+    index = np.minimum(np.searchsorted(source, target, side="right") - 1, len(source) - 1)
+    counts = ended[index]
+    resampled_done = np.zeros(counts.shape, dtype=bool)
+    resampled_done[1:] = counts[1:] > counts[:-1]
+    return gait_signature(resampled, resampled_done, rate).as_dict()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--run", action="append", required=True, help="name=path/to/capture.npz")
@@ -131,9 +164,24 @@ def main() -> int:
         speed = run["forward_speed"]
         return {**run, "forward_speed": None if speed is None else speed / run["velocity_unit"]}
 
+    paths = {}
+    for item in args.run:
+        name, _, path = item.partition("=")
+        paths[name] = REPO_ROOT / path
+    teacher_rate = dt_star(paths["teacher"])
     for name, run in runs.items():
         if name != "teacher":
             run["verdict"] = verdict(in_v(run), in_v(runs["teacher"]))
+            rate = dt_star(paths[name])
+            if abs(rate / teacher_rate - 1.0) > 0.01:
+                at_rate = {**runs["teacher"]}
+                at_rate["signature"] = signature_at_rate(paths["teacher"], rate)
+                run["verdict_at_body_rate"] = {
+                    **verdict(in_v(run), in_v(at_rate)),
+                    "teacher_signature": at_rate["signature"],
+                    "body_dt_star": rate,
+                    "teacher_dt_star": teacher_rate,
+                }
         if "asked" in run:
             plan = run["asked"]
             asked_run = {**run, "forward_speed": plan["forward_speed"]}
@@ -169,6 +217,13 @@ def main() -> int:
             u = run["contract_use"]
             line += f"  use {u['ratio']:.3f} ({'PASS' if u['passes'] else 'fail'})"
         print(line)
+        if "verdict_at_body_rate" in run:
+            v = run["verdict_at_body_rate"]
+            print(
+                f"{'  at the body rate':<22} dev "
+                f"{ {k: round(x, 3) for k, x in v['signature_deviation'].items()} }  "
+                f"{'PASS' if v['passes'] else 'fail'}"
+            )
         if "asked" in run:
             a = run["asked"]
             sig = a["signature"]

@@ -33,11 +33,12 @@ import torch
 
 
 class Zero(torch.nn.Module):
+    # Traced, not scripted: a script needs the source file, which stdin is not.
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return torch.zeros(obs.shape[0], 37, device=obs.device)
+        return obs[:, :37] * 0.0
 
 
-torch.jit.script(Zero()).save("logs/contract/zero_policy_g1.pt")
+torch.jit.trace(Zero(), torch.zeros(2, 400)).save("logs/contract/zero_policy_g1.pt")
 PYEOF
   # The reconstructed ground reactions against Newton and the contact sensor, both bodies.
   "$python" -u transfer/scripts/check_balance.py --headless --task-id G1Track-Play-v0 \

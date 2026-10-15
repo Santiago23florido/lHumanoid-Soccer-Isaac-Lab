@@ -14,6 +14,8 @@ from __future__ import annotations
 
 TASK_ID = "G1Track-v0"
 PLAY_TASK_ID = "G1Track-Play-v0"
+PHYSICS_TASK_ID = "G1TrackPhysics-v0"
+PHYSICS_PLAY_TASK_ID = "G1TrackPhysics-Play-v0"
 
 _MODULE = "humanoid_transfer.g1.tasks.g1_track"
 
@@ -25,10 +27,13 @@ def register_tasks() -> bool:
     except ModuleNotFoundError:
         return False
 
-    agents = f"{_MODULE}.agents.rsl_rl_ppo_cfg:G1TrackPPORunnerCfg"
-    for task_id, cfg in (
-        (TASK_ID, "G1TrackEnvCfg"),
-        (PLAY_TASK_ID, "G1TrackEnvCfg_PLAY"),
+    plain = f"{_MODULE}.agents.rsl_rl_ppo_cfg:G1TrackPPORunnerCfg"
+    physics = f"{_MODULE}.agents.rsl_rl_ppo_cfg:G1TrackPhysicsPPORunnerCfg"
+    for task_id, cfg, agents in (
+        (TASK_ID, "g1_track_env_cfg:G1TrackEnvCfg", plain),
+        (PLAY_TASK_ID, "g1_track_env_cfg:G1TrackEnvCfg_PLAY", plain),
+        (PHYSICS_TASK_ID, "g1_track_physics_env_cfg:G1TrackPhysicsEnvCfg", physics),
+        (PHYSICS_PLAY_TASK_ID, "g1_track_physics_env_cfg:G1TrackPhysicsEnvCfg_PLAY", physics),
     ):
         if task_id not in gym.envs.registry:
             gym.register(
@@ -36,7 +41,7 @@ def register_tasks() -> bool:
                 entry_point="isaaclab.envs:ManagerBasedRLEnv",
                 disable_env_checker=True,
                 kwargs={
-                    "env_cfg_entry_point": f"{_MODULE}.g1_track_env_cfg:{cfg}",
+                    "env_cfg_entry_point": f"{_MODULE}.{cfg}",
                     "rsl_rl_cfg_entry_point": agents,
                 },
             )
@@ -45,4 +50,11 @@ def register_tasks() -> bool:
 
 REGISTERED = register_tasks()
 
-__all__ = ["PLAY_TASK_ID", "REGISTERED", "TASK_ID", "register_tasks"]
+__all__ = [
+    "PHYSICS_PLAY_TASK_ID",
+    "PHYSICS_TASK_ID",
+    "PLAY_TASK_ID",
+    "REGISTERED",
+    "TASK_ID",
+    "register_tasks",
+]

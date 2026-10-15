@@ -83,3 +83,10 @@ class G1TrackPPORunnerCfg(RslRlOnPolicyRunnerCfg):
             else None
         ),
     )
+
+
+@configclass
+class G1TrackPhysicsPPORunnerCfg(G1TrackPPORunnerCfg):
+    """The same algorithm for the tracker whose action is a residual on its body's physics."""
+
+    experiment_name = "g1_track_physics"

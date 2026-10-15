@@ -54,13 +54,14 @@ fast 0.6 0 0
 turning 0.3 0.2 0.3"
 fi
 if [ "$body" = g1 ]; then
-  task_id=G1Track-Play-v0
+  # ZS_TASK_ID: another tracking task of the same body (the physics tracker's, say).
+  task_id="${ZS_TASK_ID:-G1Track-Play-v0}"
   walk="logs/contract/walk_dagger3e/generator.pt"
   rollouts=g1/rollouts
   mirror=g1/body/mirror.json
   scale="1 1"
 else
-  task_id=NaoTrack-Play-v0
+  task_id="${ZS_TASK_ID:-NaoTrack-Play-v0}"
   walk="logs/contract/walk_dagger2e/generator.pt"
   rollouts=nao/rollouts
   mirror=nao/body/mirror.json

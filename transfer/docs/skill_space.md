@@ -1606,6 +1606,34 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     - `rough_b4`'s target metric does not improve by more than twice its standard error.
   - *The deployed estimator is now kinematic,* so the comparison that decides is under it. It
     is queued with the incumbents' re-baseline.
+- **F5, round 1: the pre-registered cross-body test fails, and it could not have passed**
+  (`free_latent_f5_r1.json`; `train_free_latent.py` on the incumbents' probe and corner captures,
+  289,000 steps per body, 27 probes held out).
+
+  | held-out probes, balance error (standardised) | `z*` alone | `z*` + `ζ` | difference |
+  | --- | --- | --- | --- |
+  | G1 (control) | 0.153 | **0.117** | −0.036 ± 0.004 |
+  | NAO (the test) | 2.97 | 2.98 | +0.010 ± 0.042 |
+
+  - *Training worked:* paired `ζ` aligned (2.9 → 0.008), the KL held its budget, and the body
+    classifier stayed near chance (+0.03 at the end).
+  - *On the G1, `ζ` carries balance that `z*` lacks:* ten standard errors better.
+  - *Falls tell nothing here.* No probe episode fell on either body.
+  - *Why the cross-body test cannot pass.* Even `z*` alone errs twenty times more on the NAO
+    than on the G1. Per dimension:
+
+    | | G1 | NAO |
+    | --- | --- | --- |
+    | vertical load | 0.00 | 0.05 |
+    | ground shear | 0.10–0.15 | 0.9–3.4 |
+    | centre of pressure | 0.23–0.29 | 5.0–6.5 |
+
+    The NAO's centre of pressure spreads twice as wide in leg lengths (0.09 against 0.047 L):
+    its foot is nearly twice as long for its leg. Its shear is 1.4 times larger in its own
+    weight. Two paired states -- the same planned gait at the same phase -- are held up
+    differently on the two bodies. A shared `ζ` read by one shared predictor, and forbidden
+    to encode the body, cannot be right on both. The test asked for the impossible.
+  - *For review with the user (theory).*
 - **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
 
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:

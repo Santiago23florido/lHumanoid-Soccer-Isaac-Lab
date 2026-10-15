@@ -1388,6 +1388,26 @@ Limits and stopping rules:
     significantly worse than step 1's.
   - *Step 3 — L4 again,* amended, on the G1 and the NAO, frozen, with the best generator.
     Reported as a fix tested on a task already seen, not as a blind result.
+- **Step 1, run: it does not work** (`contract_rough_dad.json`, `contract_flat_dad.json`).
+  The study stops here, as agreed, for review.
+
+  | generator | before training on its chains | after round 1 | kept |
+  | --- | --- | --- | --- |
+  | rough | 0.162 ± 0.004 | 0.164 ± 0.005, no improvement | the one before |
+  | flat | 0.078 ± 0.004 | 0.094 ± 0.003, worse | the one before |
+
+  - *What the constraint did.* The bound — the held-out data loss plus twice its standard
+    error — sat only 1.6 % above that loss. The multiplier rose to 18–20 within the round,
+    so the chains weighed about a twentieth of the data. Under "not measurably worse plan
+    by plan", the chain could not be moved.
+  - *What the chains cost.* On its own chains the generator's loss is 0.58–0.63, against
+    0.49–0.53 on the data. The histories it writes are harder to answer from than its
+    teacher's.
+  - *A side finding.* flat's generator retrained on round 3's encoder chains at 0.078,
+    against `flat_dagger2`'s 0.055 on round 2's. Chain fidelity depends on the training
+    noise the encoder sets, not only on the method.
+  - *Nothing in use changed.* No generator was replaced: the G1 and the NAO keep
+    `flat_dagger2`.
 
 ## What this stage hands to the next
 

@@ -60,6 +60,7 @@ from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
     population_scores,
     train_generator,
     train_on_chains,
+    train_on_rhythm,
 )
 from humanoid_transfer.transfer.latent.train_memory import (  # noqa: E402
     MemoryConfig,
@@ -110,6 +111,9 @@ def main() -> int:
     parser.add_argument("--kind", choices=("flow", "cvae"), default="flow")
     parser.add_argument("--flow-steps", type=int, default=32)
     parser.add_argument("--horizon", type=int, default=13, help="Samples of future per plan.")
+    parser.add_argument(
+        "--history", type=int, default=26, help="Samples of history the generator reads."
+    )
     parser.add_argument("--commit", type=int, default=6, help="Samples a plan is held.")
     parser.add_argument("--view", type=int, default=8, help="Samples a tracker sees ahead.")
     parser.add_argument("--solver", choices=("euler", "midpoint"), default="euler")
@@ -136,6 +140,21 @@ def main() -> int:
     parser.add_argument("--chain-plans", type=int, default=6, help="Plans per chain.")
     parser.add_argument("--chain-starts", type=int, default=8192, help="Chains per round.")
     parser.add_argument("--chain-epochs", type=int, default=300, help="Epochs after each round.")
+    parser.add_argument(
+        "--chain-objective",
+        choices=("chains", "rhythm"),
+        default="chains",
+        help="chains: train on the generator's own chains' states; rhythm: match the rhythm "
+        "(autocorrelation and means of the feet's loads and CoM speed) of its own chain to "
+        "its teacher's, differentiably through the chain.",
+    )
+    parser.add_argument(
+        "--chain-targets",
+        choices=("time", "phase"),
+        default="time",
+        help="A written history's target: the teacher's future at the same instant, or from "
+        "the teacher window most like it (in phase).",
+    )
     parser.add_argument(
         "--chain-constraint",
         choices=("calibration", "data"),
@@ -179,7 +198,13 @@ def main() -> int:
         ),
         seed=args.seed,
     )
-    clock = ContractClock(step=dt_star, horizon=args.horizon, commit=args.commit, view=args.view)
+    clock = ContractClock(
+        step=dt_star,
+        history=args.history,
+        horizon=args.horizon,
+        commit=args.commit,
+        view=args.view,
+    )
     planned = contract_steps(streams, clock.horizon)
     train_steps = planned[~held_out[planned]]
     val_steps = planned[held_out[planned]]
@@ -256,9 +281,23 @@ def main() -> int:
         plans=args.chain_plans,
         starts=args.chain_starts,
         epochs=args.chain_epochs,
+        targets=args.chain_targets,
     )
     chain_log = []
-    if chain.rounds:
+    if chain.rounds and args.chain_objective == "rhythm":
+        chain_log = train_on_rhythm(
+            streams,
+            train_steps,
+            generator,
+            args.noise_scale * sigma,
+            config,
+            chain,
+            fidelity,
+            calibration,
+            CALIBRATION_LIMIT,
+        )
+        print(f"[rhythm] {chain_log[-1]}")
+    elif chain.rounds:
         chain_log = train_on_chains(
             streams,
             train_steps,

@@ -1444,6 +1444,35 @@ Limits and stopping rules:
     the teacher's segments would provide), or the chain's own rhythm matched to the
     teacher's directly.
   - *Nothing in use changed.*
+- **Iterative cycles, at the user's request:** each proposal judged on step 1's
+  criterion, the next tried when one fails, each recorded as it ends.
+
+  | cycle | what | rough (0.162) | flat (0.078) |
+  | --- | --- | --- | --- |
+  | C1 | phase-consistent targets (the teacher's nearest window) | 0.203, worse | not run |
+  | B1 | the chain's rhythm matched through the chain | 0.245, worse | 0.202, worse |
+  | B2 | twice the history | 0.160, no change | 0.083, no change |
+  | **B3** | **trained under the body encoder's own noise** | **0.033 ± 0.005** | **0.093 ± 0.008, not significantly worse** |
+
+  - *Two hypotheses ruled out on the way, offline:*
+    - rough's DART teacher steps at its play period (13 control steps a stride);
+    - the chain's period barely depends on the commitment (10–11 steps for commits 3–13),
+      so there is no skip at each replan.
+  - *What B3 fixed.* The task generators had been trained, and deployed, under a history
+    noise of median 3.1 (`flat_dagger2`) and 6.4 (rough, max 38), against the body
+    encoder's 0.31 on its own states. That noise was the encoder's error on the
+    teachers' states — a coverage figure, not what a deployed loop reads. Under six
+    standard deviations of noise the gait's phase cannot be read, and the chain's cadence
+    drifted. Under the encoder's own precision (`--sigma-from-body`):
+    - rough's period goes from 0.851 to 0.982, against its teacher's 1.016;
+    - its swing from 5 to 6 steps, the teacher's;
+    - its calibration from 0.022 to 0.007.
+
+    The four chain objectives had treated the symptom under the same noise. The same
+    noise also explains the true-state paths' failures throughout §8.4.
+  - *B3 meets the criterion.* Next, step 3: L4 on both bodies with `rough_b3` and
+    `flat_b3`. `flat_b3` replaces `flat_dagger2` only if it passes on both bodies at least
+    as well.
 
 ## What this stage hands to the next
 

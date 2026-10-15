@@ -161,6 +161,14 @@ class ChainConfig:
     epochs: int = 300
     """Epochs of training after each round, on the data and every chain so far."""
 
+    targets: str = "time"
+    """What a history the generator wrote is trained toward: ``time``, the teacher's future
+    at the same instant (Data as Demonstrator); ``phase``, the teacher's future from the
+    window most like that history (:func:`phase_targets`)."""
+
+    bank: int = 32768
+    """Teacher windows ``phase`` searches."""
+
 
 def chain_starts(
     streams: Streams, steps: torch.Tensor, plans: int, commit: int, horizon: int
@@ -201,6 +209,46 @@ def chain_from(
         histories.append(clean)
         steps.append(starts + (k + 1) * commit)
     return torch.cat(histories), torch.cat(steps)
+
+
+@torch.no_grad()
+def phase_targets(
+    generator: ContractGenerator,
+    streams: Streams,
+    bank: torch.Tensor,
+    histories: torch.Tensor,
+    commands: torch.Tensor,
+    recent: int = 8,
+    chunk: int = 2048,
+) -> torch.Tensor:
+    """For each history the generator wrote, a future in phase with it.
+
+    A chain that drifted in cadence is, at a given instant, at another phase of
+    the gait than its teacher was; the teacher's future at that instant asks it
+    to lift a foot it has just set down. Here the target is the future its
+    teacher went on to from the window of the data most like the history -- its
+    last ``recent`` samples and its command, in normalised units -- moved to
+    begin where the history ends: the same phase, not the same instant (the
+    retrieval motion matching does). Returns ``(N, horizon, skill)`` normalised.
+    """
+    bank_window = windows(generator, streams, bank, None)
+    bank_future = futures(generator, streams, bank)
+
+    def features(window: torch.Tensor, command: torch.Tensor) -> torch.Tensor:
+        scaled = generator.command_norm(command).repeat(1, recent)
+        return torch.cat([window[:, -recent:].flatten(1), scaled], dim=1)
+
+    keys = features(bank_window, streams.command[bank])
+    out = []
+    for start in range(0, len(histories), chunk):
+        history = histories[start : start + chunk]
+        query = features(history, commands[start : start + chunk])
+        nearest = torch.cdist(query, keys).argmin(dim=1)
+        window = generator.warp(bank_window[nearest])
+        future = generator.warp(bank_future[nearest])
+        moved = generator.warp(history)[:, -1:] + (future - window[:, -1:])
+        out.append(generator.unwarp(moved))
+    return torch.cat(out)
 
 
 def _isolated(function: Callable):
@@ -292,6 +340,8 @@ def train_on_chains(
     order = torch.Generator(device="cpu").manual_seed(config.seed + 1)
     histories: list[torch.Tensor] = []
     chained: list[torch.Tensor] = []
+    targets: list[torch.Tensor] = []
+    bank = steps[torch.randperm(len(steps), generator=order)[: chain.bank].to(device)]
     log: list[dict] = [{"round": -1, "data_loss": base, "data_loss_se": base_se, "bound": bound}]
     for round_index in range(chain.rounds):
         pick = pool[torch.randperm(len(pool), generator=order)[: chain.starts].to(device)]
@@ -299,7 +349,10 @@ def train_on_chains(
         history, at = chain_from(generator, streams, pick, sigma, chain.plans, commit)
         histories.append(history)
         chained.append(at)
+        if chain.targets == "phase":
+            targets.append(phase_targets(generator, streams, bank, history, streams.command[at]))
         own_history, own_steps = torch.cat(histories), torch.cat(chained)
+        own_targets = torch.cat(targets) if targets else None
 
         optimiser = torch.optim.Adam(generator.parameters(), lr=config.learning_rate)
         per_epoch = max(1, math.ceil(len(own_steps) / config.batch_size))
@@ -313,11 +366,16 @@ def train_on_chains(
                 own = shuffled[start : start + config.batch_size]
                 real = steps[torch.randint(len(steps), (len(own),), generator=order).to(device)]
                 own_window = own_history[own]
+                own_future = (
+                    own_targets[own]
+                    if own_targets is not None
+                    else futures(generator, streams, own_steps[own])
+                )
                 chain_term = contract_loss(
                     generator,
                     own_window + sigma * torch.randn_like(own_window),
                     streams.command[own_steps[own]],
-                    futures(generator, streams, own_steps[own]),
+                    own_future,
                     config.free_bits,
                 )["total"]
                 data_term = contract_loss(
@@ -700,6 +758,7 @@ __all__ = [
     "futures",
     "new_generator",
     "per_episode",
+    "phase_targets",
     "population_scores",
     "train_generator",
     "train_on_chains",

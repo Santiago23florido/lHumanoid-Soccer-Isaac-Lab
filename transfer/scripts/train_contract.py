@@ -137,6 +137,13 @@ def main() -> int:
     parser.add_argument("--chain-starts", type=int, default=8192, help="Chains per round.")
     parser.add_argument("--chain-epochs", type=int, default=300, help="Epochs after each round.")
     parser.add_argument(
+        "--chain-targets",
+        choices=("time", "phase"),
+        default="time",
+        help="A written history's target: the teacher's future at the same instant, or from "
+        "the teacher window most like it (in phase).",
+    )
+    parser.add_argument(
         "--chain-constraint",
         choices=("calibration", "data"),
         default="calibration",
@@ -256,6 +263,7 @@ def main() -> int:
         plans=args.chain_plans,
         starts=args.chain_starts,
         epochs=args.chain_epochs,
+        targets=args.chain_targets,
     )
     chain_log = []
     if chain.rounds:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The task side's correction after the blind test (transfer/docs/skill_space.md §8.4).
 #
-#   transfer/scripts/chain_study.sh <step1|stepA|c1>
+#   transfer/scripts/chain_study.sh <step1|stepA|c1|b1>
 #
 # step1  the published policies' generators retrained with training on their own chains
 #        (Data as Demonstrator): rough_dad and flat_dad, on the data of rough_dagger2 and
@@ -10,6 +10,8 @@
 #        rough_dadA and flat_dadA. Each reports its chain fidelity.
 # c1     stepA with phase-consistent targets: each written history trained toward the
 #        teacher's future from its nearest window, not the same instant -> rough_c1, flat_c1.
+# b1     the rhythm of the generator's own chain matched to its teacher's, differentiably
+#        through the chain, held by calibration -> rough_b1, flat_b1.
 set -euo pipefail
 
 stage="${1:-step1}"
@@ -31,6 +33,12 @@ train() {
     | tee -a "$status"
 }
 
+if [ "$stage" = b1 ]; then
+  echo "b1 start $(date +%H:%M)" >> "$status"
+  train rough_b1 rough --data g1/rollouts/rough_dagger_1.npz --data g1/rollouts/rough_dagger_2.npz --chain-objective rhythm
+  train flat_b1 flat --data g1/rollouts/flat_dagger_1.npz --data g1/rollouts/flat_dagger_2.npz --chain-objective rhythm
+  echo "b1 done $(date +%H:%M)" >> "$status"
+fi
 if [ "$stage" = c1 ]; then
   echo "c1 start $(date +%H:%M)" >> "$status"
   train rough_c1 rough --data g1/rollouts/rough_dagger_1.npz --data g1/rollouts/rough_dagger_2.npz --chain-constraint calibration --chain-targets phase

@@ -424,6 +424,132 @@ def train_on_chains(
     return log
 
 
+_RHYTHM_FIELDS = (LOAD.start, LOAD.start + 1, SKILL_LAYOUT.slice_of("com_velocity").start)
+"""Both feet's load and the CoM's forward velocity: what a gait's rhythm is read from."""
+
+
+def _autocorrelation(signal: torch.Tensor, lags: int) -> torch.Tensor:
+    """``(B, lags, C)`` normalised autocorrelation of ``(B, T, C)`` at lags 1..``lags``."""
+    centred = signal - signal.mean(dim=1, keepdim=True)
+    variance = (centred**2).mean(dim=1).clamp(min=1e-6)
+    length = signal.shape[1]
+    rows = [(centred[:, k:] * centred[:, : length - k]).mean(dim=1) for k in range(1, lags + 1)]
+    return torch.stack(rows, dim=1) / variance[:, None]
+
+
+def rhythm_loss(
+    generator: ContractGenerator,
+    streams: Streams,
+    starts: torch.Tensor,
+    sigma: torch.Tensor,
+    plans: int,
+    lags: int,
+) -> torch.Tensor:
+    """How far the rhythm of the generator's own chain is from its teacher's, differentiably.
+
+    From the data's windows the generator writes a chain of ``plans`` plans, as
+    deployed, with gradients through every one of them; the teacher's real
+    continuation from the same windows is the reference. Each is summarised by
+    the autocorrelation of both feet's loads and the CoM's forward velocity
+    over lags 1..``lags``, and by their means: statistics of the gait that do
+    not depend on its phase, so a chain is not asked to be at the teacher's
+    phase at each instant -- only to step at its rhythm, with its loads and
+    speed. Normalised units throughout.
+    """
+    commit = generator.commit
+    clean = windows(generator, streams, starts, None)
+    pieces = []
+    for k in range(plans):
+        noisy = clean + sigma * torch.randn_like(clean)
+        noise = torch.randn(len(starts), generator.noise_size, device=clean.device)
+        command = streams.command[starts + k * commit]
+        plan = generator.sample(noisy, command, noise)[:, :commit]
+        pieces.append(plan)
+        clean = torch.cat([clean[:, commit:], plan], dim=1)
+    fields = list(_RHYTHM_FIELDS)
+    chain = torch.cat(pieces, dim=1)[..., fields]
+    real = generator.skill_norm(streams.skill[streams.futures(starts, plans * commit)])[..., fields]
+    shape = (_autocorrelation(chain, lags) - _autocorrelation(real, lags)).pow(2).mean()
+    level = (chain.mean(dim=1) - real.mean(dim=1)).pow(2).mean()
+    return shape + level
+
+
+def train_on_rhythm(
+    streams: Streams,
+    steps: torch.Tensor,
+    generator: ContractGenerator,
+    sigma: torch.Tensor,
+    config: ContractConfig,
+    chain: ChainConfig,
+    measure: Callable[[], dict],
+    constraint: Callable[[], float],
+    limit: float,
+    batch: int = 256,
+    updates: int = 400,
+    check_every: int = 50,
+    lags: int = 26,
+) -> list[dict]:
+    """Match the rhythm of the generator's own chain to its teacher's, under a constraint.
+
+    ``min rhythm_loss`` subject to the measured ``constraint`` (the plans'
+    timing calibration) staying within ``limit``: the Lagrangian
+    ``rhythm_loss + μ L_data``, ``μ`` by dual ascent on the measured
+    constraint. Rounds of ``updates`` steps each are kept only if they improve
+    ``measure`` by more than twice the best one's standard error.
+    """
+    device = steps.device
+    pool = chain_starts(streams, steps, chain.plans, generator.commit, generator.horizon)
+    order = torch.Generator(device="cpu").manual_seed(config.seed + 2)
+    best = _isolated(measure)
+    best_state = copy.deepcopy(generator.state_dict())
+    multiplier = 1.0
+    measured = _isolated(constraint)
+    # A trained generator is moved gently: at a tenth of this rate the rhythm loss first rose
+    # sevenfold; at a hundredth it fell steadily on held-out chains (0.44 -> 0.21 in 60 steps).
+    optimiser = torch.optim.Adam(generator.parameters(), lr=config.learning_rate * 0.01)
+    log: list[dict] = [{"round": -1, "fidelity": best, "constraint": measured}]
+    for round_index in range(chain.rounds):
+        for update in range(updates):
+            generator.train()
+            starts = pool[torch.randint(len(pool), (batch,), generator=order).to(device)]
+            real = steps[torch.randint(len(steps), (batch * 4,), generator=order).to(device)]
+            rhythm = rhythm_loss(generator, streams, starts, sigma, chain.plans, lags)
+            data_term = contract_loss(
+                generator,
+                windows(generator, streams, real, sigma),
+                streams.command[real],
+                futures(generator, streams, real),
+                config.free_bits,
+            )["total"]
+            optimiser.zero_grad(set_to_none=True)
+            (rhythm + multiplier * data_term).backward()
+            torch.nn.utils.clip_grad_norm_(generator.parameters(), 1.0)
+            optimiser.step()
+            if (update + 1) % check_every == 0:
+                generator.eval()
+                measured = _isolated(constraint)
+                multiplier = max(0.0, multiplier + (measured - limit) / limit)
+        generator.eval()
+        fidelity = _isolated(measure)
+        log.append(
+            {
+                "round": round_index,
+                "rhythm_loss": float(rhythm),
+                "data_loss": float(data_term),
+                "constraint": measured,
+                "limit": limit,
+                "multiplier": multiplier,
+                "fidelity": fidelity,
+            }
+        )
+        if fidelity["score"] < best["score"] - 2.0 * best["score_se"]:
+            best, best_state = fidelity, copy.deepcopy(generator.state_dict())
+        else:
+            break
+    generator.load_state_dict(best_state)
+    return log
+
+
 @torch.no_grad()
 def fit_tolerance(
     generator: ContractGenerator,
@@ -759,8 +885,10 @@ __all__ = [
     "new_generator",
     "per_episode",
     "phase_targets",
+    "rhythm_loss",
     "population_scores",
     "train_generator",
     "train_on_chains",
+    "train_on_rhythm",
     "windows",
 ]

@@ -60,6 +60,7 @@ from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
     population_scores,
     train_generator,
     train_on_chains,
+    train_on_rhythm,
 )
 from humanoid_transfer.transfer.latent.train_memory import (  # noqa: E402
     MemoryConfig,
@@ -136,6 +137,14 @@ def main() -> int:
     parser.add_argument("--chain-plans", type=int, default=6, help="Plans per chain.")
     parser.add_argument("--chain-starts", type=int, default=8192, help="Chains per round.")
     parser.add_argument("--chain-epochs", type=int, default=300, help="Epochs after each round.")
+    parser.add_argument(
+        "--chain-objective",
+        choices=("chains", "rhythm"),
+        default="chains",
+        help="chains: train on the generator's own chains' states; rhythm: match the rhythm "
+        "(autocorrelation and means of the feet's loads and CoM speed) of its own chain to "
+        "its teacher's, differentiably through the chain.",
+    )
     parser.add_argument(
         "--chain-targets",
         choices=("time", "phase"),
@@ -266,7 +275,20 @@ def main() -> int:
         targets=args.chain_targets,
     )
     chain_log = []
-    if chain.rounds:
+    if chain.rounds and args.chain_objective == "rhythm":
+        chain_log = train_on_rhythm(
+            streams,
+            train_steps,
+            generator,
+            args.noise_scale * sigma,
+            config,
+            chain,
+            fidelity,
+            calibration,
+            CALIBRATION_LIMIT,
+        )
+        print(f"[rhythm] {chain_log[-1]}")
+    elif chain.rounds:
         chain_log = train_on_chains(
             streams,
             train_steps,

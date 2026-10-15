@@ -26,9 +26,9 @@ train() {
   local name="$1" task="$2"
   shift 2
   "$python" -u transfer/scripts/train_contract.py --name "$name" \
-    --data "g1/rollouts/${task}_dart.npz" "$@" --gait "g1/rollouts/${task}_play_forward.npz" \
+    --data "g1/rollouts/${task}_dart.npz" --gait "g1/rollouts/${task}_play_forward.npz" \
     --encoder-from "$body" --warp-loads --solver midpoint --flow-steps 8 --horizon 20 \
-    --commit 13 --chain-rounds 8 --results "transfer/results/contract_${name}.json" \
+    --commit 13 --chain-rounds 8 --results "transfer/results/contract_${name}.json" "$@" \
     > "logs/contract/train_${name}.log" 2>&1
   echo "$name: $(grep -E 'chained:|gate' "logs/contract/train_${name}.log" | tr '\n' ' ') $(date +%H:%M)" \
     | tee -a "$status"

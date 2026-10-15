@@ -1565,6 +1565,29 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     Without a base velocity, the more loaded foot is taken as still (leg odometry). The
     learned encoder supplies only the loads.
   - L4 with the incumbents under this estimator: `estimator_study.sh`.
+- **F2, run: the kinematic estimator is adopted** (`zero_shot_*_sym_*_auto_kin_l4_*.json`).
+  Falls through the deployed path, forward / fast / turning:
+
+  | | learned encoder | kinematic estimator | true state |
+  | --- | --- | --- | --- |
+  | `rough_b3`, G1 | 45/83, 94/127, 24/68 | **15/64, 16/62, 12/61** | 5/62, 1/61, 7/65 |
+  | `rough_b3`, G1, speed ratio | 0.75, 0.49, 0.88 | **0.99, 0.93, 1.00** | 1.04, 1.01, 1.02 |
+  | `rough_b3`, NAO | 0/64 ×3; at the body's rate, fails ×3 | 0/64 ×3; at the body's rate, **forward passes** | 0/64 ×3 |
+  | `flat_dagger2`, G1 | 0/64 ×3, passes | 0/64 ×3, passes | 9/65, 4/65, 6/64 |
+  | `flat_dagger2`, NAO | 0/64 ×3, passes at the body's rate | 0/64 ×3, passes at the body's rate | 1/64 ×3 |
+
+  - *No regression,* so the rule adopts it (`incumbents.json`).
+  - *What is left* (`encoder_error.py --recorded --lag 1`, `estimator_error_*_kin.json`):
+
+    | field | error, in the contract's sigma |
+    | --- | --- |
+    | every kinematic field | 0.00 |
+    | height | 4–25 |
+    | the learned loads | 1–3.5 |
+
+  - *Why the height errs.* The ground was taken under the lower sole point, but a pitched foot touches the ground with its heel or toe, its sole point centimetres above it. The fix, the lowest sole corner, comes with the decoder branch.
+  - *The captures needed a fix too.* They recorded each estimate one step after its state. The first figures of this table's runs were computed so and are superseded; only those runs were affected.
+  - *The NAO's remaining failure is its tracker's:* its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
 
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:
 

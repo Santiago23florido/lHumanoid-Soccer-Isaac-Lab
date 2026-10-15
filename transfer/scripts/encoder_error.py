@@ -51,12 +51,23 @@ def bootstrap(per_env: np.ndarray, weights: np.ndarray, draws: int, rng) -> tupl
     return mean, float(np.nanstd(means))
 
 
-def measure(contract, path: Path, device: str, draws: int, rng, recorded: bool) -> dict:
-    data = np.load(path)
+def measure(
+    contract, path: Path, device: str, draws: int, rng, recorded: bool, lag: int = 0
+) -> dict:
+    data = dict(np.load(path))
+    if lag:
+        # Captures before the fix recorded each estimate one step after its state.
+        ended = np.zeros_like(data["done"][lag:])
+        for k in range(lag):
+            ended |= data["done"][k : len(data["done"]) - lag + k]
+        data["estimate"] = data["estimate"][:-lag]
+        for key in ("skill_state", "encoder_input"):
+            data[key] = data[key][lag:]
+        data["done"] = data["done"][lag:] | ended
     done = data["done"]
     fresh = np.zeros_like(done)
     fresh[1:] = done[:-1]
-    keep = ~fresh
+    keep = ~fresh & ~done if lag else ~fresh
     inputs = torch.as_tensor(data["encoder_input"], dtype=torch.float32, device=device)
     skill = torch.as_tensor(data["skill_state"], dtype=torch.float32, device=device)
     with torch.no_grad():
@@ -110,6 +121,12 @@ def main() -> int:
         action="store_true",
         help="Score the estimate each capture recorded instead of re-running the encoder.",
     )
+    parser.add_argument(
+        "--lag",
+        type=int,
+        default=0,
+        help="Steps each recorded estimate trails its state (1 for captures before the fix).",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
@@ -120,7 +137,7 @@ def main() -> int:
     contract.encoder.eval()
     rng = np.random.default_rng(args.seed)
     reports = [
-        measure(contract, path, args.device, args.draws, rng, args.recorded)
+        measure(contract, path, args.device, args.draws, rng, args.recorded, args.lag)
         for path in args.captures
     ]
     names = [field.name for field in SKILL_LAYOUT.fields]

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The task side's correction after the blind test (transfer/docs/skill_space.md §8.4).
 #
-#   transfer/scripts/chain_study.sh <step1|stepA|c1|b1|b2|b3>
+#   transfer/scripts/chain_study.sh <step1|stepA|c1|b1|b2|b3|l4>
 #
 # step1  the published policies' generators retrained with training on their own chains
 #        (Data as Demonstrator): rough_dad and flat_dad, on the data of rough_dagger2 and
@@ -15,6 +15,8 @@
 # b2     twice the history (52 samples), the data alone, no chain training -> rough_b2, flat_b2.
 # b3     the data alone, under the body encoder's own precision instead of its error on the
 #        teacher's states (--sigma-from-body) -> rough_b3, flat_b3.
+# l4     step 3: the amended L4 with rough_b3 and flat_b3 on the G1 (round 3) and the NAO
+#        (round 1), both frozen and deployed symmetrized. Rough is no longer blind.
 set -euo pipefail
 
 stage="${1:-step1}"
@@ -36,6 +38,20 @@ train() {
     | tee -a "$status"
 }
 
+if [ "$stage" = l4 ]; then
+  echo "l4 start $(date +%H:%M)" >> "$status"
+  export ZS_REFERENCE=autonomous ZS_SYMMETRIZE=1
+  g1_run=logs/rsl_rl/g1_track/2026-10-14_15-38-39_zs_g1_r3_loss
+  nao_run=logs/rsl_rl/nao_track/2026-10-14_19-59-50_zs_nao_r1
+  for task in rough flat; do
+    export ZS_TASK="$task" ZS_GENERATOR="logs/contract/${task}_b3/generator.pt"
+    bash transfer/scripts/zero_shot_ladder.sh g1 "$g1_run" model_6194 r3_6194_sym l4       > "logs/contract/l4_${task}_b3_g1.log" 2>&1
+    echo "l4 ${task}_b3 g1 $(date +%H:%M)" >> "$status"
+    bash transfer/scripts/zero_shot_ladder.sh nao "$nao_run" model_3498 r1_3498_sym l4       > "logs/contract/l4_${task}_b3_nao.log" 2>&1
+    echo "l4 ${task}_b3 nao $(date +%H:%M)" >> "$status"
+  done
+  echo "l4 done $(date +%H:%M)" >> "$status"
+fi
 if [ "$stage" = b3 ]; then
   echo "b3 start $(date +%H:%M)" >> "$status"
   train rough_b3 rough --data g1/rollouts/rough_dagger_1.npz --data g1/rollouts/rough_dagger_2.npz --chain-rounds 0 --sigma-from-body

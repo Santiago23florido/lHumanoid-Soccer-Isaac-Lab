@@ -53,6 +53,9 @@ class ContractConfig:
 
     seed: int = 0
     dims: ContractDims = field(default_factory=ContractDims)
+    noise_range: tuple[float, float] = (0.125, 32.0)
+    """A noise-conditional generator's history noise, as multiples of the encoder's error:
+    drawn log-uniformly (the scale is unknown a priori, a Jeffreys prior) per window."""
 
 
 def contract_steps(streams: Streams, horizon: int) -> torch.Tensor:
@@ -129,12 +132,26 @@ def train_generator(
     config: ContractConfig,
 ) -> list[dict[str, float]]:
     def loss(batch: torch.Tensor) -> dict[str, torch.Tensor]:
+        if not generator.noise_conditional:
+            return contract_loss(
+                generator,
+                windows(generator, streams, batch, sigma),
+                streams.command[batch],
+                futures(generator, streams, batch),
+                config.free_bits,
+            )
+        # Each window at its own noise level, which the generator is told.
+        clean = windows(generator, streams, batch, None)
+        noise = windows(generator, streams, batch, sigma) - clean
+        low, high = (math.log(x) for x in config.noise_range)
+        level = torch.empty(len(batch), 1, device=batch.device).uniform_(low, high)
         return contract_loss(
             generator,
-            windows(generator, streams, batch, sigma),
+            clean + torch.exp(level)[:, :, None] * noise,
             streams.command[batch],
             futures(generator, streams, batch),
             config.free_bits,
+            level,
         )
 
     generator.train()
@@ -746,8 +763,11 @@ def chain_states(
     steps: int,
     commit: int,
     seed: int = 0,
+    level: torch.Tensor | None = None,
 ) -> np.ndarray:
     """``(steps, N, skill)`` the generator's own chain from ``start``, unstable chains dropped.
+
+    ``level``: a noise-conditional generator's history noise level (``(N, 1)``).
 
     From ``start`` -- ``(N, history, skill)`` normalised windows of real ``z*`` -- a
     plan is drawn, its first ``commit`` samples appended to the history (with the
@@ -759,7 +779,7 @@ def chain_states(
     while len(out) * commit < steps:
         window = clean + sigma * torch.randn_like(clean)
         noise = torch.randn(len(window), generator.noise_size, device=window.device)
-        chunk = generator.sample(window, command, noise)[:, :commit]
+        chunk = generator.sample(window, command, noise, level)[:, :commit]
         out.append(chunk)
         clean = torch.cat([clean[:, commit:], chunk], dim=1)
     z = generator.skill_norm.inverse(torch.cat(out, dim=1)[:, :steps]).transpose(0, 1)
@@ -818,6 +838,7 @@ def chain_fidelity(
     reference: np.ndarray,
     seed: int = 0,
     draws: int = 1000,
+    level: torch.Tensor | None = None,
 ) -> dict:
     """How far the generator's chain walks from its teacher, and how well that is known.
 
@@ -827,7 +848,7 @@ def chain_fidelity(
     here -- a change in the score is real when it exceeds its own error.
     """
     chain = per_episode(
-        chain_states(generator, start, command, sigma, steps, commit, seed), dt_star
+        chain_states(generator, start, command, sigma, steps, commit, seed, level), dt_star
     )
     teacher = per_episode(reference, dt_star)
     chain, teacher = chain[np.isfinite(chain).all(1)], teacher[np.isfinite(teacher).all(1)]

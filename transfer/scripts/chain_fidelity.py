@@ -36,6 +36,13 @@ def main() -> int:
     parser.add_argument("contract", type=Path)
     parser.add_argument("--gait", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--noise-scale",
+        type=float,
+        default=1.0,
+        help="History noise as a multiple of the contract's; a noise-conditional generator is "
+        "told the level.",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
@@ -50,21 +57,27 @@ def main() -> int:
     start = torch.as_tensor(gait_z[100 : 100 + generator.history], device=args.device)
     start = generator.skill_norm(start.transpose(0, 1))
     command = gait.command[: start.shape[0]].mean(dim=0, keepdim=True).expand(len(start), 3)
+    level = None
+    if generator.noise_conditional:
+        level = torch.full((len(start), 1), float(np.log(args.noise_scale)), device=args.device)
     with torch.no_grad():
         measured = chain_fidelity(
             generator,
             start,
             command,
-            contract.sigma,
+            contract.sigma * args.noise_scale,
             900,
             generator.commit,
             dt_star,
             gait_z[100 + generator.history :].astype(float),
             args.seed,
+            level=level,
         )
     measured["contract"] = str(args.contract)
+    measured["noise_scale"] = args.noise_scale
     print(
-        f"{args.contract}: score {measured['score']:.3f} +- {measured['score_se']:.3f} "
+        f"{args.contract} at noise x{args.noise_scale:g}: "
+        f"score {measured['score']:.3f} +- {measured['score_se']:.3f} "
         f"(period {measured['deviation']['stride_period']:.3f}, "
         f"stride {measured['deviation']['stride_length']:.3f}, chains {measured['chains']})"
     )

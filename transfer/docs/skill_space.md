@@ -1473,6 +1473,66 @@ Limits and stopping rules:
   - *B3 meets the criterion.* Next, step 3: L4 on both bodies with `rough_b3` and
     `flat_b3`. `flat_b3` replaces `flat_dagger2` only if it passes on both bodies at least
     as well.
+- **Step 3, run** (`zero_shot_{g1_r3_6194,nao_r1_3498}_sym_{rough,flat}_b3_auto_l4_*.json`;
+  autonomous reference, both trackers frozen and symmetrized). Falls per command (forward,
+  fast, turning):
+
+  | generator | G1, encoder | G1, true state | NAO, encoder |
+  | --- | --- | --- | --- |
+  | `rough_dagger2` | 41/79, 152/184, 47/83 | 265/297, 226/258, 256/288 | 0/64, 10/63, 0/64 |
+  | **`rough_b3`** | 45/83, 94/127, 24/68 | **5/62, 1/61, 7/65** | **0/64, 0/64, 0/64** |
+  | `flat_dagger2` | 0/64, 0/64, 0/64 | 9/65, 4/65, 6/64 | 0/64 ×3, passes at the body's rate |
+  | `flat_b3` | 8/64, 6/61, 12/63 | 70/125, 37/94, 132/180 | 0/64 ×3, forward fails at the body's rate |
+
+  - *Rough on the G1 is no longer a coverage failure of the body.* Fed the true state, its
+    faithful plans are followed: speed ratio 1.01–1.04, falls 1–7 in about 60. The falls
+    come back on the encoder's path. What is left is condition (vi) — the encoder on
+    crouched states — and the generator's response to the encoder's real error.
+  - *On the NAO, rough goes from 10 falls to none*, its plans used, its speed 1.01–1.05 of
+    the teacher's in `V`. It misses only the left foot's duty, 0.10–0.15 too long at the
+    body's rate.
+  - *`flat_b3` does not replace `flat_dagger2`.* It falls on the G1 where `flat_dagger2`
+    does not. Fed the clean state, its plans ask for 0.085 and 0.026 `V` against the
+    teacher's 0.18 and 0.24: a generator trained under one noise level collapses at
+    another. This is what B4 (a generator that reads its noise level) addresses.
+  - *Adopted:* `rough_b3` for rough; `flat_dagger2` stays for flat
+    (`transfer/results/incumbents.json`).
+
+## 9. Physics in the decoder and in the latent (pre-registered 2026-10-15)
+
+The design takes from the works in [related_work.md](related_work.md). Nothing below changes the zero-shot rule:
+
+- no gradient step of a body's encoder or tracker uses a task's data;
+- the G1's pretrained policies are Isaac Lab's published ones only.
+
+**Adoption rule, for every phase.** A candidate replaces an incumbent (`transfer/results/incumbents.json`) only if:
+
+- it improves its target metric by more than twice the bootstrap standard error;
+- and it is not worse by as much on the regression suite S0.
+
+S0 is:
+
+- the tests;
+- the incumbents' chains, bit-exact on the GPU;
+- L4 of `flat_dagger2` on both bodies;
+- L1b of the walk.
+
+Training constraints are Lagrangian, with a bound that is measured, not chosen.
+
+| phase | hypothesis | target metric |
+| --- | --- | --- |
+| F1, B4 | a generator that reads its noise level neither collapses on a clean history nor falls apart under the encoder's real error. The deployed level is estimated online from the innovation (committed plan − encoded state) | rough's falls on the G1's encoder path; on the true path, the plans' speed against the teacher's |
+| F2, encoder coverage | the G1's encoder errs on crouched, high-clearance states; the family's ranges, widened to physical limits, cover them | encoder error on the family's edge; the encoder − true gap in rough's falls |
+| F3, balance block z⁺ | per-foot CoP and ground force (friction included) and the DCM offset, all dimensionless, are measurable on both bodies and emitted by the biped | Newton's closure Σf = m(c̈+g) on captures of both bodies |
+| F4, decoder v2 | a deep-learning core with physics in it extrapolates beyond the practised family. The physics: heads, an IK + contact-force prior with an RL residual, a critic and reward with z⁺ | cells mastered on the competence map and on pre-registered corners (crouched, high clearance, long stance), then L4 |
+| F5, a learned latent ζ | entity tokens with attention, bottlenecked to predict balance and falls and aligned across bodies on paired procedural data, carry what z* leaves out without encoding the body | the NAO's falls and CoP predicted by heads trained on the G1 alone; a body classifier at chance |
+| F6 (optional) | projecting a plan towards mastered cells when predicted competence drops reduces falls | falls, at no cost in fidelity |
+
+There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:
+
+- flat is semi-blind;
+- rough was diagnosed;
+- the strong evidence is the competence map, its corners and the ablations.
 
 ## What this stage hands to the next
 

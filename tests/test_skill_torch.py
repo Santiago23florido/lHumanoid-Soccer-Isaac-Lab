@@ -122,3 +122,74 @@ def test_the_torch_state_reproduces_the_recorded_simulator_states() -> None:
     got = _torch(state, units, int(data["base_index"]), feet)
     recorded = data["skill_state"][steps, :raw].reshape(-1, got.shape[-1])
     np.testing.assert_allclose(got, recorded, atol=2e-4, rtol=1e-4)
+
+
+def _proprioceptive_case(seed: int):
+    """A random body whose lower sole is on the ground and whose loaded foot stands still."""
+    from humanoid_transfer.transfer.latent.skill_torch import sole_points
+
+    state = _random_state(seed)
+    t = {k: torch.as_tensor(np.asarray(v), dtype=torch.float64) for k, v in state.items()}
+    body = BodyConstants(
+        masses=t["masses"],
+        inertia_local=t["inertia"],
+        base_index=0,
+        foot_index=(5, 6),
+        sole_from_com=t["sole_from_com"],
+        units=UNITS,
+    )
+    soles = sole_points(body, t["quat"], t["com_pos"])
+    t["com_pos"][..., 2] -= soles[..., 2].min(dim=1).values[:, None]
+    load = t["foot_force"][..., 2].abs() / (UNITS.mass * 9.81)
+    t["foot_force"] = torch.zeros_like(t["foot_force"])
+    t["foot_force"][..., 2] = load * UNITS.mass * 9.81
+    return body, t, load
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+def test_the_body_reads_its_own_state_where_the_ground_is_under_its_lower_sole(seed: int) -> None:
+    from humanoid_transfer.transfer.latent.skill_torch import proprioceptive_skill_state
+
+    body, t, load = _proprioceptive_case(seed)
+    args = (body, t["quat"], t["com_pos"], t["com_lin_vel"], t["ang_vel"])
+    expected = skill_state(*args, t["foot_force"])
+    measured = proprioceptive_skill_state(*args, load)
+    np.testing.assert_allclose(measured.numpy(), expected.numpy(), atol=1e-10)
+    # Where the body stands and which way it faces are not sensed, and do not matter.
+    raised = t["com_pos"] + torch.tensor([3.0, -2.0, 0.7], dtype=torch.float64)
+    moved = proprioceptive_skill_state(
+        body, t["quat"], raised, t["com_lin_vel"], t["ang_vel"], load
+    )
+    np.testing.assert_allclose(moved.numpy(), expected.numpy(), atol=1e-10)
+
+
+def test_leg_odometry_recovers_the_velocities_when_the_loaded_foot_stands_still() -> None:
+    from humanoid_transfer.transfer.latent.skill_torch import (
+        proprioceptive_skill_state,
+        sole_points,
+    )
+
+    body, t, load = _proprioceptive_case(2)
+    # Shift every velocity so that the more loaded foot's sole is at rest.
+    feet = list(body.foot_index)
+    soles = sole_points(body, t["quat"], t["com_pos"])
+    offset = soles - t["com_pos"][:, feet]
+    sole_vel = t["com_lin_vel"][:, feet] + torch.linalg.cross(t["ang_vel"][:, feet], offset, dim=-1)
+    stance = load.argmax(dim=-1)
+    still = t["com_lin_vel"] - sole_vel[torch.arange(len(stance)), stance][:, None, :]
+    args = (body, t["quat"], t["com_pos"], still, t["ang_vel"])
+    expected = skill_state(*args, t["foot_force"])
+    np.testing.assert_allclose(
+        proprioceptive_skill_state(*args, load, base_velocity=False).numpy(),
+        expected.numpy(),
+        atol=1e-10,
+    )
+    # Without a base velocity, a drift common to every link is not sensed.
+    drift = still + torch.tensor([0.4, -0.1, 0.05], dtype=torch.float64)
+    np.testing.assert_allclose(
+        proprioceptive_skill_state(
+            body, t["quat"], t["com_pos"], drift, t["ang_vel"], load, base_velocity=False
+        ).numpy(),
+        expected.numpy(),
+        atol=1e-10,
+    )

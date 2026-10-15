@@ -73,6 +73,13 @@ parser.add_argument(
     action="store_true",
     help="Feed the generator the true z* plus its noise, not the body's encoder.",
 )
+parser.add_argument(
+    "--estimator",
+    choices=("encoder", "kinematic"),
+    default=None,
+    help="On the deployed path: the learned encoder alone, or the body's kinematics for every "
+    "field but the loads.",
+)
 parser.add_argument("--start-fraction", type=float, default=None)
 parser.add_argument(
     "--procedural-fraction",
@@ -114,6 +121,8 @@ def main() -> int:
         command_cfg.autonomous = args_cli.reference == "autonomous"
     # The deployed path reads the body's encoder; --contract-from-truth the true state.
     command_cfg.use_encoder = not args_cli.contract_from_truth
+    if args_cli.estimator is not None:
+        command_cfg.estimator = args_cli.estimator
     if args_cli.start_fraction is not None:
         command_cfg.start_fraction = args_cli.start_fraction
     if args_cli.standing_fraction is not None:
@@ -155,7 +164,7 @@ def main() -> int:
         "skill_state", "command", "action_executed", "base_lin_vel", "base_ang_vel",
         "base_quat", "base_pos", "contract_due", "contract_error", "contract_error_other",
         "contract_error_state", "contract_fields", "contract_age", "done", "terminated",
-        "encoder_input", "procedural", "biped_fallen", "biped_recovering",
+        "encoder_input", "procedural", "biped_fallen", "biped_recovering", "estimate",
     )  # fmt: skip
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
@@ -179,6 +188,8 @@ def main() -> int:
             action = driver(obs["policy"])
         record["action_executed"].append(action.cpu().numpy())
         obs, _, terminated, truncated, _ = env.step(action)
+        # What the generator and the tracker read for the state this step reached.
+        record["estimate"].append(term.generator.skill_norm.inverse(term.estimate).cpu().numpy())
         record["contract_error"].append(term.last_error.cpu().numpy())
         record["contract_error_other"].append(term.last_error_other.cpu().numpy())
         record["contract_error_state"].append(term.last_error_state.cpu().numpy())

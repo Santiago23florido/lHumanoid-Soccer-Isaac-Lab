@@ -17,6 +17,12 @@ expert is still the teacher:
    the teacher's response, with ``target_mask`` marking the steps whose future is the
    teacher's -- the only ones the generator may learn from.
 
+Another task's teacher answers the same way: ``--checkpoint`` and ``--task-id``
+name it and the task it was trained in (Isaac Lab's published G1 policies, for
+the zero-shot study's task-side DAgger), and ``--fixed-command`` keeps each
+start's command as captured instead of letting the task's heading control
+recompute the turn.
+
 Usage::
 
     python g1/scripts/teacher_from_states.py --headless \
@@ -46,6 +52,20 @@ parser.add_argument("--rounds", type=int, default=8, help="Starts per environmen
 parser.add_argument("--horizon", type=int, default=50, help="Teacher steps from each start.")
 parser.add_argument("--history", type=int, default=26, help="Closed-loop steps kept before.")
 parser.add_argument("--seed", type=int, default=0)
+parser.add_argument(
+    "--checkpoint", type=Path, default=None, help="TorchScript teacher (default: pinned)."
+)
+parser.add_argument("--task-id", default=None, help="The teacher's task (default: the walk's).")
+parser.add_argument(
+    "--fixed-command", action="store_true", help="No heading control: hold the command."
+)
+parser.add_argument(
+    "--last-action",
+    choices=("zero", "source"),
+    default="zero",
+    help="The teacher's first last-action input: zero, or the joint targets in force at the "
+    "captured state (the capture's own last action, same action space).",
+)
 parser.add_argument("--output", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -74,16 +94,18 @@ def main() -> int:
 
     torch.manual_seed(args_cli.seed)
     rng = np.random.default_rng(args_cli.seed)
-    cfg = parse_env_cfg(TASK_ID, num_envs=args_cli.num_envs)
+    task_id = args_cli.task_id or TASK_ID
+    checkpoint = args_cli.checkpoint or TEACHER
+    cfg = parse_env_cfg(task_id, num_envs=args_cli.num_envs)
     cfg.seed = args_cli.seed
     cfg.episode_length_s = 1.0e6  # a start is never cut by a time-out
-    env = gym.make(TASK_ID, cfg=cfg)
+    env = gym.make(task_id, cfg=cfg)
     inner = env.unwrapped
     device = inner.device
     robot = inner.scene["robot"]
     sensor = inner.scene["contact_forces"]
     command_term = inner.command_manager.get_term("base_velocity")
-    teacher = torch.jit.load(str(TEACHER), map_location=device).eval()
+    teacher = torch.jit.load(str(checkpoint), map_location=device).eval()
 
     card = json.loads(BODY_CARD.read_text(encoding="utf-8"))
     foot_ids, _ = robot.find_bodies(FEET, preserve_order=True)
@@ -150,12 +172,25 @@ def main() -> int:
         command = take("command")
         command_term.vel_command_b[:] = command
         command_term.is_standing_env[:] = command.norm(dim=-1) == 0
+        if args_cli.fixed_command and hasattr(command_term, "is_heading_env"):
+            command_term.is_heading_env[:] = False
         command_term.time_left[:] = 1.0e9
         inner.action_manager.reset()
+        if args_cli.last_action == "source":
+            # The joint targets are part of the state: the policy's last action is the
+            # target its joints were driven to. Zeroed, it reads a body commanded to the
+            # default pose mid-stride, and its first steps answer that, not the state.
+            last = take("obs")[:, -inner.action_manager.total_action_dim :]
+            inner.action_manager._action[:] = last
+            inner.action_manager._prev_action[:] = last
         observation = inner.observation_manager.compute()["policy"]
 
         window = np.stack([source["skill_state"][t - k, n] for k in range(args_cli.history)][::-1])
         window_obs = np.stack([source["obs"][t - k, n] for k in range(args_cli.history)][::-1])
+        if window_obs.shape[-1] != observation.shape[-1]:
+            # A teacher that reads more than the capture kept (a height scan): the history's
+            # observations are not the generator's input, so they are left empty.
+            window_obs = np.zeros((*window_obs.shape[:-1], observation.shape[-1]), np.float32)
         steps, steps_obs = [], []
         living = torch.ones(args_cli.num_envs, dtype=torch.bool, device=device)
         lived = []
@@ -207,7 +242,9 @@ def main() -> int:
         control_dt=np.float32(inner.step_dt),
         joint_names=np.array(robot.data.joint_names),
         driver=np.array("teacher"),
-        teacher_sha256=np.array(hashlib.sha256(TEACHER.read_bytes()).hexdigest()),
+        teacher_sha256=np.array(hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest()),
+        teacher=np.array(str(checkpoint)),
+        task=np.array(task_id),
         states=np.array([str(p) for p in args_cli.states]),
         history=np.int64(args_cli.history),
     )

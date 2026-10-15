@@ -39,11 +39,13 @@ from isaaclab_tasks.manager_based.locomotion.velocity import mdp
 from isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg import G1Rewards
 
 from ....transfer.tasks.tracking import (
+    OCTAVE_WEIGHTS,
+    OCTAVES,
     ReferenceCommandCfg,
     contract_left,
+    contract_likelihood,
     contract_path,
     contract_privileged,
-    contract_tracking,
     contract_view,
 )
 from ..g1_walk.g1_walk_env_cfg import FROUDE_MATCHED_SPEED, G1WalkTeacherEnvCfg
@@ -52,8 +54,16 @@ REPO_ROOT = Path(__file__).resolve().parents[6]
 BODY_CARD = REPO_ROOT / "g1" / "body" / "body_card.json"
 DEFAULT_CONTRACT = REPO_ROOT / "logs" / "contract" / "walk_starts" / "generator.pt"
 CONTRACT = os.environ.get("HUMANOID_CONTRACT", str(DEFAULT_CONTRACT))
-START_STATES = REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz"
+START_STATES = os.environ.get(
+    "HUMANOID_START_STATES", str(REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz")
+)
 """The task's generator; ``HUMANOID_CONTRACT`` points the same body at another task's."""
+
+PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
+"""Share of training episodes following the point-mass biped's plans instead of the task's
+(``transfer/docs/skill_space.md`` §8); 0 keeps the walk alone."""
+
+CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
 
 BASE_BODY = "pelvis"
 FOOT_BODIES = ["left_ankle_roll_link", "right_ankle_roll_link"]
@@ -131,14 +141,12 @@ class TrackPlayObservationsCfg(TrackObservationsCfg):
 
 @configclass
 class G1TrackRewards(G1Rewards):
+    # One likelihood, its error's scale marginalised over octaves (1 to 128 tolerances);
+    # it replaced three kernels two decades apart, between which it was flat (§8.4).
     contract = RewTerm(
-        func=contract_tracking, weight=1.0, params={"command_name": COMMAND, "kernel": 1.0}
-    )
-    contract_medium = RewTerm(
-        func=contract_tracking, weight=0.5, params={"command_name": COMMAND, "kernel": 10.0}
-    )
-    contract_coarse = RewTerm(
-        func=contract_tracking, weight=0.25, params={"command_name": COMMAND, "kernel": 100.0}
+        func=contract_likelihood,
+        weight=1.0,
+        params={"command_name": COMMAND, "kernels": OCTAVES, "weights": OCTAVE_WEIGHTS},
     )
 
 
@@ -180,6 +188,8 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             # No catching up with a body that falls behind: that let it veto the task
             # again. A body that leaves the task falls, and a fall ends the episode.
             resync_error=float("inf"),
+            procedural_fraction=PROCEDURAL,
+            procedural_calibration=str(CALIBRATION),
         )
 
         self.observations = TrackObservationsCfg()
@@ -219,6 +229,7 @@ class G1TrackEnvCfg_PLAY(G1TrackEnvCfg):
         command.ranges.lin_vel_x = (FROUDE_MATCHED_SPEED, FROUDE_MATCHED_SPEED)
         command.use_encoder = True
         command.start_fraction = 0.0
+        command.procedural_fraction = 0.0
         # The teacher's own play conditions, so the two captures compare.
         command.resampling_time_range = (10.0, 10.0)
         command.rel_standing_envs = 0.02

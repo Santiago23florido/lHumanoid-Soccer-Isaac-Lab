@@ -45,11 +45,13 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
 
 from ....transfer.embodiment import G1, NAO
 from ....transfer.tasks.tracking import (
+    OCTAVE_WEIGHTS,
+    OCTAVES,
     ReferenceCommandCfg,
     contract_left,
+    contract_likelihood,
     contract_path,
     contract_privileged,
-    contract_tracking,
     contract_view,
 )
 from ...assets import nao_kinematics as nk
@@ -61,7 +63,14 @@ CONTRACT = os.environ.get("HUMANOID_CONTRACT", str(DEFAULT_CONTRACT))
 POSTURE_CONTRACT = os.environ.get("HUMANOID_POSTURE_CONTRACT", CONTRACT)
 """The contract the NAO's tracker was trained on, which fixes its nominal crouch: the
 posture belongs to the body's tracker, so another task's contract must not move it."""
-START_WINDOWS = REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz"
+START_WINDOWS = os.environ.get(
+    "HUMANOID_START_WINDOWS", str(REPO_ROOT / "g1" / "rollouts" / "teacher_states.npz")
+)
+"""Demonstrations a start is seeded from; another task's, to start inside its motion."""
+PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
+"""Share of training episodes following the point-mass biped's plans (§8 of skill_space.md)."""
+
+CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
 
 COMMAND = "base_velocity"
 BASE_BODY = "base_link"
@@ -177,14 +186,12 @@ class NaoTrackRewards(RewardsCfg):
     joint_deviation_free = RewTerm(
         func=mdp.joint_deviation_l1, weight=-0.1, params={"asset_cfg": FREE_JOINTS}
     )
+    # One likelihood, its error's scale marginalised over octaves (1 to 128 tolerances);
+    # it replaced three kernels two decades apart, between which it was flat (§8.4).
     contract = RewTerm(
-        func=contract_tracking, weight=1.0, params={"command_name": COMMAND, "kernel": 1.0}
-    )
-    contract_medium = RewTerm(
-        func=contract_tracking, weight=0.5, params={"command_name": COMMAND, "kernel": 10.0}
-    )
-    contract_coarse = RewTerm(
-        func=contract_tracking, weight=0.25, params={"command_name": COMMAND, "kernel": 100.0}
+        func=contract_likelihood,
+        weight=1.0,
+        params={"command_name": COMMAND, "kernels": OCTAVES, "weights": OCTAVE_WEIGHTS},
     )
 
 
@@ -254,6 +261,8 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             # No catching up with a body that falls behind: that let it veto the task
             # again. A body that leaves the task falls, and a fall ends the episode.
             resync_error=float("inf"),
+            procedural_fraction=PROCEDURAL,
+            procedural_calibration=str(CALIBRATION),
         )
 
         self.observations = NaoTrackObservationsCfg()
@@ -310,5 +319,6 @@ class NaoTrackEnvCfg_PLAY(NaoTrackEnvCfg):
         command.resampling_time_range = (10.0, 10.0)
         command.rel_standing_envs = 0.02
         command.start_fraction = 0.0
+        command.procedural_fraction = 0.0
         # Captures count falls only.
         self.terminations.contract_left = None

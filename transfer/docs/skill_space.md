@@ -857,6 +857,450 @@ where the published gait steps quickly with alternating feet (duty
 trained on the walk alone executes the walk on any body, and no other
 gait.
 
+## 8. Zero-shot by coverage: every tracker practises a physical family of plans
+
+§7.3 and §7.4 ended on a limit, not a defect: a tracker trained by RL is an
+inverse model over the plans it practised. Trained on the walk's contract
+alone, the G1 fell 120–240 times on the published policy's gait and the NAO
+shuffled. This section keeps the contract and everything about it — the
+generator per task, the encoder and tracker per body, ancestral sampling when
+deployed, the autonomous reference in training, the precision likelihood, the
+anchored integral and the path in view — and changes one thing: the
+distribution of plans each body's tracker is trained on.
+
+### 8.1 Why, and what is claimed
+
+- **Zero-shot, defined.** No gradient step of a body's encoder or tracker uses
+  data from a new task's generator or teacher. A new task trains only its own
+  generator, on G1 data (its teacher, and DAgger on the G1).
+- **Why it fails today.** The tracker's loss on a task is bounded by its
+  training loss times the concentrability `C = sup d_task / d_train` (Kakade
+  and Langford, 2002; Munos, 2003). Outside the support of `d_train`, `C` is
+  infinite and nothing is guaranteed. The walk's support does not hold the
+  published gait (duty 0.5 and 0.98 `T` against 0.9 and 1.9 `T`).
+- **What to train on, without knowing the task.** Over tasks whose plans have
+  density at most `ρ` on the set `F` of physically feasible plans, the worst
+  `C` is `ρ / inf d_train`, minimised by the uniform distribution on `F`: the
+  minimax argument of domain randomisation, applied to plans.
+- **Why `F` can be sampled.** A plan of `z*` is not a free 13 × 27 array.
+  Centroidal dynamics fix it once the contact schedule, the footholds and the
+  CoM's start are given, so `F` is parameterised by about a dozen
+  dimensionless numbers per segment. They are drawn uniformly, and
+  log-uniformly for the period (a scale: Jeffreys' prior).
+- **Why it is shared.** The parameters are dimensionless (Froude, `T`, `L`,
+  duty, `m g`), so one family trains every body; each body executes the part
+  of it its tracker can (its competence), measured with no task in sight.
+- **When a task transfers.** Its plans lie in the family (i), within the
+  body's competence (ii) — which the tracker has to have learned (iii) — and
+  the tracker does not treat real plans differently from procedural ones of
+  the same gait (iv: no shortcut, Geirhos et al., 2020). The closed loop must
+  also keep the task's generator in its own support (v), and the encoder must
+  cover the states (vi). Each level of the evaluation isolates one of these.
+
+### 8.2 The family
+
+`transfer/latent/procedural.py`: a point mass on massless legs that push
+along themselves.
+
+- **Contacts.** Event-based contacts on a phase clock; duties below one half
+  give flight phases.
+- **Loads.** A half-sine of load per stance, its impulse set by what follows
+  the stance — one model across the walk–run transition.
+- **Stepping and balance.**
+  - Foot placement is deadbeat for the model's own centre of pressure,
+    double support and turns included, with an integral on the speed.
+  - The CoP tracks the periodic DCM within the soles.
+  - Standing holds the DCM over the feet; starts lean before they step.
+- **Recovery.** A recovery steps in place when a compound transition drifts.
+- **Calibrated fields.** The three fields a point mass cannot derive — tilt,
+  the base's rate beyond the turn, and angular momentum — are calibrated on
+  both bodies' walks (`procedural_calibration.json`). Their model error is 4–6
+  times the encoder's, and becomes their tolerance on procedural plans.
+
+The ranges, set by physics before any task was trained:
+
+| parameter | range |
+| --- | --- |
+| speed `v_x`, `v_y` | −0.10 – 0.45 `V`, ±0.15 `V` |
+| turn | ±0.3 / `T` |
+| period | 0.6 – 3.0 `T`, log-uniform |
+| duty | 0.30 – 0.95, asymmetry ±0.08 |
+| step width | 0.20 – 0.55 `L` |
+| CoM height | 0.85 – 1.00 `L` |
+| clearance | 0.01 – 0.12 `L` |
+| lean | 0 – 0.20 rad |
+
+Constraints:
+- the shortest swing is 1.5 control steps of the body, the only body-specific
+  term;
+- stride ≤ 1 `L`;
+- step ≤ 0.55 `L`;
+- mean swing speed ≤ 2 `V`;
+- the stance's CoM bounce is ≤ 0.08 `L`.
+
+Measured (`tests/test_procedural.py`, random schedules over 77 `T`):
+- the vertical acceleration is the load minus the weight;
+- the CoP implied by the horizontal acceleration stays under the feet;
+- fixed gaits come out with their period, duty and speed (3 %, 0.03, 10 %);
+- 2.8 % of the time is spent recovering;
+- 0.7 % of episodes fall, after which the plan holds still and the body's
+  episode ends on its lag.
+
+**Coverage, H1** (`procedural_coverage.json`):
+
+| capture | inside the family for the G1 | for the NAO |
+| --- | --- | --- |
+| the walk teacher | yes | no: its 0.15 `T` swing is under 1.5 NAO steps |
+| published policy, forward / fast / turning | yes | yes |
+
+The published policy walks with its CoM at 0.86 `L` (the walk at 0.95), at
+the low edge of the range.
+
+**Style, a diagnostic.** A logistic probe separates walk windows from
+procedural ones with AUC 0.96 on every field and 0.89 on the derived fields.
+On the derived fields the published policy's windows are nearer to the
+family than to the walk (60–90 %); on every field they are nearer to the walk.
+The calibrated fields give the source away. This is the shortcut risk that
+level L3 below exists to catch.
+
+**Data hygiene.**
+- The ranges were set before any tracker was trained on them.
+- The published policy's gait was known (§7.3), so it is a semi-blind test.
+- Isaac Lab's `Isaac-Velocity-Rough-G1-v0` is the blind one. Its gait is not
+  looked at until both trackers are frozen, and it is evaluated once.
+
+### 8.3 The loop, pre-registered
+
+Each tracker is trained on 70 % procedural and 30 % walk plans, warm-started
+from its walk tracker (G1 round 12, NAO crouch 2). It is then evaluated level
+by level. Levels L1–L3 read the true state (plus the encoder's noise). L4
+reads both the true state and the encoder; the deployed path decides.
+
+| level | condition | gate |
+| --- | --- | --- |
+| L1 learning | (iii) | random schedules as in training: use < 0.5, falls ≤ 10 %; competence map before/after, reported |
+| L1b no regression | the walk | each path: falls ≤ round 12's + 2 points, speed ratio ≥ 0.9, stride/period/duty ≤ round 12's + 5 points, use passes |
+| L2 twins | (ii) + (iii) on the published gait | each procedural twin: falls ≤ 5 %, speed within 10 % of asked (floor 0.05 `V`), period and duty within 10 %, use < 0.5 |
+| L3 the published generator, autonomous | (iv) | started inside the published gait: use < 0.5, falls ≤ 5 %, body within 10 % of asked |
+| L4 the published generator, deployed | (v) + (vi): the zero-shot result | gates B and C against the published policy, per command |
+
+One correction per round, chosen by the first level that fails. A correction
+is never aimed at the published gait.
+
+| fails | correction |
+| --- | --- |
+| L1 | learning-progress curriculum over cells of the family (ALP-GMM, Portelas et al., 2019; PLR, Jiang et al., 2021) → action std reset to 0.6 → widen the network, function-preserving |
+| L1b | walk share 0.3 → 0.5 |
+| L2 (L1 passes) | the curriculum of L1 |
+| L3 (L2 passes) | model error on more fields → randomised shapes (load ramps, swing profile) → procedural plans only |
+| L4 true state (L3 passes) | DAgger of the published generator on the G1 (task side) |
+| L4 encoder (true state passes) | refit the body's encoder on more procedural states and starts |
+
+Limits and stopping rules:
+- **Rounds.** At most three RL rounds on the G1 and two on the NAO.
+- **The NAO.** It is trained only once the G1 passes L4, and the published
+  generator stays frozen for it. A twin outside the NAO's competence is
+  reported as a physical limit of that body, not a transfer failure.
+- **Escalations, decided by the user.** A model-based decoder, training on
+  the union of skills, or a different length unit.
+
+**Threats to validity, declared.**
+- The published policy is a semi-blind test.
+- Each RL round is a single seed.
+- The 10 % / 2-point thresholds are §5's, unchanged.
+- The deployed path decides, per command.
+
+### 8.4 Log
+
+- *Pre-registration* (this section, before any tracker was trained on the family).
+- **Baselines**, the trackers trained on the walk alone (`competence_g1_r12.json`,
+  `competence_nao_nao2.json`):
+  - *Grid:* 3 of 61 probes on the G1, 6 of 57 on the NAO.
+  - *Twins:* the walk's twin passes on both — the walk tracker follows the biped's walk as
+    it follows the real one (use 0.02). The published policy's twins fail on duty exactly
+    as the zero-shot did (0.85 against 0.5): the map predicts the failure without the task.
+- **G1 round 1** — round 12 resumed with 70 % procedural plans, for 2 × 1000 iterations
+  (`competence_g1_r1_*.json`, `zero_shot_g1_r1_4196_walk.json`):
+  - *L1 passes:* random schedules, 0 falls, plans used.
+  - *Map:* the grid goes 3 → 8 → 13 of 61. On every grid probe falls, speed and use now
+    pass, and the period on 85 %; the duty on 20 %.
+  - *L2 fails, on the duty alone:* the published policy's twins come out with period and
+    velocity exact, no falls, plans used, and duty 0.67–0.78 against 0.47–0.53. Asked to
+    swing, the foot carries more than 5 % of the weight 40 % of the time, whatever the
+    contact threshold, and lifts half as high.
+  - *L1b, measured against round 12, fails, and not because of the tracker:* it now steps at
+    the rate its plans ask. Body over asked: period 1.12–1.18 and stride 1.04–1.10, against
+    round 12's 1.43–1.56 and 1.48–1.61. Round 12 passed gate C on the deployed path by not
+    following its plans; the walk's generator asks for quick steps (§7.1, its chain bias,
+    asked period 1.23–1.47 against the teacher's 1.87), and a tracker that follows them takes
+    them. More walk in the mix, the pre-registered correction, would teach it to ignore its
+    plans again; it is not applied. The walk's fidelity now waits on the task side.
+  - *What the duty failure is, measured:* on the twins the joint error sits at about 15
+    tolerances, dominated by fields the encoder knows to a millimetre (CoM height 43,
+    feet 11–43). The reward's kernels were 1, 10 and 100: at 15 the first is dead and the
+    second flat, and a correct swing changes the reward by 0.2 % per tolerance — no
+    signal, which neither a curriculum (the pre-registered correction for L2, about
+    coverage, which every other criterion shows is there) nor more exploration supplies.
+  - *Two hypotheses ruled out:* the encoder's error on the family's states (refitted on
+    them it is 0.2–0.6 of the walk-fitted one: the tolerance is not too tight for lack of
+    data), and the point-mass model's error on every field
+    (`procedural_model_error.json`: 3–14 encoder errors, mostly the walk teacher's own
+    stride-to-stride irregularity; widening by it would erase the contact signal).
+- **Round 2's correction** (a deviation from the pre-registered order, for the reason above):
+  the same likelihood with the error's scale marginalised by an octave quadrature,
+  kernels 1, 2, … 128 with the old power law of weights (`OCTAVES`). The three old kernels
+  are among them. At 15 tolerances the gradient is 13 times the old, at 2 it is 1.5
+  times: no field loses its pull.
+- **G1 round 2** — the octave likelihood, round 1 resumed for 1000 iterations
+  (`competence_g1_r2_5195*.json`, `zero_shot_g1_r2_5195_*.json`):
+  - *Map:* the grid goes 13 → 26 of 61, the manoeuvres 0 → 5 of 6. Over the grid the duty
+    passes on 43 % (20 %) and the period on 98 %.
+  - *L2 passes:* all four twins. The published policy's three come out with duty
+    0.51–0.58 against 0.47–0.53, period exact, no falls, use 0.00–0.03.
+  - *L1b:* no falls on the true state or through the encoder (3 of 64 autonomous), speed
+    ratio 1.04–1.06, use 0.06 (round 12: 0.15). Stride −15 % and period −20 %: the walk's
+    generator's chain bias, followed (§7.1).
+  - *L3:* started inside the published gait, the tracker walks it on the published
+    generator's own chain with no falls in 128 episodes, at period 0.97 and duty 0.43/0.53
+    against the published policy's 0.98 and 0.47/0.53. Against the plans' own stitched
+    gait (period 0.77, its seams every 13 samples counted as steps) the gate's check fails;
+    against the policy it walks like, it does not.
+  - *L4 fails on falls:* 119–169 per 32 environments over 900 steps, with the plans used
+    (0.016–0.04). The falls come 60–105 steps into each episode, as the generator starts
+    the body from rest — the published generator's own chain diverges from a standing
+    start (§7.3), now on the body's history. A task-side failure (v): the pre-registered
+    correction is DAgger of the published generator on the G1.
+- **Task-side DAgger, round 1** (`task_dagger.sh`, `contract_flat_dagger1.json`,
+  `zero_shot_g1_r2_5195_flat_dagger1_*.json`). The G1's frozen tracker ran with the
+  published generator under five commands of the task's range, plus starts and stops. The
+  published policy acted from 1024 of the loop's states, and the generator was retrained on
+  its data and this round's (gate passes, chain period 0.93 against 0.98).
+  - *Falls:* 0 deployed (136–169 before), 3–9 on the true state.
+  - *Deployed:* period 0.96–0.98 against 0.98, plans used (0.31–0.36), every field
+    within 1.5 tolerances of its plan.
+  - *What fails now is the speed.* Asked 0.30, 0.60 and 0.32 m/s where the published
+    policy walks 0.18, 0.49 and 0.24 at those commands; the body takes what it is asked.
+    The generator's chain was already 11 % fast. Now that the tracker delivers its plans,
+    that bias compounds upward through the body's history, where round 12 had delivered 75 %
+    and compounded down. Stride, which is speed times period, fails gate C. The true-state
+    path also suffers: its history's noise makes this generator's plans jitter, and the
+    body steps at 0.6 `T`.
+  - Both are the task side's, and DAgger is the correction: a second round, from this
+    loop's states, at the speeds the published policy does not walk.
+- **Task-side DAgger, round 2** (`contract_flat_dagger2.json`,
+  `zero_shot_g1_r2_5195_flat_dagger2_*.json`). Round 1's loop was captured on both paths,
+  the true state and the encoder. The published policy acted from 1024 of its states, and
+  the generator was retrained on the teacher's data and both rounds' (gate passes, chain
+  period 0.94).
+  - *Deployed, no falls.* The plans are used (0.31–0.49) and period 0.96–0.98.
+  - *The speed runs further away.* Asked 0.48, 0.76 and 0.40 m/s at the three commands,
+    against round 1's 0.30, 0.60 and 0.32 and the policy's 0.18, 0.49 and 0.24. Stride is
+    +49 to +155 %.
+  - *True state:* 14–36 falls, period 0.66–0.69. *L3:* 30 falls in 133 episodes, mostly in
+    the first 1–3 s after starting from the policy's noisy states, at commands up to
+    0.96 m/s forward and 0.42 m/s sideways.
+- **Why DAgger diverges here, measured** (offline, nothing trained):
+  - *The generator on its own chain is the policy's.* Chained on its own plans from the
+    G1's spawn state — what a perfect tracker would walk — rounds 1 and 2 start 32 of 32
+    chains, reach 0.20, 0.51 and 0.27 m/s within two seconds, and keep period 0.93–0.99 and
+    duty 0.49/0.54. The published policy, in its training environment, walks 0.20 m/s at the
+    first command. The pre-DAgger generator starts only 6–7 of 32. Started from the loop's
+    own 0.49 m/s states, every round's chain returns to 0.20 within 6 s, also when every
+    plan is overshot by 3 %.
+  - *On the body's history it barely reverts.* Fed the deployed loop's own windows (encoder,
+    true state, or true state plus noise), round 2 plans 0.47 m/s where the body was
+    walking 0.49. The tracker overshoots its plans by 1.7 %. That balance is the loop's
+    fixed point.
+  - *The policy's labels say so.* From the loop's states, the published policy speeds up
+    for the first 0.26 s — a commitment's length — and only then slows down (command
+    0.25: 0.35 → 0.43 → 0.37 → 0.23 m/s over one second). Round 2's fast half goes
+    0.50 → 0.53. From its own states the jump is small (0.183 → 0.196, or 0.186 with the
+    joint targets in force written as its last action, `--last-action source`). From the
+    loop's states the same correction changes the jump by 0.002 m/s, so the transplant is
+    not to blame.
+  - *So the labels are right and the loop is not.* Every 0.26 s the generator is asked,
+    again, what the policy does in the first 0.26 s after finding itself in the G1
+    tracker's state, and the policy's answer — a pendulum ahead of its foot, caught by a
+    quick step — is to speed up. Each round adds data at the higher speeds the previous
+    round reached; the fixed point moves up with it.
+- **What this says about reading the body's history.** Let a plan revert a deviation from
+  the commanded gait by a fraction `κ` per commitment. Let a body's tracker overshoot by
+  `ε`, and let `δ` be how the task's expert answers that body's way of moving. The loop
+  then settles where `(1 − κ)(1 + ε)` and `δ` balance, which is far from the expert's gait
+  whenever `κ ≲ ε`, as here. Both `ε` and `δ` belong to the pair of task and body:
+  - a generator kept stable on a body's history must be trained on that body's
+    histories — N × M trainings, the thing the contract exists to avoid;
+  - DAgger on the G1 writes the published policy's reaction to the *G1 tracker's* style
+    into the task's generator, which is wrong for any other body.
+
+  Reading its own plans instead (the autonomous reference, already the tracker's training
+  mode and §7's L3), the generator's chain is a property of the task alone — it is what
+  the task's gate checks. The tracker follows the plan's anchored displacement, so its
+  `ε` cannot accumulate, and the body enters the history only where it must: at a start
+  and when it has left the plan (a resync). That splits the loop into the two halves N + M
+  can certify separately. Task-side DAgger keeps one job, the starts, which is what it
+  fixed (6 → 32 of 32).
+- **Amendment to L4, made before its result was read:** the deployed path is the encoder
+  with the autonomous reference. The physical reference stays as a diagnostic, and its
+  failure above stands.
+- **L4, amended** (`zero_shot_g1_r2_5195_flat_dagger2_auto_l4_*.json`). Round 2's tracker
+  and round 2's generator, both frozen, at the three commands:
+  - *Deployed:*
+    - no falls in 64 episodes at any command;
+    - plans used (0.22–0.27);
+    - speed 1.10, 1.06 and 1.15 times the policy's;
+    - stride +3 to +7 %, period −2.5 to −3.5 %;
+    - the plans ask for duties within 4 % of the policy's (0.48–0.50 / 0.54).
+  - *Gate C* passes at the fast command. At forward and turning it fails on the left
+    foot's duty alone: 10.2 % and 10.5 % short of the policy's, against a limit of 10 %.
+    The body's left stance is 13–14 % shorter than its plan asks; the right is within 3 %.
+  - *True state:* 11–17 falls, period 0.60–0.65, use 0.78. This path writes the task
+    contract's `σ` into the tracker's view, and the published contract's `σ` is the walk
+    encoder's error on the published policy's states when the contract was trained. That is
+    8.8 times (median; up to 56) the noise the tracker trained with, and 4–10 times the
+    deployed encoder's error on these same runs. So this path measures that earlier
+    encoder, not the one deployed, and is not read as a diagnostic of this one.
+  - *The left foot, measured without the task.* Over the competence map
+    (`competence_g1_r2_5195.json`), where every plan's two duties are equal, the body's
+    left duty is 0.041 below its right; on moving gaits near duty 0.55 it is 0.054 below.
+    The family is mirror-symmetric (tested) and so is the robot; the tracker is not. That
+    asymmetry belongs to the body side, the map shows it without the task, and it decides
+    both of the remaining failures.
+- **The correction: an equivariant tracker** (`transfer/symmetry.py`, a deviation from the
+  catalog for the reason above). When the family and the robot are mirror-symmetric, the
+  optimal tracker answers a reflected input with its action reflected. The maps:
+  - *Joints:* from the body's own kinematics (`measure_mirror.py`, `g1/body/mirror.json`).
+    Each joint is moved ±0.1 rad; the reflected displacements of every link origin and
+    centre of mass pick the partner's sign. Residuals are below 1.5e-3 of the move, against
+    2.0 for the other sign, on all 37 joints. Six finger signs differ from what the
+    position-only probe suggested, so they are measured, not guessed.
+  - *The plan:* `mirror_matrix` in the contract's normalised units.
+
+  The test-time form needs no training: `½ (π(o) + P π(A o + b))`, the projection onto
+  equivariant policies (`symmetrize_actor.py`).
+- **Round 2's tracker, symmetrized** (`*_r2_5195_sym*.json`):
+  - *L4 (amended) passes at all three commands.* No falls; plans used (0.36–0.40); speed
+    1.09, 1.05 and 1.17; stride 2.7–6 %, period 2.5–3 %, duty 1.1–7.2 %. A wrong sign
+    anywhere would have averaged the tracker with a body it does not have.
+  - *Map:* left minus right duty −0.003 (−0.041 before). Grid 26 → 32 of 61, manoeuvres
+    5 → 6 of 6.
+  - *L2 now fails, on the duty:* the published gait's procedural twins are each followed
+    with stances 0.05 of a stride longer than the biped asks, on both feet (9–12 %); before
+    symmetrizing, the left foot's short bias had hidden it on that side. On the task's own
+    plans the stances are at or below what is asked (−0.04 to 0). So this is the family's
+    load profile against real contact — a half-sine that ends exactly at the duty — as
+    much as the tracker.
+  - *L1 passes* (1 fall in 128 environments). *L1b fails:*
+    - speed ratio 0.84 deployed and 0.86 on the true state, against round 2's 1.04–1.06;
+    - 4 falls in 64 deployed.
+
+    The walk teacher's own gait is asymmetric (duty 0.92 / 0.86), and the average mixes
+    in the tracker's answer to its mirror image, a walk it never practised. Training
+    toward the mirror (round 3) practises both.
+- **G1 round 3, pre-registered before training** — the last RL round on the G1:
+  - *Run:* round 2 resumed for 1000 iterations with every minibatch doubled by its mirror
+    image (rsl-rl's symmetry augmentation; `HUMANOID_SYMMETRY=1`), and deployed
+    symmetrized.
+  - *Choosing the G1's tracker,* between round 3 and round 2 symmetrized:
+    1. the one whose first failing level comes later in the ladder (L1, L1b, L2, L4);
+    2. then the one that passes more levels;
+    3. on a tie, round 3.
+
+    The chosen tracker is frozen for the NAO's evaluation and the blind test.
+  - *The augmentation, stopped at iteration 160 of 1000.* Training was getting worse
+    against round 2:
+    - action `σ` rose from 1.02 to 1.18;
+    - the surrogate loss went from −0.01 to +0.11;
+    - the policy grew *less* equivariant: the logged mirror error went 0.23 → 0.46, and the
+      legs' from 0.20 to 0.36.
+
+    The mechanism is PPO's. A reflected sample keeps the original's advantage and old
+    log-probability, so its importance ratio is `π(P a | M o) / π(a | o) ≈ exp(−Σ d² / 2σ²)`
+    for an asymmetry `d`. For a trained, asymmetric policy that is nearly zero, and the
+    clipped objective can then only widen `σ`, never move the means. Augmentation suits a
+    policy trained from scratch, which is symmetric from the start (Mittal et al. train
+    so); this one is warm-started.
+  - *Round 3 is run with the mirror loss instead:* `‖π(M o) − P π(o)‖²` on the action
+    means, weight 1 (`HUMANOID_SYMMETRY=loss`). Everything else — iterations, the
+    selection rule — is unchanged. The stopped run stays in
+    `logs/rsl_rl/g1_track/2026-10-14_15-20-31_zs_g1_r3`.
+- **G1 round 3** (`2026-10-14_15-38-39_zs_g1_r3_loss`, model_6194, deployed symmetrized;
+  `*_r3_6194_sym*.json`):
+  - *Training:* the mirror error fell from 0.20 to 0.019, `σ` stayed at 1.02–1.11, and
+    the contract reward ended at 2.74 (round 2: 2.64).
+  - *L1 passes:* 1 fall in 256 episodes, use 0.006.
+  - *Map:* grid 39 of 61 (26 for round 2, 32 for round 2 symmetrized), manoeuvres 6 of 6,
+    left minus right duty −0.004.
+  - *L2 passes:* all four twins, duty within 2.8–7.8 %. The stance that symmetrizing alone
+    had lengthened is learned back.
+  - *L1b fails on its letter, as round 2 did:*
+    - what the tracker controls passes on every path: falls 0, 0 and 1 in 64; speed ratio
+      0.97–1.04; use 0.05–0.06;
+    - stride and period on the deployed path are 23 % off, against round 12's 6 % and 5 %
+      plus 5 points. That is the walk generator's chain bias (§7.1), now followed.
+  - *L3 fails:* 15 falls in 129 episodes, use 0.66. L3 reads the true state with the
+    published contract's noise, the 8.8-fold one discussed under L4 above. Open: whether
+    it fails at the tracker's own training noise.
+  - *L4 (amended) passes at every command:* no falls, plans used (0.27–0.30), speed 1.09,
+    1.06 and 1.16, stride 1.7–5.2 %, period 3.8–5.3 %, duty 0.7–8.4 %.
+- **The G1's tracker, by the pre-registered rule:** both candidates first fail at L1b;
+  round 3 passes three levels (L1, L2, L4), round 2 symmetrized two (L1, L4). Round 3 it
+  is, deployed symmetrized, with its refitted encoder (`walk_zs_g1_r3_6194_sym`). Frozen.
+- **The G1 passes L4**, the condition for the NAO's round. The task side used for it —
+  the published generator with task-side DAgger for its starts, `flat_dagger2` — is
+  frozen with it.
+- **The NAO's mirror** (`nao/body/mirror.json`), recorded with the right hip yaw-pitch as
+  the left's mimic:
+  - *Legs:* exact, residual ~1e-4 against 2.0 for the other sign.
+  - *Arms:* clear but not exact, residual 8–36 % of the move against 170–200 %. The
+    model's arm links are not mirror images: its default pose reflects onto itself joint
+    by joint, yet differs by 3.3 cm in its links.
+- **NAO round 1** (`2026-10-14_19-59-50_zs_nao_r1`, model_3498, deployed symmetrized;
+  `*_nao_r1_3498_sym*.json`). Crouch 2 resumed for 2000 iterations with the G1's final
+  recipe: 70 % procedural, octave likelihood, mirror loss. Nothing of the G1, and nothing
+  of the published tasks, was trained.
+  - *Training:* mirror error 0.07 → 0.015; contract reward still rising at the end (2.38);
+    96 % of episodes time out.
+  - *L1 passes:* 1 fall in 256 episodes.
+  - *Map, against the walk-only NAO (`nao2`):*
+    - grid 6 → 33 of 57;
+    - manoeuvres 0 → 6 of 6;
+    - twins 0 → 1 of 4 — the other two flat twins fail on the right foot's duty alone,
+      +10 and +13 %;
+    - left-right duty gap −0.037 → −0.009;
+    - grid stance excess +0.138 → +0.039.
+  - *L1b fails on its letter.* On the deployed walk: speed ratio 1.33, stride −4 %,
+    period −27 %. On the autonomous path the ratio is 1.00.
+  - *L3 fails* (31 falls in 134 episodes), with the true-state noise caveat of the G1's.
+- **L4 on the NAO — the published G1 gait, zero-shot on another body.** The generator was
+  trained on the G1 alone, and the NAO's encoder and tracker are frozen.
+  - *Every command:* no falls, plans used (0.42–0.47), speed 1.04–1.11 times the policy's
+    in `V`, stride 1.6–8.1 %, period 1.4–2.6 %.
+  - *As pre-registered, gate C fails on the duty alone:* stances 13–19 % longer than the
+    published policy's.
+- **Where the NAO's longer stance comes from, measured offline:**
+  - *Not the generator, and not the transfer.* Asked on the NAO, the frozen generator's
+    plans have duty 0.526/0.578, against 0.488/0.544 on the G1. The G1's own plans,
+    resampled onto the NAO's grid, give 0.525/0.581: the same gait, seen at a different
+    rate.
+  - *The control rate.* The NAO's control step is 0.126 `T` against the G1's 0.077 — 1.62
+    times coarser in body time. The published gait's swing of about 0.5 `T` is 4 of the
+    NAO's steps, and on that grid each stance spans more samples.
+  - *The tracker adds 1–5 points of duty* on top of what it is asked.
+  - *Against what the NAO can represent* — the published policy's own gait resampled to
+    the NAO's control rate — the NAO is within 10 % on every criterion at every command:
+    duty 0.6–7.6 %, period 1.6–2.5 %, stride 1.8–8.5 %.
+  - This comparison is post hoc. It is reported beside the pre-registered verdict and does
+    not replace it.
+- **Pre-registered for the blind test**, before any of the rough policy's data is
+  captured: across bodies, gate C compares a body with the teacher's gait measured at
+  that body's control rate (resampled in body time). Both verdicts are reported — this
+  one and the teacher's own-grid one — and the teacher's own grid stays the rule within
+  one body.
+- **The NAO's tracker is frozen** at round 1, deployed symmetrized: the duty gap is the
+  control rate, which no tracker round can change. The second NAO round allowed by the
+  protocol is not used.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates
@@ -928,3 +1372,14 @@ gait.
   cross-embodiment robot control. arXiv:2601.15419.
 - CrossBFM (2026), arXiv:2609.38087; PHASOR (2026), arXiv:2606.01851;
   H-Zero (2025), arXiv:2512.00971.
+- Caron, S., Escande, A., Lanari, L. and Mallein, B. (2019). Capturability-based
+  pattern generation for walking with variable height. *IEEE T-RO*.
+- Geirhos, R. et al. (2020). Shortcut learning in deep neural networks. *Nature
+  Machine Intelligence*.
+- Jiang, M., Grefenstette, E. and Rocktäschel, T. (2021). Prioritized level replay. *ICML*.
+- Kakade, S. and Langford, J. (2002). Approximately optimal approximate reinforcement
+  learning. *ICML*.
+- Munos, R. (2003). Error bounds for approximate policy iteration. *ICML*.
+- Portelas, R., Colas, C., Hofmann, K. and Oudeyer, P.-Y. (2019). Teacher algorithms for
+  curriculum learning of deep RL in continuously parameterized environments. *CoRL*.
+- Raibert, M. H. (1986). *Legged robots that balance*. MIT Press.

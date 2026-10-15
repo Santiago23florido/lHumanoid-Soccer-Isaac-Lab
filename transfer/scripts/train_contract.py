@@ -136,6 +136,13 @@ def main() -> int:
     parser.add_argument("--chain-plans", type=int, default=6, help="Plans per chain.")
     parser.add_argument("--chain-starts", type=int, default=8192, help="Chains per round.")
     parser.add_argument("--chain-epochs", type=int, default=300, help="Epochs after each round.")
+    parser.add_argument(
+        "--chain-constraint",
+        choices=("calibration", "data"),
+        default="calibration",
+        help="What the chains' weight is held by: the plans' timing calibration against its "
+        "gate, or the held-out data loss within twice its own error (too tight to move).",
+    )
     parser.add_argument("--samples", type=int, default=32)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -223,6 +230,25 @@ def main() -> int:
             generator, start, command, sigma, 900, clock.commit, dt_star, teacher_z, args.seed
         )
 
+    events = contact_events(streams)
+    gait_events = contact_events(gait)
+    population = population_scores(
+        event_categories(events, train_steps, clock.horizon), clock.horizon
+    )
+    # The calibration gate's own measurement, on a fixed quarter of the held-out
+    # steps with fewer samples: cheap enough to check during training.
+    check_steps = val_steps[
+        torch.randperm(len(val_steps), generator=torch.Generator().manual_seed(args.seed))[
+            : max(1, len(val_steps) // 4)
+        ].to(val_steps.device)
+    ]
+
+    def calibration() -> float:
+        block = evaluate_generator(
+            generator, streams, check_steps, events, population, None, samples=16, seed=args.seed
+        )
+        return float(max(block["calibration_error"]))
+
     started = time.time()
     history = train_generator(streams, train_steps, generator, args.noise_scale * sigma, config)
     chain = ChainConfig(
@@ -242,17 +268,13 @@ def main() -> int:
             chain,
             fidelity,
             val_steps,
+            calibration if args.chain_constraint == "calibration" else None,
+            CALIBRATION_LIMIT,
         )
         print(f"[chains] {chain_log[-1]}")
     seconds = time.time() - started
     tolerance = fit_tolerance(generator, streams, val_steps, sigma, seed=args.seed)
     print(f"[generator] {seconds:.0f} s, final {history[-1]}")
-
-    events = contact_events(streams)
-    gait_events = contact_events(gait)
-    population = population_scores(
-        event_categories(events, train_steps, clock.horizon), clock.horizon
-    )
 
     def measure(on, steps, labels, noise):
         return evaluate_generator(

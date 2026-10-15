@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # The task side's correction after the blind test (transfer/docs/skill_space.md §8.4).
 #
-#   transfer/scripts/chain_study.sh step1
+#   transfer/scripts/chain_study.sh <step1|stepA>
 #
 # step1  the published policies' generators retrained with training on their own chains
 #        (Data as Demonstrator): rough_dad and flat_dad, on the data of rough_dagger2 and
-#        flat_dagger2, the G1's frozen encoder. Each reports its chain gate.
+#        flat_dagger2, the G1's frozen encoder, the chains held by the data loss's own error.
+# stepA  the same, the chains held by the plans' timing calibration against its gate instead:
+#        rough_dadA and flat_dadA. Each reports its chain fidelity.
 set -euo pipefail
 
 stage="${1:-step1}"
@@ -27,9 +29,15 @@ train() {
     | tee -a "$status"
 }
 
+if [ "$stage" = stepA ]; then
+  echo "stepA start $(date +%H:%M)" >> "$status"
+  train rough_dadA rough --data g1/rollouts/rough_dagger_1.npz --data g1/rollouts/rough_dagger_2.npz     --chain-constraint calibration
+  train flat_dadA flat --data g1/rollouts/flat_dagger_1.npz --data g1/rollouts/flat_dagger_2.npz     --chain-constraint calibration
+  echo "stepA done $(date +%H:%M)" >> "$status"
+fi
 if [ "$stage" = step1 ]; then
   echo "step1 start $(date +%H:%M)" >> "$status"
-  train rough_dad rough --data g1/rollouts/rough_dagger_1.npz --data g1/rollouts/rough_dagger_2.npz
-  train flat_dad flat --data g1/rollouts/flat_dagger_1.npz --data g1/rollouts/flat_dagger_2.npz
+  train rough_dad rough --data g1/rollouts/rough_dagger_1.npz --data g1/rollouts/rough_dagger_2.npz     --chain-constraint data
+  train flat_dad flat --data g1/rollouts/flat_dagger_1.npz --data g1/rollouts/flat_dagger_2.npz     --chain-constraint data
   echo "step1 done $(date +%H:%M)" >> "$status"
 fi

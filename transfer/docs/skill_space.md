@@ -1408,6 +1408,18 @@ Limits and stopping rules:
     noise the encoder sets, not only on the method.
   - *Nothing in use changed.* No generator was replaced: the G1 and the NAO keep
     `flat_dagger2`.
+- **Option A, chosen on review, pre-registered before it runs.** Constrain what matters,
+  not the raw loss: the chains' weight is held by the plans' timing calibration against
+  the gate every generator has had from the start (`--chain-constraint calibration`).
+  - *How:* the multiplier follows dual ascent on the calibration measured every 25 epochs,
+    on a fixed quarter of the held-out steps.
+  - *Room:* calibration is at 0.01–0.02 against the gate's 0.05.
+  - *A measurement bug fixed with it:* the chain and calibration measurements reseeded the
+    generator's random state mid-training. They now run isolated.
+  - *It works if,* on the same terms as step 1, rough's chain score improves on its value
+    before chain training by more than twice their combined standard error, flat's does
+    not get worse by as much, and both keep the calibration gate.
+  - *Before any generator in use is replaced,* flat must pass L4 on both bodies again.
 
 ## What this stage hands to the next
 

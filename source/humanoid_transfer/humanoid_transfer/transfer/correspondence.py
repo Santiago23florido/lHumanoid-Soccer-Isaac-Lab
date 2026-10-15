@@ -69,6 +69,60 @@ TEACHER_JOINTS: dict[str, tuple[str, ...]] = {
     "elbow_flexion": ("left_elbow_pitch_joint", "right_elbow_pitch_joint"),
 }
 
+# Sign to apply to a teacher angle to express it in the student's convention,
+# per role and per side. A name map is not enough: the two robots disagree about
+# which direction is positive for one of these joints, and the disagreement is
+# systematic rather than arbitrary.
+#
+# In the NAO's URDF the left and right axis vectors are *identical* -- both
+# ``LElbowRoll`` and ``RElbowRoll`` rotate about ``+z`` -- and the mirroring
+# lives in the rotated origin of the parent link. So the same positive rotation
+# produces opposite anatomical motions on the two sides, which is visible in the
+# limits: roll and yaw joints have negated ranges across sides,
+#
+#     LElbowRoll     [-1.545, -0.035]      RElbowRoll     [+0.035, +1.545]
+#     LShoulderRoll  [-0.314, +1.326]      RShoulderRoll  [-1.326, +0.314]
+#     LHipRoll       [-0.379, +0.790]      RHipRoll       [-0.790, +0.379]
+#
+# while pitch joints, whose axis lies in the sagittal plane and is shared, have
+# identical ranges across sides,
+#
+#     LKneePitch     [-0.092, +2.113]      RKneePitch     [-0.092, +2.113]
+#
+# A sign is required exactly where the two robots place the same motion on axes
+# of *different mirroring class*. That happens once: the NAO puts elbow flexion
+# on a roll axis (mirrored) and the G1 puts it on a pitch axis (not mirrored).
+# The captured teacher gait shows both of its elbows flexing positive,
+# ``left_elbow_pitch_joint`` in [+0.830, +0.910] and the right in
+# [+0.825, +0.909], so copying the angle across unsigned lands inside
+# ``RElbowRoll`` and outside ``LElbowRoll`` for every sample.
+#
+# This is the same root cause as the naming error above, one level deeper: the
+# names were corrected to match the motion, but matching the motion is not
+# enough when the sign conventions for that motion differ.
+JOINT_SIGN: dict[str, tuple[float, ...]] = {
+    "hip_yaw": (1.0,),
+    "hip_roll": (1.0, 1.0),
+    "hip_pitch": (1.0, 1.0),
+    "knee_pitch": (1.0, 1.0),
+    "ankle_pitch": (1.0, 1.0),
+    "ankle_roll": (1.0, 1.0),
+    "shoulder_pitch": (1.0, 1.0),
+    "shoulder_roll": (1.0, 1.0),
+    "upper_arm_yaw": (1.0, 1.0),
+    "elbow_flexion": (-1.0, 1.0),
+}
+"""Per-side sign from the teacher's convention to the student's.
+
+Only ``elbow_flexion`` is not the identity, for the reason derived above. The
+entries that are ``1.0`` are not all equally well established: a joint whose
+range is symmetric about zero, such as ``LShoulderPitch`` at
+:math:`\\pm 2.086`, admits either sign without ever leaving its limits, so a
+reachability check cannot reveal a sign error there. For those joints the
+evidence is the matching mirroring class, not the measurement, and
+:mod:`feasibility` says so where it reports.
+"""
+
 EXPECTED_UNMAPPED = (
     "torso_joint",
     "left_elbow_roll_joint",
@@ -105,6 +159,33 @@ def is_hand_joint(name: str) -> bool:
     """
     ordinals = ("zero", "one", "two", "three", "four", "five", "six")
     return any(f"_{ordinal}_joint" in name for ordinal in ordinals)
+
+
+def signed_channels() -> tuple[tuple[str, str, float], ...]:
+    """Every mapped joint as ``(teacher_joint, student_joint, sign)``.
+
+    The flat form the retargeting needs: one entry per commanded student joint
+    that has a teacher counterpart, carrying the sign from :data:`JOINT_SIGN`
+    so a caller cannot copy an angle across while forgetting the convention.
+
+    Returns 19 entries minus the unpaired ones -- the NAO's single
+    ``LHipYawPitch`` takes the teacher's left hip yaw and the teacher's right
+    hip yaw has no destination, which :class:`Correspondence` reports as an
+    asymmetric role.
+    """
+    channels: list[tuple[str, str, float]] = []
+    for role in sorted(set(STUDENT_JOINTS) & set(TEACHER_JOINTS)):
+        student = STUDENT_JOINTS[role]
+        teacher = TEACHER_JOINTS[role]
+        signs = JOINT_SIGN[role]
+        if len(signs) != len(student):
+            raise ValueError(
+                f"role {role!r} has {len(student)} student joints but {len(signs)} signs"
+            )
+        for side, student_joint in enumerate(student):
+            if side < len(teacher):
+                channels.append((teacher[side], student_joint, signs[side]))
+    return tuple(channels)
 
 
 @dataclass(frozen=True)
@@ -149,9 +230,7 @@ def build_correspondence() -> Correspondence:
     student_only = tuple(sorted(set(STUDENT_JOINTS) - set(TEACHER_JOINTS)))
     teacher_only = tuple(sorted(set(TEACHER_JOINTS) - set(STUDENT_JOINTS)))
     asymmetric = tuple(
-        role
-        for role in shared
-        if len(STUDENT_JOINTS[role]) != len(TEACHER_JOINTS[role])
+        role for role in shared if len(STUDENT_JOINTS[role]) != len(TEACHER_JOINTS[role])
     )
     return Correspondence(
         roles=shared,
@@ -201,10 +280,12 @@ def unexpected_unmapped_joints(teacher_joint_names: list[str]) -> list[str]:
 __all__ = [
     "Correspondence",
     "EXPECTED_UNMAPPED",
+    "JOINT_SIGN",
     "STUDENT_JOINTS",
     "TEACHER_JOINTS",
     "build_correspondence",
     "is_hand_joint",
+    "signed_channels",
     "unexpected_unmapped_joints",
     "unmapped_teacher_joints",
 ]

@@ -257,3 +257,24 @@ def test_foot_bodies_are_the_links_that_survive_the_fixed_frame_merge() -> None:
         assert model.links[body].mass > 0.0
     for sole in nk.SOLE_FRAMES:
         assert model.links[sole].mass == 0.0
+
+
+def test_the_transfer_limit_table_matches_the_urdf() -> None:
+    """``transfer.feasibility`` reproduces these limits rather than parsing.
+
+    Reproducing them keeps the transfer package independent of the student's
+    URDF, at the cost of a table that can drift. This test is the thing that
+    stops it drifting: the reachability criterion is only as good as the
+    numbers it compares against, and a stale bound fails open -- it reports
+    everything reachable, which is exactly the mask-that-does-nothing failure
+    the criterion replaced.
+    """
+    from humanoid_transfer.transfer.feasibility import STUDENT_JOINT_LIMITS
+
+    model = nk.load_model()
+    urdf = {joint.name: joint for joint in model.joints}
+
+    assert set(STUDENT_JOINT_LIMITS) == set(nk.ACTUATED_JOINTS)
+    for name, (lower, upper) in STUDENT_JOINT_LIMITS.items():
+        assert urdf[name].lower == pytest.approx(lower, abs=1e-6), name
+        assert urdf[name].upper == pytest.approx(upper, abs=1e-6), name

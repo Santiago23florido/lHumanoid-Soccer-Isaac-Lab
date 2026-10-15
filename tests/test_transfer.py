@@ -21,18 +21,22 @@ from humanoid_transfer.common.capturability import (
 from humanoid_transfer.g1.assets.g1 import SOURCE_ROBOT, describe_source_robot
 from humanoid_transfer.transfer.correspondence import (
     EXPECTED_UNMAPPED,
+    JOINT_SIGN,
     STUDENT_JOINTS,
     TEACHER_JOINTS,
     build_correspondence,
     is_hand_joint,
+    signed_channels,
     unexpected_unmapped_joints,
     unmapped_teacher_joints,
 )
 from humanoid_transfer.transfer.distillation import DistillationCfg, TeacherSignal
 from humanoid_transfer.transfer.feasibility import (
-    StudentEnvelope,
-    feasible_fraction,
-    imitation_mask,
+    STUDENT_JOINT_LIMITS,
+    StandingEnvelope,
+    joint_reachability,
+    reachability_mask,
+    standing_margin,
 )
 
 # --- the theory, stated for any robot ---------------------------------------
@@ -89,7 +93,7 @@ def test_a_ray_from_outside_the_polygon_is_rejected() -> None:
 
 def test_the_capturable_bound_is_direction_dependent_by_a_factor_near_1_87() -> None:
     """The anisotropy is the reason direction-blind curricula and transfers fail."""
-    low, high = StudentEnvelope().extremes()
+    low, high = StandingEnvelope().extremes()
     assert low == pytest.approx(0.443, abs=2e-3)
     assert high == pytest.approx(0.827, abs=2e-3)
     assert high / low == pytest.approx(1.87, abs=0.01)
@@ -103,7 +107,7 @@ def test_the_extremes_are_exact_rather_than_sampled() -> None:
     against the best a fine sweep can do, so the summary statistic cannot
     silently drift back to a sampled one.
     """
-    envelope = StudentEnvelope()
+    envelope = StandingEnvelope()
     _, exact = envelope.extremes()
     sweep = max(envelope.bound(2.0 * math.pi * i / 360) for i in range(360))
     assert sweep < exact
@@ -111,13 +115,13 @@ def test_the_extremes_are_exact_rather_than_sampled() -> None:
 
 
 def test_the_weakest_direction_is_backwards() -> None:
-    envelope = StudentEnvelope()
+    envelope = StandingEnvelope()
     assert envelope.bound(math.pi) < envelope.bound(0.0)
     assert envelope.bound(math.pi) < envelope.bound(math.pi / 2.0)
 
 
 def test_generalised_and_directional_helpers_agree() -> None:
-    envelope = StudentEnvelope()
+    envelope = StandingEnvelope()
     direct = capturable_velocity_in_direction(
         0.0,
         com_xy=envelope.com_xy,
@@ -198,28 +202,161 @@ def test_a_joint_the_map_names_but_the_robot_lacks_is_a_defect() -> None:
 # --- feasibility -------------------------------------------------------------
 
 
-def test_a_slow_forward_velocity_is_fully_feasible() -> None:
-    mask = imitation_mask(np.array([[0.1, 0.0]]))
-    assert mask[0] == pytest.approx(1.0)
+TEACHER_ARM_NAMES = ["left_elbow_pitch_joint", "right_elbow_pitch_joint"]
 
 
-def test_a_velocity_past_the_backward_bound_is_masked_out() -> None:
-    """0.6 m/s backward exceeds the 0.443 m/s bound, so the teacher is ignored."""
-    fraction = feasible_fraction(np.array([[-0.6, 0.0]]))
-    assert fraction[0] > 1.0
-    assert imitation_mask(np.array([[-0.6, 0.0]]))[0] == pytest.approx(0.0)
+def test_the_nao_elbow_cannot_straighten() -> None:
+    """The fact the whole reachability criterion rests on.
+
+    Zero is outside both elbow ranges, so a straight-arm teacher pose is not
+    something the student is merely bad at -- it is unreachable.
+    """
+    assert STUDENT_JOINT_LIMITS["LElbowRoll"] == (-1.54462, -0.0349066)
+    assert STUDENT_JOINT_LIMITS["RElbowRoll"] == (0.0349066, 1.54462)
+    for joint in ("LElbowRoll", "RElbowRoll"):
+        lower, upper = STUDENT_JOINT_LIMITS[joint]
+        assert not lower <= 0.0 <= upper
 
 
-def test_the_same_speed_is_feasible_forward_and_not_backward() -> None:
-    """The whole point of a direction-aware mask, in one assertion."""
-    speed = 0.50
-    assert imitation_mask(np.array([[speed, 0.0]]))[0] > 0.0
-    assert imitation_mask(np.array([[-speed, 0.0]]))[0] == pytest.approx(0.0)
+def test_the_teacher_elbow_angle_is_reachable_on_both_sides() -> None:
+    """The captured gait flexes both elbows to about +0.87 rad.
+
+    With the sign applied this lands inside both NAO elbow ranges. Without it
+    the left side is outside for every sample, which is the defect the sign
+    exists to fix -- pinned by the next test.
+    """
+    angles = np.full((16, 2), 0.87)
+    reach = joint_reachability(angles, TEACHER_ARM_NAMES)
+    assert not reach.any_outside.any()
+    assert reachability_mask(angles, TEACHER_ARM_NAMES) == pytest.approx(1.0)
 
 
-def test_the_mask_rejects_a_margin_outside_the_unit_interval() -> None:
-    with pytest.raises(ValueError, match="margin"):
-        imitation_mask(np.array([[0.1, 0.0]]), margin=1.5)
+def test_dropping_the_elbow_sign_makes_the_left_arm_unreachable() -> None:
+    """Regression: the bug was invisible without this.
+
+    A name-only map sends +0.87 rad to ``LElbowRoll``, whose range is
+    [-1.545, -0.035]. Every sample is outside, by 0.905 rad. Nothing raises --
+    the command would simply clamp, holding the left arm straight and the right
+    at 50 degrees of flexion, asymmetrically and silently.
+    """
+    assert JOINT_SIGN["elbow_flexion"] == (-1.0, 1.0)
+
+    unsigned = np.full((16, 2), 0.87)
+    reach = joint_reachability(unsigned * np.array([-1.0, 1.0]), TEACHER_ARM_NAMES)
+    left = reach.joint_names.index("LElbowRoll")
+    assert reach.outside[:, left].all()
+    assert float(np.abs(reach.excess[:, left]).max()) == pytest.approx(0.905, abs=1e-3)
+
+
+def test_every_signed_channel_names_a_joint_with_a_known_limit() -> None:
+    """A channel pointing at a joint with no limit would skip the check."""
+    for teacher_joint, student_joint, sign in signed_channels():
+        assert student_joint in STUDENT_JOINT_LIMITS
+        assert teacher_joint.endswith("_joint")
+        assert sign in (-1.0, 1.0)
+
+
+def test_the_hip_yaw_asymmetry_drops_a_teacher_joint_not_a_student_one() -> None:
+    """Every student joint gets a channel; one teacher joint has no destination.
+
+    The NAO drives both hips from a single motor, so ``RHipYawPitch`` is mimic
+    driven and never commanded -- it is not a channel that went missing. What
+    is missing is a destination for the teacher's *right* hip yaw, which is why
+    ``build_correspondence`` reports ``hip_yaw`` as asymmetric rather than
+    reporting a count mismatch.
+    """
+    channels = signed_channels()
+    assert len(channels) == 19
+
+    students = [student for _, student, _ in channels]
+    assert "LHipYawPitch" in students
+    assert "RHipYawPitch" not in students
+    assert len(set(students)) == 19
+
+    teachers = [teacher for teacher, _, _ in channels]
+    assert "left_hip_yaw_joint" in teachers
+    assert "right_hip_yaw_joint" not in teachers
+    assert "hip_yaw" in build_correspondence().asymmetric
+
+
+def test_reachability_says_nothing_about_velocity_or_stepping() -> None:
+    """The division the module now keeps.
+
+    A configuration well inside every joint range is fully weighted no matter
+    how fast the robot is moving through it. Whether that state is survivable
+    is the student objective's problem, not a weight's.
+    """
+    angles = np.full((4, 2), 0.87)
+    assert reachability_mask(angles, TEACHER_ARM_NAMES) == pytest.approx(1.0)
+
+
+def test_the_reachability_weight_ramps_rather_than_cliffs() -> None:
+    """A gradient through a cliff is worse behaved than one through a ramp."""
+    tolerance = 0.05
+    lower, _ = STUDENT_JOINT_LIMITS["RElbowRoll"]
+    # The left column must stay reachable, or it becomes the worst joint and
+    # drives the weight instead of the one under test.
+    half = np.array([[0.87, lower - tolerance / 2.0]])
+    past = np.array([[0.87, lower - tolerance * 2.0]])
+    assert reachability_mask(half, TEACHER_ARM_NAMES, tolerance)[0] == pytest.approx(0.5, abs=1e-6)
+    assert reachability_mask(past, TEACHER_ARM_NAMES, tolerance)[0] == 0.0
+
+
+def test_reachability_rejects_a_nonpositive_tolerance() -> None:
+    with pytest.raises(ValueError, match="tolerance"):
+        reachability_mask(np.zeros((2, 2)), TEACHER_ARM_NAMES, tolerance=0.0)
+
+
+def test_reachability_rejects_names_from_the_wrong_robot() -> None:
+    """Silently checking nothing is the failure mode worth preventing."""
+    with pytest.raises(ValueError, match="do not look like"):
+        joint_reachability(np.zeros((2, 2)), ["LHipPitch", "RHipPitch"])
+
+
+def test_symmetric_ranges_are_flagged_as_blind_to_a_sign_error() -> None:
+    """Honesty about what a clean report does not prove."""
+    reach = joint_reachability(
+        np.zeros((4, 2)),
+        ["left_shoulder_pitch_joint", "right_shoulder_pitch_joint"],
+    )
+    assert set(reach.sign_blind) == {"LShoulderPitch", "RShoulderPitch"}
+
+
+# --- capturability is instrumentation, not a constraint ----------------------
+
+
+def test_the_standing_margin_is_reported_not_enforced() -> None:
+    """``standing_margin`` returns a measurement and has no masking behaviour.
+
+    A state past the zero-step bound returns a fraction above 1.0 rather than a
+    weight of zero. For a walking gait that condition is normal: the DCM has to
+    leave the current polygon for the next step to mean anything.
+    """
+    margin = standing_margin(np.array([[-0.6, 0.0]]))
+    assert margin[0] > 1.0
+    assert not hasattr(standing_margin, "margin")
+
+
+def test_the_captured_teacher_gait_never_approaches_the_standing_bound() -> None:
+    """Why the old zero-step mask was inert as well as misdirected.
+
+    At the Froude-matched speed the teacher uses at most 0.56 of the standing
+    envelope, so a mask decaying from 0.9 never engaged on a single one of the
+    12 800 captured samples. These are the scaled velocities, reproduced here
+    as a closed form rather than loaded, so the test runs without the archive.
+    """
+    scale = 0.15 / 0.2488
+    for teacher_speed in (0.20, 0.2488, 0.30):
+        margin = standing_margin(np.array([[teacher_speed * scale, 0.0]]))
+        assert margin[0] < 0.9
+
+
+def test_the_single_support_polygon_is_much_tighter_than_double() -> None:
+    """The envelope's default describes a pose a walking robot is not in."""
+    double = StandingEnvelope()
+    single = StandingEnvelope(polygon_y=(-0.0526, 0.0397))
+    lateral = math.pi / 2.0
+    assert double.bound(lateral) / single.bound(lateral) == pytest.approx(2.58, abs=0.01)
 
 
 # --- distillation configuration ---------------------------------------------

@@ -22,11 +22,15 @@ Copying the teacher's speed asks the student to move at roughly 1.7 times its
 dynamically similar pace; copying its joint angles gives a different posture,
 because equal angles on unequal segments do not give equal geometry.
 
-**Feasibility.** A gait the G1 executes comfortably can imply centre-of-mass
-states outside the NAO's capturable envelope in some directions and well inside
-it in others — a factor of **1.87** between its weakest and strongest direction.
-There the teacher is not hard to follow; it is asking for something no
-controller on that body can do.
+**Feasibility.** The NAO's elbow cannot straighten: `LElbowRoll` spans
+[−1.545, −0.035] and `RElbowRoll` spans [+0.035, +1.545], so zero is in neither
+range. There the teacher is not hard to follow; it is asking for a configuration
+that body cannot occupy, and no amount of training buys it.
+
+The question has to be *can the student's body occupy this state*, not *would it
+handle this state well*. The first is a property of the robot. The second is the
+thing being learned, and discounting the teacher by it teaches the student to
+avoid the skill.
 
 So a faithful copy of the teacher is the wrong target, and the research question
 is what the right one is.
@@ -47,27 +51,57 @@ Three candidate signals, in decreasing order of information:
 The publishable content is the comparison, not any one of them working. A
 negative result would be equally informative and is a real possibility.
 
-## The feasibility mask
+## The reachability mask
 
 ```
 L = λ_task · L_task  +  λ_im · w(s) · L_imitate
 ```
 
-`w(s)` is full where the teacher asks for something comfortably inside the
-student's capturable envelope and decays to zero at the boundary.
+`w(s)` is full while every mapped joint sits inside the NAO's range and decays to
+zero as the worst joint goes 0.05 rad past its bound. It constrains the **body**
+and carries no term about stepping, contact or velocity — those are things the
+student can physically do, so they belong to `L_task` and to the dynamics.
 
-This comes directly from the balance work, which found that a *penalty* prices a
-behaviour while only a *constraint* removes it: soft foot penalties left 51 of
-51 policies stepping, and only a hard termination stopped it. Whether that
-carries from a reward term to a loss weight is an open question, and the
-hard-cut variant is the control condition.
+Run it against a rollout before training on it:
+
+```bash
+python transfer/scripts/check_reachability.py
+```
+
+### This replaced a zero-step capturability mask
+
+That mask weighted the teacher by whether the implied student state could be
+brought to rest without stepping. It was inherited from the balance task, where
+it is correct — "recover without stepping" *is* what that task poses.
+
+Here it is wrong, structurally. Walking *is* the DCM diverging from the current
+support polygon, `ξ̇ = ω₀(ξ − p)`, with the next footstep moving `p`. A state
+needing a step is not infeasible, it is a *walking* state. The mask measured how
+close to standing still the teacher was and discounted it exactly where it was
+demonstrating the skill.
+
+It was also inert. On 12 800 captured samples at the Froude-matched speed the
+capturable fraction peaked at 0.564, so a mask decaying from 0.9 down-weighted
+**0 of 12 800**. It would not bite until 0.493 m/s, 3.3× the experiment's speed
+— and it used the double-stance polygon while a walking robot is in single
+support most of the time, making it 2.58× too generous laterally.
+
+The balance finding that a *penalty* prices a behaviour while only a
+*constraint* removes it — 51 of 51 policies stepping under soft penalties —
+still stands. It is a finding about that task. Importing its criterion into a
+task whose objective is the opposite was the error.
+
+Capturability survives as instrumentation: `feasibility.standing_margin` reports
+the margin a learned gait *chose* to keep. Requiring it would make the same
+number an assumption.
 
 ## What is implemented
 
 | Module | State |
 | --- | --- |
-| `correspondence.py` | Role map done and tested. Value map deliberately absent — it is the experiment. |
-| `feasibility.py` | Done, tested. Masks the teacher where it exceeds the student's envelope. |
+| `correspondence.py` | Role map and sign done and tested. Scale map deliberately absent — it is the experiment. |
+| `feasibility.py` | Reachability done and tested. Torque feasibility not implemented. |
+| `scripts/check_reachability.py` | Done. Caught a sign error that affected 100% of samples. |
 | `distillation.py` | Configuration only. The loss terms need the student environment first. |
 | Student walking task | **Not started.** The critical path. |
 
@@ -82,8 +116,12 @@ Code lives in `source/humanoid_transfer/humanoid_transfer/transfer/`.
 
 1. **Teacher.** Train `G1Walk-Teacher-v0` to a stable gait. Unblocked.
 2. **Rollout capture.** Record joint states, CoM, centroidal momentum, contacts.
-3. **Student task.** A NAO *walking* environment. Does not exist; the balance
-   task is not one, and its zero-step termination is exactly wrong for a gait.
+3. **Student task.** A NAO *walking* environment. Does not exist. It must be a
+   new task rather than a variant of the balance one, whose zero-step
+   termination defines it and is exactly wrong for a gait. The objective is
+   open — track the command, do not fall — with no condition on whether, when
+   or how the student steps. Whether a gait emerges is the question, so it
+   cannot be an input.
 4. **Baseline.** Train the student with `λ_im = 0`. Without this number none of
    the comparisons mean anything, and it is the one most likely to be skipped.
 5. **The comparison.** Three signals × masked/unmasked × 3 seeds.

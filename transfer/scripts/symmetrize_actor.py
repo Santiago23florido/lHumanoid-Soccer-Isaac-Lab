@@ -85,7 +85,7 @@ def main() -> int:
     parser.add_argument("actor", type=Path, help="An exported TorchScript actor.")
     parser.add_argument("--mirror", type=Path, required=True, help="The body's measure_mirror.py.")
     parser.add_argument("--contract", type=Path, required=True, help="Fixes the plan's units.")
-    parser.add_argument("--view", type=int, default=None, help="Default: the contract's.")
+    parser.add_argument("--view", type=int, default=None, help="Default: from the actor's width.")
     parser.add_argument(
         "--body",
         choices=("g1", "nao"),
@@ -103,7 +103,16 @@ def main() -> int:
 
         names = list(ACTUATED_JOINTS)
     contract = load_contract(args.contract)
-    view = args.view or contract.generator.view
+    actor = torch.jit.load(str(args.actor), map_location="cpu").eval()
+    imu = args.body == "nao"
+    # The view is the tracker's, counted on its own body's grid, not the generator's: the
+    # NAO's control step is longer in body time, and it sees 4 of the plan's samples where
+    # the G1 sees 8. It follows from the actor's input width.
+    width = int(actor.mean.shape[0])
+    fixed = sum(w for _, w in tracker_terms(len(names), 0, imu=imu))
+    view, rest = divmod(width - fixed, SKILL_LAYOUT.size + 3)
+    if rest or (args.view is not None and args.view != view):
+        raise ValueError(f"{args.actor}: {width} inputs fit no view (asked {args.view})")
     norm = contract.generator.skill_norm
     joints = joint_mirror(names, spec)
     # Offsets for a default pose that is not its own reflection (zero on the G1).
@@ -117,12 +126,10 @@ def main() -> int:
         offset = np.array(recorded["offset"])[index]
         scale = np.array(recorded["scale"])[index]
         action = joint_offsets(joints, offset, 1.0)[0] / scale
-    terms = tracker_terms(len(names), view, imu=args.body == "nao")
+    terms = tracker_terms(len(names), view, imu=imu)
     mirror = observation_mirror(
         terms, joints, norm.mean.numpy(), norm.std.numpy(), position, action
     )
-    actor = torch.jit.load(str(args.actor), map_location="cpu").eval()
-    width = mirror.offset.shape[0]
     probe = torch.zeros(1, width)
     if actor(probe).shape[-1] != len(names):
         raise ValueError(f"{args.actor}: actions are not the mirror's {len(names)} joints")

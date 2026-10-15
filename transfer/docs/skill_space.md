@@ -1633,7 +1633,28 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     weight. Two paired states -- the same planned gait at the same phase -- are held up
     differently on the two bodies. A shared `ζ` read by one shared predictor, and forbidden
     to encode the body, cannot be right on both. The test asked for the impossible.
-  - *For review with the user (theory).*
+  - *Taken to the user.* The user chose to keep `ζ` shared and body-blind, and give each body
+    its own physics readout (round 2).
+- **F5, round 2: the three pre-registered checks pass** (`free_latent_f5_r2.json`; `ζ` shared,
+  each body's head trained on its own procedural data, centre of pressure as a fraction of
+  each foot's polygon):
+
+  | check | result |
+  | --- | --- |
+  | shared: a classifier on 4,320 held-out pairs | −0.008 ± 0.005 beyond chance; alignment 0.03 |
+  | informative: G1 held-out probes | 0.152 → **0.114** (−0.039 ± 0.003) |
+  | informative: NAO held-out probes | 0.144 → **0.141** (−0.0035 ± 0.0011) |
+  | carried: the NAO's head reading the *G1's* `ζ` | 0.140 → **0.135** (−0.0048 ± 0.0014) |
+
+  - *What it shows.* A latent learned with attention over both bodies can be shared, blind to
+    the body, and still informative about each body's own physics. What a plan written from
+    the G1 hands the NAO carries something about the NAO's balance that `z*` does not.
+  - *What it does not.* On the NAO the effect is small, 2–3 % of the error against 25 % on the
+    G1: `ζ` mostly encodes the G1's balance.
+  - *A detail to fix.* The KL budget was held on the two bodies' mean, so the G1's own ended
+    above it (5.8 nats against 4).
+  - *Next, if `ζ` is to enter the contract:* the generator predicts its future and the trackers
+    read it, with an ablation against `z*` alone.
 - **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
 
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:

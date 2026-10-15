@@ -203,6 +203,13 @@ def chain_from(
     return torch.cat(histories), torch.cat(steps)
 
 
+def _isolated(function: Callable):
+    """Call a measurement without letting its own seeding reset the training's random state."""
+    devices = [torch.cuda.current_device()] if torch.cuda.is_available() else []
+    with torch.random.fork_rng(devices=devices), torch.no_grad():
+        return function()
+
+
 @torch.no_grad()
 def data_loss(
     generator: ContractGenerator,
@@ -238,8 +245,18 @@ def train_on_chains(
     chain: ChainConfig,
     measure: Callable[[], dict] | None = None,
     held_out: torch.Tensor | None = None,
+    constraint: Callable[[], float] | None = None,
+    limit: float = 0.0,
+    check_every: int = 25,
 ) -> list[dict[str, float]]:
     """Teach the generator to come back from its own drift, as a constrained problem.
+
+    With ``constraint`` (a measured quantity that must stay at or below
+    ``limit``, checked every ``check_every`` epochs), the multiplier follows
+    that measurement instead of the data loss's bound: ``L_data`` stays the
+    restoring term, weighted up only when the measured constraint is violated.
+    The plans' timing calibration against its gate is the one used: the bound
+    on the raw loss at its own noise left no room to improve the chain at all.
 
     A generator trained on one plan of data at a time is used on a chain of its
     own plans, and its small errors compound: the rough-terrain policy's
@@ -269,8 +286,9 @@ def train_on_chains(
     base, base_se = data_loss(generator, streams, reference, sigma, config)
     bound = base + 2.0 * base_se
     multiplier = 1.0
-    best = measure() if measure is not None else None
+    best = _isolated(measure) if measure is not None else None
     best_state = copy.deepcopy(generator.state_dict())
+    measured = _isolated(constraint) if constraint is not None else None
     order = torch.Generator(device="cpu").manual_seed(config.seed + 1)
     histories: list[torch.Tensor] = []
     chained: list[torch.Tensor] = []
@@ -288,7 +306,7 @@ def train_on_chains(
         schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimiser, T_max=chain.epochs * per_epoch
         )
-        for _ in range(chain.epochs):
+        for epoch in range(chain.epochs):
             generator.train()
             shuffled = torch.randperm(len(own_steps), generator=order).to(device)
             for start in range(0, len(shuffled), config.batch_size):
@@ -314,19 +332,27 @@ def train_on_chains(
                 optimiser.step()
                 schedule.step()
             generator.eval()
-            held, _ = data_loss(generator, streams, reference, sigma, config)
-            # Dual ascent on the bound's relative violation.
-            multiplier = max(0.0, multiplier + (held - bound) / bound)
+            if constraint is None:
+                held, _ = data_loss(generator, streams, reference, sigma, config)
+                # Dual ascent on the bound's relative violation.
+                multiplier = max(0.0, multiplier + (held - bound) / bound)
+            elif (epoch + 1) % check_every == 0 or epoch + 1 == chain.epochs:
+                measured = _isolated(constraint)
+                # Dual ascent on the measured constraint's relative violation.
+                multiplier = max(0.0, multiplier + (measured - limit) / limit)
+        if constraint is None:
+            held_entry = {"data_loss": held, "bound": bound}
+        else:
+            held_entry = {"constraint": measured, "limit": limit}
         entry = {
             "round": round_index,
             "chain_pairs": len(own_steps),
             "chain_loss": float(chain_term),
-            "data_loss": held,
-            "bound": bound,
+            **held_entry,
             "multiplier": multiplier,
         }
         if measure is not None:
-            fidelity = measure()
+            fidelity = _isolated(measure)
             entry["fidelity"] = fidelity
             log.append(entry)
             if fidelity["score"] < best["score"] - 2.0 * best["score_se"]:

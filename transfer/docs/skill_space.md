@@ -1408,6 +1408,42 @@ Limits and stopping rules:
     noise the encoder sets, not only on the method.
   - *Nothing in use changed.* No generator was replaced: the G1 and the NAO keep
     `flat_dagger2`.
+- **Option A, chosen on review, pre-registered before it runs.** Constrain what matters,
+  not the raw loss: the chains' weight is held by the plans' timing calibration against
+  the gate every generator has had from the start (`--chain-constraint calibration`).
+  - *How:* the multiplier follows dual ascent on the calibration measured every 25 epochs,
+    on a fixed quarter of the held-out steps.
+  - *Room:* calibration is at 0.01–0.02 against the gate's 0.05.
+  - *A measurement bug fixed with it:* the chain and calibration measurements reseeded the
+    generator's random state mid-training. They now run isolated.
+  - *It works if,* on the same terms as step 1, rough's chain score improves on its value
+    before chain training by more than twice their combined standard error, flat's does
+    not get worse by as much, and both keep the calibration gate.
+  - *Before any generator in use is replaced,* flat must pass L4 on both bodies again.
+- **Option A, run: it does not work either** (`contract_rough_dadA.json`,
+  `contract_flat_dadA.json`). The study stops again, for review.
+
+  | generator | before | after round 1 | calibration | multiplier | kept |
+  | --- | --- | --- | --- | --- | --- |
+  | rough | 0.162 | 0.220 ± 0.009, worse | 0.049 | 0.22 | the one before |
+  | flat | 0.078 | 0.191 ± 0.004, worse | 0.027 | 0 | the one before |
+
+  - *With room, training on its own chains makes the chain worse.* On flat the constraint
+    was never near its gate and the multiplier fell to 0, so the generator trained on its
+    chains alone — and its chain went from 0.078 to 0.191. Step 1 had shown nothing only
+    because it allowed no movement.
+  - *The likely reason (a hypothesis consistent with both runs).* Data as Demonstrator
+    pairs a drifted history with the teacher's future at the same instant. A gait is
+    periodic, and a chain that has drifted in cadence is at another phase than the
+    teacher at that instant, so the target asks the generator to lift a foot that has
+    just landed. Averaged over contradictory targets, the gait blurs and quickens.
+    Venkatraman et al. built the method for systems where the same instant means the
+    same state; a periodic one with phase drift is not such a system.
+  - *What a correction would need.* A phase-consistent target: the teacher's segment
+    nearest the drifted state (retrieval, as in motion matching — what attention over
+    the teacher's segments would provide), or the chain's own rhythm matched to the
+    teacher's directly.
+  - *Nothing in use changed.*
 
 ## What this stage hands to the next
 

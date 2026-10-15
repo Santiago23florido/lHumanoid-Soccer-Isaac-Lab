@@ -1249,6 +1249,57 @@ Limits and stopping rules:
 - **The G1 passes L4**, the condition for the NAO's round. The task side used for it —
   the published generator with task-side DAgger for its starts, `flat_dagger2` — is
   frozen with it.
+- **The NAO's mirror** (`nao/body/mirror.json`), recorded with the right hip yaw-pitch as
+  the left's mimic:
+  - *Legs:* exact, residual ~1e-4 against 2.0 for the other sign.
+  - *Arms:* clear but not exact, residual 8–36 % of the move against 170–200 %. The
+    model's arm links are not mirror images: its default pose reflects onto itself joint
+    by joint, yet differs by 3.3 cm in its links.
+- **NAO round 1** (`2026-10-14_19-59-50_zs_nao_r1`, model_3498, deployed symmetrized;
+  `*_nao_r1_3498_sym*.json`). Crouch 2 resumed for 2000 iterations with the G1's final
+  recipe: 70 % procedural, octave likelihood, mirror loss. Nothing of the G1, and nothing
+  of the published tasks, was trained.
+  - *Training:* mirror error 0.07 → 0.015; contract reward still rising at the end (2.38);
+    96 % of episodes time out.
+  - *L1 passes:* 1 fall in 256 episodes.
+  - *Map, against the walk-only NAO (`nao2`):*
+    - grid 6 → 33 of 57;
+    - manoeuvres 0 → 6 of 6;
+    - twins 0 → 1 of 4 — the other two flat twins fail on the right foot's duty alone,
+      +10 and +13 %;
+    - left-right duty gap −0.037 → −0.009;
+    - grid stance excess +0.138 → +0.039.
+  - *L1b fails on its letter.* On the deployed walk: speed ratio 1.33, stride −4 %,
+    period −27 %. On the autonomous path the ratio is 1.00.
+  - *L3 fails* (31 falls in 134 episodes), with the true-state noise caveat of the G1's.
+- **L4 on the NAO — the published G1 gait, zero-shot on another body.** The generator was
+  trained on the G1 alone, and the NAO's encoder and tracker are frozen.
+  - *Every command:* no falls, plans used (0.42–0.47), speed 1.04–1.11 times the policy's
+    in `V`, stride 1.6–8.1 %, period 1.4–2.6 %.
+  - *As pre-registered, gate C fails on the duty alone:* stances 13–19 % longer than the
+    published policy's.
+- **Where the NAO's longer stance comes from, measured offline:**
+  - *Not the generator, and not the transfer.* Asked on the NAO, the frozen generator's
+    plans have duty 0.526/0.578, against 0.488/0.544 on the G1. The G1's own plans,
+    resampled onto the NAO's grid, give 0.525/0.581: the same gait, seen at a different
+    rate.
+  - *The control rate.* The NAO's control step is 0.126 `T` against the G1's 0.077 — 1.62
+    times coarser in body time. The published gait's swing of about 0.5 `T` is 4 of the
+    NAO's steps, and on that grid each stance spans more samples.
+  - *The tracker adds 1–5 points of duty* on top of what it is asked.
+  - *Against what the NAO can represent* — the published policy's own gait resampled to
+    the NAO's control rate — the NAO is within 10 % on every criterion at every command:
+    duty 0.6–7.6 %, period 1.6–2.5 %, stride 1.8–8.5 %.
+  - This comparison is post hoc. It is reported beside the pre-registered verdict and does
+    not replace it.
+- **Pre-registered for the blind test**, before any of the rough policy's data is
+  captured: across bodies, gate C compares a body with the teacher's gait measured at
+  that body's control rate (resampled in body time). Both verdicts are reported — this
+  one and the teacher's own-grid one — and the teacher's own grid stays the rule within
+  one body.
+- **The NAO's tracker is frozen** at round 1, deployed symmetrized: the duty gap is the
+  control rate, which no tracker round can change. The second NAO round allowed by the
+  protocol is not used.
 
 ## What this stage hands to the next
 

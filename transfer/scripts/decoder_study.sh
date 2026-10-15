@@ -77,7 +77,8 @@ if [ "$stage" = train ]; then
 fi
 
 if [ "$stage" = evaluate ]; then
-  export ZS_REFERENCE=autonomous
+  # The deployed path reads the state with the body's kinematics (F2), on every variant alike.
+  export ZS_REFERENCE=autonomous ZS_ESTIMATOR="${ZS_ESTIMATOR:-kinematic}"
   for variant in "${variants[@]}"; do
     if [ "$variant" = v1 ]; then experiment=g1_track; else experiment=g1_track_physics; fi
     if [ "$variant" = v2h ]; then export HUMANOID_HEADS=1; else export HUMANOID_HEADS=0; fi

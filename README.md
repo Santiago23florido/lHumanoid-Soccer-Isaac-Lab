@@ -117,25 +117,51 @@ transfer comparison is a comparison against this teacher.
 component, the one variable that was chosen and why, the learning curve, and how
 the gait was verified rather than assumed.
 
-### Track 3 — the transfer: **scaffolding and a plan**
+### Track 3 — the transfer: **a G1 skill reaches the NAO zero-shot**
 
-| Module | State |
-| --- | --- |
-| Joint correspondence | Done, tested, **signed**. Records what the map *cannot* express. |
-| Reachability criterion | Done, tested. Ignores the teacher where the student's body cannot reach, and nowhere else. |
-| Student objective | Configuration only. |
-| **Student walking task** | **Not started — the critical path.** |
+A skill crosses bodies as a **contract**: the short future of `z*`, 27
+dimensionless numbers that say what a body is doing, not how its joints move —
+CoM height and velocity, tilt, turn rate, feet, the weight on each foot, angular
+momentum. Lengths are in leg lengths and times in `√(L/g)`, so dynamically
+similar motions of a 1.3 m and a 0.57 m robot are the same vector.
 
-The baseline it starts from: the **pinned G1 teacher** on one side, the **NAO's
-body alone** on the other.
+| Trained | How often | On what |
+| --- | --- | --- |
+| A skill's **generator** (plans of `z*`) | once per skill | the G1's expert alone |
+| A body's **encoder** (sensors → `z*`) and **tracker** (plan → joints) | once per body | a physical family of plans from a point-mass biped — never a skill |
 
-Read [`transfer/README.md`](transfer/README.md) for the hypothesis and
-[`transfer/docs/plan.md`](transfer/docs/plan.md) for the order of work and the
-threats to the result.
+A new skill therefore costs one training, on the G1, however many bodies run it:
+**N + M trainings, not N × M.**
+
+The first skill tested is Isaac Lab's published `Isaac-Velocity-Flat-G1-v0`.
+Neither body ever saw its data, and both are frozen. Results are on the
+deployed path, at three commands:
+
+| | G1 | NAO |
+| --- | --- | --- |
+| Falls | **0** / 64 | **0** / 64 |
+| Speed vs the policy (Froude-scaled) | 1.06–1.16 | 1.04–1.11 |
+| Stride, period | within 6 % | within 8 % |
+| Duty | within 8.4 % | within 8.2 % at its own control rate (+13–19 % at the G1's) |
+| Before this method | 120–240 falls | shuffling, 14–41 % of the speed |
+
+The NAO's longer stance is its control rate, not the transfer. Its step is
+1.62 × the G1's in body time, and the G1's own plans, sampled at the NAO's rate,
+show the same stance. A **blind test** on `Isaac-Velocity-Rough-G1-v0` was
+pre-registered whole before any of its data existed, and is running.
+
+**→ [`transfer/docs/skill_space.md`](transfer/docs/skill_space.md)** §7–8 has
+the theory, the pre-registered protocol, every deviation from it with its
+reason, and every number with the result file it comes from.
 
 ### Open
 
-- **Single seed.** The +4.7 margin characterises one policy, not the method.
+- **The blind test** is running.
+- **Single seed** per training run, in both tracks.
+- **Locomotion only.** `z*` holds the CoM and the feet; a kick or the hands need
+  fields it does not have.
+- **The walk's own fidelity** (L1b) is limited by its generator, which steps
+  about 20 % fast.
 - **The capture-point controller underperforms badly** (27.8 %) and the reason
   is not verified.
 - **No hardware.** Everything is simulation.

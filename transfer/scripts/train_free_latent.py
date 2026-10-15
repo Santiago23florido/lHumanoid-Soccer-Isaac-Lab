@@ -201,6 +201,46 @@ def per_probe_error(predictor, skill, free, balance, falls, probe) -> torch.Tens
     return torch.stack(rows)
 
 
+def encode_all(encoder, stem, features: dict, chunk: int = 8192) -> torch.Tensor:
+    """``ζ``'s posterior means for every row, a chunk at a time (a fused attention kernel
+    rejects a launch over hundreds of thousands of rows)."""
+    count = next(iter(features.values())).shape[0]
+    means = []
+    with torch.no_grad():
+        for start in range(0, count, chunk):
+            part = {k: v[start : start + chunk] for k, v in features.items()}
+            means.append(encoder(stem(part))[0])
+    return torch.cat(means)
+
+
+def verdict(predictor, baseline, data: dict, free: torch.Tensor, probes, seed: int) -> dict:
+    """Per held-out probe: the predictor with ``ζ`` against the ``z*``-alone baseline."""
+    with_free = (
+        per_probe_error(predictor, data["skill"], free, data["balance"], data["falls"], probes)
+        .cpu()
+        .numpy()
+    )
+    alone = (
+        per_probe_error(
+            baseline, data["skill"], torch.zeros_like(free), data["balance"], data["falls"], probes
+        )
+        .cpu()
+        .numpy()
+    )
+    result = {}
+    for i, name in enumerate(("balance_mse", "fall_cross_entropy")):
+        diff = with_free[:, i] - alone[:, i]
+        se = bootstrap_se(diff, 2000, seed)
+        result[name] = {
+            "z_star_alone": float(alone[:, i].mean()),
+            "with_free": float(with_free[:, i].mean()),
+            "difference": float(diff.mean()),
+            "se": se,
+            "better": bool(diff.mean() < -2 * se),
+        }
+    return result
+
+
 def bootstrap_se(diff: np.ndarray, draws: int, seed: int) -> float:
     rng = np.random.default_rng(seed)
     picks = rng.integers(0, len(diff), size=(draws, len(diff)))
@@ -238,7 +278,14 @@ def main() -> int:
     nao = load_body(args.nao, "nao", args.phase_bins, norm, device)
     held = held_out_probes(g1, args.held_out, args.seed).to(device)
     train_g1 = (~torch.isin(g1.probe, held)).nonzero().squeeze(-1)
+    test_g1 = torch.isin(g1.probe, held).nonzero().squeeze(-1)
     test_nao = torch.isin(nao.probe, held).nonzero().squeeze(-1)
+    # The balance in units of its spread over the G1's training steps, on both bodies (it is
+    # dimensionless already, so the NAO's is read in the same units).
+    balance_mean = g1.balance[train_g1].mean(dim=0)
+    balance_std = g1.balance[train_g1].std(dim=0).clamp(min=1e-6)
+    for data in (g1, nao):
+        data.balance = (data.balance - balance_mean) / balance_std
     cells = pair_index(g1, nao, args.phase_bins)
     cells = {c: v for c, v in cells.items() if not bool(torch.isin(c // args.phase_bins, held))}
     print(
@@ -307,52 +354,6 @@ def main() -> int:
             log.append(row)
             print(" ".join(f"{k} {v:.4g}" for k, v in row.items()))
 
-    encoder.eval()
-    with torch.no_grad():
-        nao_test = take(nao, test_nao)
-        free_nao, _ = encoder(stems["nao"](nao_test["features"]))
-    probes = nao.probe[test_nao]
-    with_free = (
-        per_probe_error(
-            predictor, nao_test["skill"], free_nao, nao_test["balance"], nao_test["falls"], probes
-        )
-        .cpu()
-        .numpy()
-    )
-    alone = (
-        per_probe_error(
-            baseline,
-            nao_test["skill"],
-            torch.zeros_like(free_nao),
-            nao_test["balance"],
-            nao_test["falls"],
-            probes,
-        )
-        .cpu()
-        .numpy()
-    )
-    verdicts = {}
-    for i, name in enumerate(("balance_mse", "fall_cross_entropy")):
-        diff = with_free[:, i] - alone[:, i]
-        se = bootstrap_se(diff, 2000, args.seed)
-        verdicts[name] = {
-            "z_star_alone": float(alone[:, i].mean()),
-            "with_free": float(with_free[:, i].mean()),
-            "difference": float(diff.mean()),
-            "se": se,
-            "better": bool(diff.mean() < -2 * se),
-        }
-    final_excess = log[-1]["body_excess"]
-    report = {
-        "g1": [str(p) for p in args.g1],
-        "nao": [str(p) for p in args.nao],
-        "dims": asdict(dims),
-        "held_out_probes": held.cpu().tolist(),
-        "nao_held_out": verdicts,
-        "body_classifier_excess": final_excess,
-        "log": log,
-        "carries_physics_across_bodies": all(v["better"] for v in verdicts.values()),
-    }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -360,9 +361,34 @@ def main() -> int:
             "stems": stems.state_dict(),
             "encoder": encoder.state_dict(),
             "predictor": predictor.state_dict(),
+            "baseline": baseline.state_dict(),
+            "balance_mean": balance_mean,
+            "balance_std": balance_std,
         },
         args.output,
     )
+    encoder.eval()
+    nao_test, g1_test = take(nao, test_nao), take(g1, test_g1)
+    free_nao = encode_all(encoder, stems["nao"], nao_test["features"])
+    free_g1 = encode_all(encoder, stems["g1"], g1_test["features"])
+    verdicts = verdict(predictor, baseline, nao_test, free_nao, nao.probe[test_nao], args.seed)
+    own = verdict(predictor, baseline, g1_test, free_g1, g1.probe[test_g1], args.seed)
+    final_excess = log[-1]["body_excess"]
+    report = {
+        "g1": [str(p) for p in args.g1],
+        "nao": [str(p) for p in args.nao],
+        "dims": asdict(dims),
+        "held_out_probes": held.cpu().tolist(),
+        "nao_held_out": verdicts,
+        "g1_held_out": own,
+        "fall_rate": {
+            "g1": float(g1.falls.float().mean()),
+            "nao": float(nao.falls.float().mean()),
+        },
+        "body_classifier_excess": final_excess,
+        "log": log,
+        "carries_physics_across_bodies": all(v["better"] for v in verdicts.values()),
+    }
     args.results.parent.mkdir(parents=True, exist_ok=True)
     args.results.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     for name, v in verdicts.items():

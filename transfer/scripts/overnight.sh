@@ -23,6 +23,19 @@ note() { echo "$1 $(date +%H:%M)" | tee -a "$status"; }
 g1_run=logs/rsl_rl/g1_track/2026-10-14_15-38-39_zs_g1_r3_loss
 nao_run=logs/rsl_rl/nao_track/2026-10-14_19-59-50_zs_nao_r1
 
+# Windows does not pass a High priority class on to child processes: raise the queue's Python
+# processes every two minutes (the RL ran 8.1 -> 6.8 s/it at High next to the user's browser).
+keeper() {
+  while true; do
+    powershell.exe -NoProfile -Command "Get-Process python -ErrorAction SilentlyContinue | \
+      ForEach-Object { try { \$_.PriorityClass = 'High' } catch {} }" > /dev/null 2>&1
+    sleep 120
+  done
+}
+keeper &
+keeper_pid=$!
+trap 'kill $keeper_pid 2>/dev/null' EXIT
+
 note "overnight start"
 if ! bash transfer/scripts/decoder_study.sh smoke; then note "smoke FAILED: stopping"; exit 1; fi
 if ! grep -q "ppo smoke:.*Iteration time" logs/contract/decoder_study.status; then

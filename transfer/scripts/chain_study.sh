@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The task side's correction after the blind test (transfer/docs/skill_space.md §8.4).
 #
-#   transfer/scripts/chain_study.sh <step1|stepA|c1|b1|b2>
+#   transfer/scripts/chain_study.sh <step1|stepA|c1|b1|b2|b3>
 #
 # step1  the published policies' generators retrained with training on their own chains
 #        (Data as Demonstrator): rough_dad and flat_dad, on the data of rough_dagger2 and
@@ -13,6 +13,8 @@
 # b1     the rhythm of the generator's own chain matched to its teacher's, differentiably
 #        through the chain, held by calibration -> rough_b1, flat_b1.
 # b2     twice the history (52 samples), the data alone, no chain training -> rough_b2, flat_b2.
+# b3     the data alone, under the body encoder's own precision instead of its error on the
+#        teacher's states (--sigma-from-body) -> rough_b3, flat_b3.
 set -euo pipefail
 
 stage="${1:-step1}"
@@ -34,6 +36,12 @@ train() {
     | tee -a "$status"
 }
 
+if [ "$stage" = b3 ]; then
+  echo "b3 start $(date +%H:%M)" >> "$status"
+  train rough_b3 rough --data g1/rollouts/rough_dagger_1.npz --data g1/rollouts/rough_dagger_2.npz --chain-rounds 0 --sigma-from-body
+  train flat_b3 flat --data g1/rollouts/flat_dagger_1.npz --data g1/rollouts/flat_dagger_2.npz --chain-rounds 0 --sigma-from-body
+  echo "b3 done $(date +%H:%M)" >> "$status"
+fi
 if [ "$stage" = b2 ]; then
   echo "b2 start $(date +%H:%M)" >> "$status"
   train rough_b2 rough --data g1/rollouts/rough_dagger_1.npz --data g1/rollouts/rough_dagger_2.npz --chain-rounds 0 --history 52

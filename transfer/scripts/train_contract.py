@@ -47,6 +47,7 @@ from humanoid_transfer.transfer.latent.events import contact_events  # noqa: E40
 from humanoid_transfer.transfer.latent.model import G1_OBSERVATION  # noqa: E402
 from humanoid_transfer.transfer.latent.sequences import load_streams  # noqa: E402
 from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
+    ChainConfig,
     ContractConfig,
     chained_gait,
     contract_steps,
@@ -57,6 +58,7 @@ from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
     new_generator,
     population_scores,
     train_generator,
+    train_on_chains,
 )
 from humanoid_transfer.transfer.latent.train_memory import (  # noqa: E402
     MemoryConfig,
@@ -65,6 +67,7 @@ from humanoid_transfer.transfer.latent.train_memory import (  # noqa: E402
 )
 
 CALIBRATION_LIMIT = 0.05
+CHAIN_LIMIT = 0.10
 
 
 def _display(path: Path) -> str:
@@ -124,6 +127,15 @@ def main() -> int:
         default=1.0,
         help="Multiplies the encoder error used as training noise; 0 trains on clean history.",
     )
+    parser.add_argument(
+        "--chain-rounds",
+        type=int,
+        default=0,
+        help="Rounds of training on the generator's own chains (Data as Demonstrator); 0: none.",
+    )
+    parser.add_argument("--chain-plans", type=int, default=6, help="Plans per chain.")
+    parser.add_argument("--chain-starts", type=int, default=8192, help="Chains per round.")
+    parser.add_argument("--chain-epochs", type=int, default=300, help="Epochs after each round.")
     parser.add_argument("--samples", type=int, default=32)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -198,6 +210,18 @@ def main() -> int:
 
     started = time.time()
     history = train_generator(streams, train_steps, generator, args.noise_scale * sigma, config)
+    chain = ChainConfig(
+        rounds=args.chain_rounds,
+        plans=args.chain_plans,
+        starts=args.chain_starts,
+        epochs=args.chain_epochs,
+    )
+    chain_log = []
+    if chain.rounds:
+        chain_log = train_on_chains(
+            streams, train_steps, generator, args.noise_scale * sigma, config, chain
+        )
+        print(f"[chains] {chain_log[-1]}")
     seconds = time.time() - started
     tolerance = fit_tolerance(generator, streams, val_steps, sigma, seed=args.seed)
     print(f"[generator] {seconds:.0f} s, final {history[-1]}")
@@ -241,6 +265,10 @@ def main() -> int:
     )
     calibration = evaluation["validation_walking"]["calibration_error"]
     passes = all(value <= CALIBRATION_LIMIT for value in calibration)
+    # Added after the blind test: every plan was calibrated while the chain of them
+    # stepped 17-20 % fast. A generator that does not chain into its teacher's gait
+    # is not ready to hand to any body.
+    chain_passes = all(deviation[key] <= CHAIN_LIMIT for key in ("stride_period", "stride_length"))
 
     path = args.logdir / args.name / "generator.pt"
     meta = {
@@ -308,6 +336,7 @@ def main() -> int:
         "generator": {
             "seconds": seconds,
             "final": history[-1],
+            "chains": {"config": vars(chain), "rounds": chain_log},
             "kind": generator.kind,
             "tolerance_by_k": tolerance.mean(dim=-1).tolist(),
             "tolerance": tolerance.tolist(),
@@ -319,6 +348,11 @@ def main() -> int:
             "clean history",
             "calibration_error": calibration,
             "passes": passes,
+        },
+        "chain_gate": {
+            "rule": f"chained stride period and length within {CHAIN_LIMIT:.0%} of the teacher's",
+            "deviation": {k: deviation[k] for k in ("stride_period", "stride_length")},
+            "passes": chain_passes,
         },
         "artifact": _display(path),
     }
@@ -340,7 +374,10 @@ def main() -> int:
         f"{chained['segments']['swing']['median']} ({reference['segments']['swing']['median']}), "
         f"stable {chained['environments_stable']}/{chained['environments']}"
     )
-    print(f"gate {'PASSES' if passes else 'FAILS'}; written {_display(results)}")
+    print(
+        f"gate {'PASSES' if passes else 'FAILS'}, chain gate "
+        f"{'PASSES' if chain_passes else 'FAILS'}; written {_display(results)}"
+    )
     return 0
 
 

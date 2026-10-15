@@ -140,6 +140,124 @@ def train_generator(
     return history
 
 
+@dataclass(frozen=True)
+class ChainConfig:
+    """Training on the generator's own chains (Data as Demonstrator)."""
+
+    rounds: int = 0
+    """Rounds of chains, each aggregated with the ones before; 0 trains on the data alone."""
+
+    plans: int = 6
+    """Plans per chain, each held for the commitment, as deployed."""
+
+    starts: int = 8192
+    """Chains drawn per round, from the data's own windows."""
+
+    epochs: int = 300
+    """Epochs of training after each round, on the data and every chain so far."""
+
+
+def chain_starts(
+    streams: Streams, steps: torch.Tensor, plans: int, commit: int, horizon: int
+) -> torch.Tensor:
+    """Training steps from which a chain keeps the data's real future at every plan boundary."""
+    boundaries = steps[:, None] + commit * torch.arange(1, plans + 1, device=steps.device)
+    ends = boundaries + horizon
+    keep = (ends[:, -1] <= streams.end[steps]) & ~streams.falling[ends].any(dim=1)
+    if streams.target is not None:
+        keep &= streams.target[boundaries].all(dim=1)
+    return steps[keep]
+
+
+@torch.no_grad()
+def chain_from(
+    generator: ContractGenerator,
+    streams: Streams,
+    starts: torch.Tensor,
+    sigma: torch.Tensor,
+    plans: int,
+    commit: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """The generator's own chains from the data's windows.
+
+    Returns, for every plan boundary of every chain, the clean history the
+    generator wrote up to it (normalised) and the data's step at that instant,
+    whose real future is where the teacher went from there.
+    """
+    clean = windows(generator, streams, starts, None)
+    histories, steps = [], []
+    for k in range(plans):
+        noisy = clean + sigma * torch.randn_like(clean)
+        noise = torch.randn(len(starts), generator.noise_size, device=clean.device)
+        plan = generator.sample(noisy, streams.command[starts + k * commit], noise)[:, :commit]
+        clean = torch.cat([clean[:, commit:], plan], dim=1)
+        histories.append(clean)
+        steps.append(starts + (k + 1) * commit)
+    return torch.cat(histories), torch.cat(steps)
+
+
+def train_on_chains(
+    streams: Streams,
+    steps: torch.Tensor,
+    generator: ContractGenerator,
+    sigma: torch.Tensor,
+    config: ContractConfig,
+    chain: ChainConfig,
+) -> list[dict[str, float]]:
+    """Teach the generator to come back from its own drift (Venkatraman et al., 2015).
+
+    A generator trained on one plan of data at a time is used on a chain of its
+    own plans, and its small errors compound: the rough-terrain policy's
+    generator stepped 17-20 % fast on its own chain while each plan was
+    calibrated. Data as Demonstrator closes that gap with the data alone. From
+    the data's own windows the generator writes chains of plans as deployed;
+    each history it wrote is paired with the *real* future the teacher went on
+    to from that instant, and the generator is trained to produce it -- from
+    where it drifted to, back toward where the teacher went. Rounds aggregate,
+    as DAgger does, so the generator is trained on the histories its own
+    earlier versions reach.
+    """
+    commit = generator.commit
+    pool = chain_starts(streams, steps, chain.plans, commit, generator.horizon)
+    order = torch.Generator(device="cpu").manual_seed(config.seed + 1)
+    histories: list[torch.Tensor] = []
+    chained: list[torch.Tensor] = []
+    log: list[dict[str, float]] = []
+    for round_index in range(chain.rounds):
+        pick = pool[torch.randperm(len(pool), generator=order)[: chain.starts].to(pool.device)]
+        generator.eval()
+        history, at = chain_from(generator, streams, pick, sigma, chain.plans, commit)
+        histories.append(history)
+        chained.append(at)
+        own_history, own_steps = torch.cat(histories), torch.cat(chained)
+        count = len(steps)
+
+        def loss(batch: torch.Tensor, own_history=own_history, own_steps=own_steps, count=count):
+            real, own = batch[batch < count], batch[batch >= count] - count
+            own_window = own_history[own]
+            window = torch.cat(
+                [
+                    windows(generator, streams, steps[real], sigma),
+                    own_window + sigma * torch.randn_like(own_window),
+                ]
+            )
+            command = torch.cat([streams.command[steps[real]], streams.command[own_steps[own]]])
+            future = torch.cat(
+                [
+                    futures(generator, streams, steps[real]),
+                    futures(generator, streams, own_steps[own]),
+                ]
+            )
+            return contract_loss(generator, window, command, future, config.free_bits)
+
+        index = torch.arange(count + len(own_steps), device=steps.device)
+        generator.train()
+        history_log = _optimise(list(generator.parameters()), index, loss, chain.epochs, config)
+        generator.eval()
+        log.append({"round": round_index, "chain_pairs": len(own_steps), **history_log[-1]})
+    return log
+
+
 @torch.no_grad()
 def fit_tolerance(
     generator: ContractGenerator,
@@ -385,7 +503,10 @@ def gait_reference(
 
 
 __all__ = [
+    "ChainConfig",
     "ContractConfig",
+    "chain_from",
+    "chain_starts",
     "chained_gait",
     "gait_reference",
     "change_times",
@@ -397,5 +518,6 @@ __all__ = [
     "new_generator",
     "population_scores",
     "train_generator",
+    "train_on_chains",
     "windows",
 ]

@@ -1352,6 +1352,26 @@ Limits and stopping rules:
   one did not. The body side's competence is not what is tested first. The NAO's partial
   pass is on plans its own control rate slows toward the policy's gait — not a property
   claimed for the method.
+- **The task side's correction, pre-registered before it is trained.** Rough is no longer
+  blind: its result has been read. What follows is a fix of the first failing condition,
+  judged on criteria fixed here, and stopped at the first step that fails.
+  - *A chain gate for every generator* (`train_contract.py`): its chained stride period
+    and stride length within 10 % of its teacher's. The calibration gate alone passed a
+    generator whose chain stepped 17–20 % fast. Measured now:
+    - `rough_dagger2` fails it: period +16.3 %, stride +12.6 %;
+    - `flat_dagger2` passes it: +4.0 %, +5.4 %.
+  - *Step 1 — training on the generator's own chains* (Data as Demonstrator; Venkatraman,
+    Hebert and Bagnell, 2015; `--chain-rounds`). From the data's windows the generator
+    writes chains of six plans as deployed. Each history it wrote is paired with the real
+    future its teacher went on to from that instant. Three rounds, aggregated. It passes
+    if the rough generator meets the chain gate, the flat one still does, and both keep
+    the calibration gate.
+  - *Step 2 — attention.* A generator that reads a longer history through causal
+    attention and attends to a bank of its teacher's segments, trained as in step 1. It
+    passes if it meets the same gates on rough and flat with chain deviations no larger
+    than step 1's.
+  - *Step 3 — L4 again,* amended, on the G1 and the NAO, frozen, with the best generator.
+    Reported as a fix tested on a task already seen, not as a blind result.
 
 ## What this stage hands to the next
 

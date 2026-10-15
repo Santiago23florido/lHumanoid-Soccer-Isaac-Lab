@@ -9,8 +9,10 @@ policy's output is a residual on top (residual policy learning, Silver et al.
 Residual MPC, 2025, and HybridMimic, 2026):
 
 * **Kinematic prior.** One damped least-squares step from the current joints
-  puts each sole where the plan's next ``foot_position`` asks, relative to the
-  CoM and in the body's current heading, with the foot flat
+  towards the plan's next pose: each sole where the plan's ``foot_position``
+  asks, relative to the CoM, and each foot flat -- both expressed in the base
+  frame the plan's ``gravity`` gives (its tilt), so with the feet on the ground
+  the step also brings the trunk to the planned tilt
   (:func:`~...latent.whole_body.damped_least_squares`). Only the leg joints move
   in it; the others keep the default pose.
 * **Static prior.** The plan's loads, as forces along the legs through the CoM
@@ -45,6 +47,7 @@ from ...latent.whole_body import (
     leg_forces,
     orientation_error,
     point_jacobian,
+    tilt_from_gravity,
     yaw_rotation,
 )
 
@@ -53,6 +56,7 @@ if TYPE_CHECKING:
 
 _FEET = SKILL_LAYOUT.slice_of("foot_position")
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
+_TILT = SKILL_LAYOUT.slice_of("gravity")
 _GRAVITY = 9.81
 
 
@@ -141,15 +145,19 @@ class PhysicsPriorAction(JointPositionAction):
         q = data.joint_pos
         targets = data.default_joint_pos[:, self._action_joints].clone()
         if self.cfg.kinematic:
-            # Soles relative to the CoM in the base frame, where only the joints move them.
+            # The planned pose in the base frame, where only the joints move the soles: the
+            # plan's feet relative to the CoM and flat feet, seen from a base at the plan's tilt.
+            to_planned = tilt_from_gravity(plan[:, _TILT]).transpose(-1, -2)[:, None]
             to_base = base.transpose(-1, -2)[:, None]
-            wanted = to_base @ (heading[:, None] @ (length * planned_feet)[..., None])
+            wanted = to_planned @ (length * planned_feet)[..., None]
             current = to_base @ (soles - c[:, None])[..., None]
             position_error = (wanted - current)[..., 0] / length
             relative_jac = sole_jac - com_jac[:, None]
             position_jac = (to_base @ relative_jac)[..., self._ik_columns] / length
-            # Each foot flat on its own heading.
-            turn_error = orientation_error(foot_rot, yaw_rotation(foot_rot))
+            # Each foot flat, keeping its yaw against the heading; the base-fixed step aims at
+            # that pose relative to the base as it is now.
+            foot_yaw = yaw_rotation(heading.transpose(-1, -2)[:, None] @ foot_rot)
+            turn_error = orientation_error(foot_rot, base[:, None] @ (to_planned @ foot_yaw))
             turn_jac = jacobian[:, feet, 3:][..., self._ik_columns]
             task = torch.cat([position_jac, turn_jac], dim=2).flatten(1, 2)
             error = torch.cat([position_error, turn_error], dim=2).flatten(1)
@@ -171,7 +179,14 @@ class PhysicsPriorAction(JointPositionAction):
             world = (heading[:, None] @ forces[..., None])[..., 0]
             gravity = robot.root_physx_view.get_gravity_compensation_forces().to(self.device)
             gravity = self._fold(gravity)[:, self._joint_columns]
-            contact = torch.einsum("nfid,nfi->nd", sole_jac[..., self._joint_columns], world)
+            # The plan says how much each foot carries, not where under it: the forces act
+            # below the ankle, so the prior asks no ankle torque and the residual supplies the
+            # centre of pressure. (At the sole point, 3.6 cm ahead of the G1's ankle, they
+            # pressed the toes down and tipped a still body backwards.)
+            below_ankle = link_pos[:, feet].clone()
+            below_ankle[..., 2] = soles[..., 2]
+            ankle_jac = point_jacobian(jacobian[:, feet], link_pos[:, feet], below_ankle)
+            contact = torch.einsum("nfid,nfi->nd", ankle_jac[..., self._joint_columns], world)
             torque = self.cfg.feedforward_gain * (gravity - contact)
             limit = data.joint_effort_limits[:, self._action_joints]
             torque = torch.maximum(torch.minimum(torque, limit), -limit)

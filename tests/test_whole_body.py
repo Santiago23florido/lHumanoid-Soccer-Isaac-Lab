@@ -141,3 +141,17 @@ def test_the_ground_reaction_balances_the_joint_and_the_foot_weight() -> None:
     force, moment = ground_reaction(joint_force, joint_moment, joint, com, mass)
     torch.testing.assert_close(force, ground_force)
     torch.testing.assert_close(moment, ground_moment)
+
+
+def test_the_tilt_is_recovered_from_gravity_in_the_base() -> None:
+    from humanoid_transfer.transfer.latent.whole_body import tilt_from_gravity
+
+    pitch, roll = 0.25, -0.4
+    tilt = _rotation(torch.tensor([0.0, 1.0, 0.0]), pitch) @ _rotation(
+        torch.tensor([1.0, 0.0, 0.0]), roll
+    )
+    gravity = tilt.T @ torch.tensor([0.0, 0.0, -1.0])
+    torch.testing.assert_close(tilt_from_gravity(gravity), tilt)
+    # Its yaw is zero, and a vector without length reads as upright.
+    torch.testing.assert_close(yaw_rotation(tilt_from_gravity(gravity)), torch.eye(3))
+    torch.testing.assert_close(tilt_from_gravity(torch.zeros(3)), torch.eye(3))

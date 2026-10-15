@@ -28,7 +28,7 @@ from isaaclab_rl.rsl_rl import (
     RslRlSymmetryCfg,
 )
 
-from ....transfer.tasks.tracking.physics_cfg import with_physics_heads
+from .....transfer.tasks.tracking.physics_cfg import with_physics_heads
 from ..mirror import augment
 
 SYMMETRY = os.environ.get("HUMANOID_SYMMETRY", "")

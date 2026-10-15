@@ -97,6 +97,33 @@ def yaw_rotation(rotation: torch.Tensor) -> torch.Tensor:
     )
 
 
+def tilt_from_gravity(gravity: torch.Tensor) -> torch.Tensor:
+    """``(..., 3) -> (..., 3, 3)``: the base's rotation in its heading frame, from gravity in it.
+
+    ``z*`` carries the unit gravity vector in the base frame, which fixes the base's pitch
+    and roll and nothing of its yaw (the heading frame has none). With the rotation
+    ``R = R_y(θ) R_x(φ)`` -- yaw, then pitch, then roll, the heading's convention --
+    gravity in the base is ``Rᵀ (0, 0, -1) = (sin θ, -cos θ sin φ, -cos θ cos φ)``.
+    A vector without length (no plan) reads as upright.
+    """
+    norm = gravity.norm(dim=-1, keepdim=True)
+    upright = torch.zeros_like(gravity)
+    upright[..., 2] = -1.0
+    g = torch.where(norm > 1e-6, gravity / norm.clamp(min=1e-6), upright)
+    pitch = torch.asin(g[..., 0].clamp(-1.0, 1.0))
+    roll = torch.atan2(-g[..., 1], -g[..., 2])
+    cp, sp, cr, sr = torch.cos(pitch), torch.sin(pitch), torch.cos(roll), torch.sin(roll)
+    zero = torch.zeros_like(cp)
+    return torch.stack(
+        [
+            torch.stack([cp, sp * sr, sp * cr], dim=-1),
+            torch.stack([zero, cr, -sr], dim=-1),
+            torch.stack([-sp, cp * sr, cp * cr], dim=-1),
+        ],
+        dim=-2,
+    )
+
+
 def orientation_error(current: torch.Tensor, desired: torch.Tensor) -> torch.Tensor:
     """``(..., 3)``: the small rotation taking ``current`` to ``desired``, world frame.
 

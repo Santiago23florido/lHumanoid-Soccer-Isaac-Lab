@@ -51,7 +51,7 @@ from ....common.skill_state import SKILL_LAYOUT
 from ...latent.contract import load_contract, plan_integrals
 from ...latent.memory import TimeGrid
 from ...latent.procedural import GaitRanges, PointMassBiped
-from ...latent.skill_torch import BodyConstants, skill_state
+from ...latent.skill_torch import BodyConstants, proprioceptive_skill_state, skill_state
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -60,6 +60,7 @@ _TOLERANCE = 1e-6
 _PLAN_LIMIT = 50.0
 _VX = SKILL_LAYOUT.slice_of("com_velocity").start
 _YAW_RATE = SKILL_LAYOUT.slice_of("base_angular_velocity").start + 2
+_LOAD = SKILL_LAYOUT.slice_of("foot_load")
 """Normalised units: fifty standard deviations of the teacher's ``z*``."""
 
 
@@ -430,7 +431,22 @@ class ReferenceCommand(UniformVelocityCommand):
         if self.encoder is None:
             return self._true_now + self.sigma * torch.randn_like(self._true_now)
         with torch.no_grad():
-            return self.encoder(self.encoder_input())
+            learned = self.encoder(self.encoder_input())
+        if self.cfg.estimator == "encoder":
+            return learned
+        # The kinematic part of z* from the body's own model, the loads from the encoder.
+        load = self.generator.skill_norm.inverse(learned)[:, _LOAD]
+        data = self.robot.data
+        z = proprioceptive_skill_state(
+            self.body,
+            data.body_link_quat_w,
+            data.body_com_pos_w,
+            data.body_com_lin_vel_w,
+            data.body_com_ang_vel_w,
+            load,
+            base_velocity=self.cfg.base_velocity,
+        )
+        return self.generator.skill_norm(z)
 
     # -- the plan ------------------------------------------------------------
 
@@ -765,6 +781,17 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     sensor_name: str = "contact_forces"
     use_encoder: bool = False
     """Read ``ẑ*`` from the contract's encoder (deployed path) instead of truth plus noise."""
+
+    estimator: str = "encoder"
+    """What ``use_encoder`` reads ``ẑ*`` with. ``encoder``: the learned encoder alone.
+    ``kinematic``: the body's kinematic model for every field but the feet's loads, which
+    stay the encoder's (:func:`~...latent.skill_torch.proprioceptive_skill_state`) -- the
+    encoder learned on the states its body practised and errs far beyond them, where
+    kinematics does not."""
+
+    base_velocity: bool = True
+    """Whether the body senses its base's linear velocity; without it, the kinematic
+    estimator measures velocities from the more loaded foot (leg odometry)."""
 
     noise_scale: float = 1.0
     """Multiplies the encoder error used as noise on the true state while training."""

@@ -152,4 +152,64 @@ def skill_state(
     return si / body.scales(layout)
 
 
-__all__ = ["BodyConstants", "quat_to_matrix", "skill_state"]
+def sole_points(
+    body: BodyConstants, link_quat: torch.Tensor, com_pos: torch.Tensor
+) -> torch.Tensor:
+    """``(N, 2, 3)`` each foot's sole point, in the frame ``com_pos`` is given in."""
+    feet = list(body.foot_index)
+    foot_rot = quat_to_matrix(link_quat[:, feet])
+    return com_pos[:, feet] + torch.einsum("nfij,fj->nfi", foot_rot, body.sole_from_com)
+
+
+def proprioceptive_skill_state(
+    body: BodyConstants,
+    link_quat: torch.Tensor,
+    com_pos: torch.Tensor,
+    com_lin_vel: torch.Tensor,
+    ang_vel: torch.Tensor,
+    foot_load: torch.Tensor,
+    base_velocity: bool = True,
+    layout: ZLayout = SKILL_LAYOUT,
+) -> torch.Tensor:
+    """``z*`` as a body can compute it from its own sensors and kinematic model.
+
+    Everything in ``z*`` but the feet's loads is kinematics: the links' poses and
+    velocities relative to the base follow from the joint encoders through the
+    body's model, the base's tilt and turn rate from its IMU, and ``z*`` never
+    depends on where the body is or which way it faces. What a body cannot sense
+    is replaced by what it can infer:
+
+    - the ground is under the lower sole, so the height is the CoM's above it;
+    - without a base velocity (``base_velocity=False``, as on the NAO) the more
+      loaded foot is taken to stand still, and every velocity is measured from it
+      (leg odometry) -- the angular momentum, about the CoM, does not change;
+    - the loads, ``(N, 2)`` in units of ``mg``, come from elsewhere (a learned
+      estimate).
+
+    The arguments are those of :func:`skill_state`, in any world frame.
+    """
+    soles = sole_points(body, link_quat, com_pos)
+    ground = soles[..., 2].min(dim=1).values
+    lifted = com_pos.clone()
+    lifted[..., 2] = com_pos[..., 2] - ground[:, None] + body.ground_height
+    velocity = com_lin_vel
+    if not base_velocity:
+        feet = list(body.foot_index)
+        offset = soles - com_pos[:, feet]
+        sole_vel = com_lin_vel[:, feet] + torch.linalg.cross(ang_vel[:, feet], offset, dim=-1)
+        stance = foot_load.argmax(dim=-1)
+        velocity = com_lin_vel - sole_vel[torch.arange(len(stance)), stance][:, None, :]
+    force = torch.zeros(*foot_load.shape, 3, dtype=com_pos.dtype, device=com_pos.device)
+    force[..., 2] = foot_load * body.units.scale(_FORCE)
+    return skill_state(body, link_quat, lifted, velocity, ang_vel, force, layout)
+
+
+_FORCE = next(field.dimension for field in SKILL_LAYOUT.fields if field.name == "foot_load")
+
+__all__ = [
+    "BodyConstants",
+    "proprioceptive_skill_state",
+    "quat_to_matrix",
+    "skill_state",
+    "sole_points",
+]

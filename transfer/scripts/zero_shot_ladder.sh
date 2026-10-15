@@ -39,6 +39,11 @@ generator_name="$(basename "$(dirname "$task_generator")")"
 reference="${ZS_REFERENCE:-physical}"
 mode=""
 if [ "$reference" = autonomous ]; then mode="_auto"; fi
+# ZS_ESTIMATOR: what the deployed path reads the state with -- the learned encoder, or the
+# body's kinematics for every field but the loads (kinematic; its results carry "_kin").
+estimator="${ZS_ESTIMATOR:-encoder}"
+est=""
+if [ "$estimator" = kinematic ]; then est="_kin"; fi
 if [ "$task" = rough ]; then
   commands="forward 0.25 0 0
 fast 0.6 0 0
@@ -145,15 +150,19 @@ if want l4; then
     vx=$("$python" -c "print($vx * $speed_scale)")
     vy=$("$python" -c "print($vy * $speed_scale)")
     wz=$("$python" -c "print($wz * $turn_scale)")
-    capture "${generator_name}${mode}_${name}_encoder" --num-envs 32 --reference "$reference" \
-      --command "$vx" "$vy" "$wz"
-    capture "${generator_name}${mode}_${name}_truth" --num-envs 32 --reference "$reference" \
-      --contract-from-truth --command "$vx" "$vy" "$wz"
+    capture "${generator_name}${mode}${est}_${name}_encoder" --num-envs 32 \
+      --reference "$reference" --estimator "$estimator" --command "$vx" "$vy" "$wz"
+    # The true-state path does not depend on the estimator: reuse it when it exists.
+    truth="$rollouts/zs_${tag}_${generator_name}${mode}_${name}_truth.npz"
+    if [ -z "$est" ] || [ ! -f "$truth" ]; then
+      capture "${generator_name}${mode}_${name}_truth" --num-envs 32 --reference "$reference" \
+        --contract-from-truth --command "$vx" "$vy" "$wz"
+    fi
     "$python" transfer/scripts/evaluate_contract.py \
       --run "teacher=g1/rollouts/${task}_play_${name}.npz" \
-      --run "encoder=$rollouts/zs_${tag}_${generator_name}${mode}_${name}_encoder.npz" \
-      --run "truth=$rollouts/zs_${tag}_${generator_name}${mode}_${name}_truth.npz" \
-      --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${mode}_l4_${name}.json" \
+      --run "encoder=$rollouts/zs_${tag}_${generator_name}${mode}${est}_${name}_encoder.npz" \
+      --run "truth=$truth" \
+      --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${mode}${est}_l4_${name}.json" \
       | grep -v "^  [^a]"
   done <<< "$commands"
 fi

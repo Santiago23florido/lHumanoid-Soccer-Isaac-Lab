@@ -1300,6 +1300,25 @@ Limits and stopping rules:
 - **The NAO's tracker is frozen** at round 1, deployed symmetrized: the duty gap is the
   control rate, which no tracker round can change. The second NAO round allowed by the
   protocol is not used.
+- **The cross-body verdict, implemented.** `evaluate_contract.py` adds
+  `verdict_at_body_rate` whenever a run's control rate differs from the teacher's.
+  Recomputed with it, the NAO's flat L4 passes at every command: duty 0.7–8.2 %, stride
+  1.7–8.4 %, period 1.4–2.6 %, against the policy's gait at the NAO's rate. This is the
+  same post hoc reading as above, now the tool's.
+- **The blind test, pre-registered whole before any of its data exists**
+  (`transfer/scripts/blind_test.sh`). No rollout, generator or result of
+  `Isaac-Velocity-Rough-G1-v0` exists at this commit. The recipe is the published flat
+  task's:
+  1. its rollouts on the G1 (`G1RoughOnFlat-v0`, a plane), and its generator on the G1's
+     frozen encoder (`held_out_task.sh` → `rough_h20`);
+  2. two rounds of task-side DAgger on the G1, with the G1's frozen tracker as deployed
+     (round 3, symmetrized) → `rough_dagger2`;
+  3. L4, amended, on the G1 and on the NAO, each frozen and deployed symmetrized, at
+     forward 0.25, fast 0.6 and turning 0.3/0/0.3 — gates B and C, and on the NAO also at
+     its control rate.
+
+  It is run once and reported as it comes out: nothing is changed after its results are
+  read.
 
 ## What this stage hands to the next
 

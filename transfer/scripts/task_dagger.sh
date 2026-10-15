@@ -52,6 +52,12 @@ previous="${TASK_GENERATOR:-logs/contract/${task}_h20/generator.pt}"
 "$python" transfer/scripts/body_encoder.py "$previous" "$body_contract" --output "$generator"
 "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt" > /dev/null
 policy="$run/exported/$checkpoint.pt"
+# DAGGER_SYMMETRIZE=1: the G1's tracker as deployed, averaged with its mirror image.
+if [ "${DAGGER_SYMMETRIZE:-0}" = 1 ]; then
+  "$python" transfer/scripts/symmetrize_actor.py "$policy" --mirror g1/body/mirror.json \
+    --contract "$body_contract" | tail -1
+  policy="$run/exported/${checkpoint}_sym.pt"
+fi
 export HUMANOID_CONTRACT="$root/$generator"
 
 capture() {

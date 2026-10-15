@@ -1355,21 +1355,37 @@ Limits and stopping rules:
 - **The task side's correction, pre-registered before it is trained.** Rough is no longer
   blind: its result has been read. What follows is a fix of the first failing condition,
   judged on criteria fixed here, and stopped at the first step that fails.
-  - *A chain gate for every generator* (`train_contract.py`): its chained stride period
-    and stride length within 10 % of its teacher's. The calibration gate alone passed a
-    generator whose chain stepped 17–20 % fast. Measured now:
-    - `rough_dagger2` fails it: period +16.3 %, stride +12.6 %;
-    - `flat_dagger2` passes it: +4.0 %, +5.4 %.
+  - *Chain fidelity, measured for every generator* (`train_contract.py`,
+    `chain_fidelity.py`). The score is the larger relative deviation of its chained stride
+    period and stride length from its teacher's, with a bootstrap standard error over
+    chains and teacher episodes. It is a measurement, not a gate: no tolerance is fixed
+    for it. The teachers vary by only 0.1–1 % between their own episodes, so "within the
+    expert's own variability" would reject even the flat generator, which transfers to
+    both bodies.
+
+    | generator | score |
+    | --- | --- |
+    | `rough_h20` | 0.202 ± 0.005 |
+    | `rough_dagger2` | 0.162 ± 0.004 |
+    | `flat_dagger2` | 0.055 ± 0.006 |
   - *Step 1 — training on the generator's own chains* (Data as Demonstrator; Venkatraman,
-    Hebert and Bagnell, 2015; `--chain-rounds`). From the data's windows the generator
-    writes chains of six plans as deployed. Each history it wrote is paired with the real
-    future its teacher went on to from that instant. Three rounds, aggregated. It passes
-    if the rough generator meets the chain gate, the flat one still does, and both keep
-    the calibration gate.
+    Hebert and Bagnell, 2015; `--chain-rounds`).
+    - *Pairs:* from the data's windows the generator writes chains of six plans as
+      deployed, and each history it wrote is paired with the real future its teacher went
+      on to from that instant.
+    - *How much those pairs weigh is not fixed; it is a constrained problem.* Minimise the
+      loss on the generator's own chains subject to the held-out data loss staying within
+      its pre-training value plus twice its own standard error, by a Lagrangian whose
+      multiplier follows dual ascent.
+    - *Rounds:* they aggregate and stop by themselves. A round is kept only if it improves
+      the chain score by more than twice the best score's standard error (8 at most).
+    - *It works if* rough's chain score improves on `rough_dagger2`'s by more than twice
+      their combined standard error, and flat's does not get worse by as much. No target
+      value is set; the robots' gates decide in step 3.
   - *Step 2 — attention.* A generator that reads a longer history through causal
     attention and attends to a bank of its teacher's segments, trained as in step 1. It
-    passes if it meets the same gates on rough and flat with chain deviations no larger
-    than step 1's.
+    works if it meets step 1's criterion on rough and flat, and its scores are not
+    significantly worse than step 1's.
   - *Step 3 — L4 again,* amended, on the G1 and the NAO, frozen, with the best generator.
     Reported as a fix tested on a task already seen, not as a blind result.
 

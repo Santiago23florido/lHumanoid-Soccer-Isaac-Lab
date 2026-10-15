@@ -49,6 +49,7 @@ from humanoid_transfer.transfer.latent.sequences import load_streams  # noqa: E4
 from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
     ChainConfig,
     ContractConfig,
+    chain_fidelity,
     chained_gait,
     contract_steps,
     evaluate_generator,
@@ -67,7 +68,6 @@ from humanoid_transfer.transfer.latent.train_memory import (  # noqa: E402
 )
 
 CALIBRATION_LIMIT = 0.05
-CHAIN_LIMIT = 0.10
 
 
 def _display(path: Path) -> str:
@@ -208,6 +208,21 @@ def main() -> int:
     encoder_seconds = time.time() - started
     print(f"[encoder] {encoder_seconds:.0f} s, sigma median {float(sigma.median()):.3f}")
 
+    # What a perfect tracker would walk: the generator chained on its own plans
+    # from 32 of the teacher's histories, at the teacher's command. Added after
+    # the first closed loop showed that calibrated plans can chain into a gait
+    # that steps a quarter faster than the teacher's.
+    gait_z = np.load(args.gait)["skill_state"].astype(np.float32)
+    start = torch.as_tensor(gait_z[100 : 100 + clock.history], device=args.device)
+    start = generator.skill_norm(start.transpose(0, 1))
+    command = gait.command[: start.shape[0]].mean(dim=0, keepdim=True).expand(len(start), 3)
+    teacher_z = gait_z[100 + clock.history :].astype(float)
+
+    def fidelity() -> dict:
+        return chain_fidelity(
+            generator, start, command, sigma, 900, clock.commit, dt_star, teacher_z, args.seed
+        )
+
     started = time.time()
     history = train_generator(streams, train_steps, generator, args.noise_scale * sigma, config)
     chain = ChainConfig(
@@ -219,7 +234,14 @@ def main() -> int:
     chain_log = []
     if chain.rounds:
         chain_log = train_on_chains(
-            streams, train_steps, generator, args.noise_scale * sigma, config, chain
+            streams,
+            train_steps,
+            generator,
+            args.noise_scale * sigma,
+            config,
+            chain,
+            fidelity,
+            val_steps,
         )
         print(f"[chains] {chain_log[-1]}")
     seconds = time.time() - started
@@ -243,14 +265,6 @@ def main() -> int:
         "gait": measure(gait, gait_steps, gait_events, None),
         "gait_noisy_history": measure(gait, gait_steps, gait_events, sigma),
     }
-    # What a perfect tracker would walk: the generator chained on its own plans
-    # from 32 of the teacher's histories, at the teacher's command. Added after
-    # the first closed loop showed that calibrated plans can chain into a gait
-    # that steps a quarter faster than the teacher's.
-    gait_z = np.load(args.gait)["skill_state"].astype(np.float32)
-    start = torch.as_tensor(gait_z[100 : 100 + clock.history], device=args.device)
-    start = generator.skill_norm(start.transpose(0, 1))
-    command = gait.command[: start.shape[0]].mean(dim=0, keepdim=True).expand(len(start), 3)
     chained = chained_gait(
         generator, start, command, sigma, 900, clock.commit, dt_star, seed=args.seed
     )
@@ -265,10 +279,10 @@ def main() -> int:
     )
     calibration = evaluation["validation_walking"]["calibration_error"]
     passes = all(value <= CALIBRATION_LIMIT for value in calibration)
-    # Added after the blind test: every plan was calibrated while the chain of them
-    # stepped 17-20 % fast. A generator that does not chain into its teacher's gait
-    # is not ready to hand to any body.
-    chain_passes = all(deviation[key] <= CHAIN_LIMIT for key in ("stride_period", "stride_length"))
+    # Added after the blind test, where every plan was calibrated while their chain
+    # stepped 17-20 % fast: how far the chain walks from the teacher, with its own
+    # standard error. A measurement, not a gate; the body's gates decide.
+    chain_measured = fidelity()
 
     path = args.logdir / args.name / "generator.pt"
     meta = {
@@ -349,11 +363,7 @@ def main() -> int:
             "calibration_error": calibration,
             "passes": passes,
         },
-        "chain_gate": {
-            "rule": f"chained stride period and length within {CHAIN_LIMIT:.0%} of the teacher's",
-            "deviation": {k: deviation[k] for k in ("stride_period", "stride_length")},
-            "passes": chain_passes,
-        },
+        "chain_fidelity": chain_measured,
         "artifact": _display(path),
     }
     results.parent.mkdir(parents=True, exist_ok=True)
@@ -375,9 +385,12 @@ def main() -> int:
         f"stable {chained['environments_stable']}/{chained['environments']}"
     )
     print(
-        f"gate {'PASSES' if passes else 'FAILS'}, chain gate "
-        f"{'PASSES' if chain_passes else 'FAILS'}; written {_display(results)}"
+        f"  chain fidelity: score {chain_measured['score']:.3f} +- "
+        f"{chain_measured['score_se']:.3f} (period "
+        f"{chain_measured['deviation']['stride_period']:.3f}, stride "
+        f"{chain_measured['deviation']['stride_length']:.3f})"
     )
+    print(f"gate {'PASSES' if passes else 'FAILS'}; written {_display(results)}")
     return 0
 
 

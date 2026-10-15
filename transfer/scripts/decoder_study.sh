@@ -6,16 +6,17 @@
 #   transfer/scripts/decoder_study.sh <smoke|train|evaluate> [variant...]
 #
 # smoke     the prior alone (a zero residual) on the walk, true state, against the plain
-#           tracker's zero action; then 5 PPO iterations of the physics task on 256 envs.
-# train     2000 iterations from scratch per variant: v2 (G1TrackPhysics-v0, HUMANOID_PRIOR=full)
-#           and v1 (G1Track-v0), same seed.
+#           tracker's zero action; then 5 PPO iterations of the physics task with its heads.
+# train     2000 iterations from scratch per variant, same seed: v2h (G1TrackPhysics-v0, the
+#           prior with the physics heads and the critic's balance), v1 (G1Track-v0, the plain
+#           tracker), v2 (the prior alone).
 # evaluate  the ladder's competence stages (l1, map) and encoder, walk, l4 per variant.
 set -euo pipefail
 
 stage="${1:-smoke}"
 shift || true
 variants=("$@")
-if [ ${#variants[@]} -eq 0 ]; then variants=(v2 v1); fi
+if [ ${#variants[@]} -eq 0 ]; then variants=(v2h v1 v2); fi
 python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
@@ -45,15 +46,18 @@ PYEOF
       --output "g1/rollouts/decoder_zero_${task%%-*}.npz" > "logs/contract/decoder_zero_${task%%-*}.log" 2>&1
     echo "zero action on ${task}: $(tail -1 "logs/contract/decoder_zero_${task%%-*}.log")" >> "$status"
   done
-  "$python" -u scripts/train.py --task G1TrackPhysics-v0 --headless --num_envs 256 \
+  HUMANOID_HEADS=1 HUMANOID_PROCEDURAL=0.7 HUMANOID_SYMMETRY=loss \
+    "$python" -u scripts/train.py --task G1TrackPhysics-v0 --headless --num_envs 256 \
     --max_iterations 5 --seed 41 --run_name decoder_smoke > logs/contract/decoder_smoke.log 2>&1
-  echo "ppo smoke: $(grep -a -E 'Mean reward|Iteration time' logs/contract/decoder_smoke.log | tail -2 | tr '\n' ' ')" >> "$status"
+  echo "ppo smoke: $(grep -a -E 'Mean reward|Iteration time|physics' logs/contract/decoder_smoke.log \
+    | tail -4 | tr '\n' ' ')" >> "$status"
   echo "smoke done $(date +%H:%M)" >> "$status"
 fi
 
 if [ "$stage" = train ]; then
   export HUMANOID_PROCEDURAL=0.7 HUMANOID_SYMMETRY=loss HUMANOID_PRIOR=full
   for variant in "${variants[@]}"; do
+    if [ "$variant" = v2h ]; then export HUMANOID_HEADS=1; else export HUMANOID_HEADS=0; fi
     echo "train ${variant} start $(date +%H:%M)" >> "$status"
     "$python" -u scripts/train.py --task "$(task_of "$variant")" --headless --num_envs 4096 \
       --max_iterations "$iterations" --seed 41 --run_name "decoder_${variant}" \
@@ -66,6 +70,7 @@ if [ "$stage" = evaluate ]; then
   export ZS_REFERENCE=autonomous
   for variant in "${variants[@]}"; do
     if [ "$variant" = v1 ]; then experiment=g1_track; else experiment=g1_track_physics; fi
+    if [ "$variant" = v2h ]; then export HUMANOID_HEADS=1; else export HUMANOID_HEADS=0; fi
     run="$(ls -d logs/rsl_rl/${experiment}/*_decoder_${variant} | tail -1)"
     checkpoint="model_$((iterations - 1))"
     export ZS_TASK_ID="$(task_of "$variant" | sed 's/-v0/-Play-v0/')"

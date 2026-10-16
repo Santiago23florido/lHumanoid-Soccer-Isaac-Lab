@@ -80,6 +80,12 @@ parser.add_argument(
     help="On the deployed path: the learned encoder alone, or the body's kinematics for every "
     "field but the loads.",
 )
+parser.add_argument(
+    "--noise-scale",
+    type=float,
+    default=None,
+    help="On the true-state path: the noise on z* as a multiple of the contract's (0: none).",
+)
 parser.add_argument("--start-fraction", type=float, default=None)
 parser.add_argument(
     "--procedural-fraction",
@@ -122,6 +128,8 @@ def main() -> int:
         command_cfg.autonomous = args_cli.reference == "autonomous"
     # The deployed path reads the body's encoder; --contract-from-truth the true state.
     command_cfg.use_encoder = not args_cli.contract_from_truth
+    if args_cli.noise_scale is not None:
+        command_cfg.noise_scale = args_cli.noise_scale
     if args_cli.estimator is not None:
         command_cfg.estimator = args_cli.estimator
     if args_cli.start_fraction is not None:

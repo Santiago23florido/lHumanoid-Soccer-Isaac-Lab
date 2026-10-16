@@ -1655,6 +1655,49 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     above it (5.8 nats against 4).
   - *Next, if `ζ` is to enter the contract:* the generator predicts its future and the trackers
     read it, with an ablation against `z*` alone.
+- **F4, round 1: decoder v2 (v2h) against the plain control (v1), both from scratch**
+  (2000 iterations, the incumbent's conditions; `competence_g1_dec_*.json`,
+  `compare_g1_dec_v2h_vs_v1*.json`, `zero_shot_g1_dec_*_auto_kin_l4_*.json`).
+
+  On the family, through the true state:
+
+  | | v1 | v2h |
+  | --- | --- | --- |
+  | grid passed | 32/61 | 32/61 |
+  | grid: speed deviation | 0.013 | **0.009** (−0.004 ± 0.001) |
+  | grid: duty deviation | 0.101 | **0.076** (−0.025 ± 0.005) |
+  | corners passed (beyond the family's ranges) | 27/36 | **30/36** |
+  | corners: speed deviation | 0.099 | **0.083** (−0.016 ± 0.005) |
+
+  The incumbent r3 (three times the training) passes 39/61 of the grid.
+
+  Deployed path (kinematic estimator), falls, forward / fast / turning:
+
+  | | rough_b3 | flat_dagger2 |
+  | --- | --- | --- |
+  | r3 | 15/64, 16/62, 12/61 | 0/64 ×3, passes |
+  | v1 | **7/56, 13/55, 4/53** | 0/64 ×3, passes |
+  | v2h | 109/141, 278/310, 127/159 | 0/64 ×3; passes fast only |
+
+  - *v2h extrapolates better on the family, and worse with learned plans.* The diagnosis
+    (offline, from the captures): the generators' plans do not jump at redraws. They sway the
+    trunk and the height step by step, about as the teachers' bodies do, plus about 30 %
+    sampling noise. The biped's plans held the trunk fixed. The prior turned the sway into joint
+    motion its residual never practised.
+  - *Round 2 is the user's choice* (`plan_trust.py`, variant v2t):
+    - the prior trusts each plan by its measured sampling noise;
+    - it aims the trunk at the plan's slow tilt;
+    - the biped's plans carry the measured noise and the gait's trunk sway.
+  - *v1, the plain tracker from scratch, beats the incumbent on rough* (24/164 falls against
+    43/187, about 2 SE) and passes flat.
+  - *An open anomaly.* Through the true state both new trackers fall where the incumbent does
+    not (v1 rough 141/179). It is not the noise: without noise it falls too (127 in 32 envs × 600
+    steps; `diag_v1_rough_truth_noise*.npz`).
+    - The plans the generator asks there differ (0.131 V, period 0.76, against 0.260 V, 0.96
+      through the estimator).
+    - The paths differ, in effect, only in the feet's loads: the contact sensor's single-substep
+      spikes against the encoder's smooth estimate.
+    - Not the deployed path; to be diagnosed.
 - **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
 
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:

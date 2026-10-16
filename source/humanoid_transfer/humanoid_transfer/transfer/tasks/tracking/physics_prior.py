@@ -19,6 +19,13 @@ Residual MPC, 2025, and HybridMimic, 2026):
   (the procedural family's pendulum), mapped through the soles' Jacobians, plus
   gravity compensation: ``tau = g(q) - sum_f J_f^T F_f``, sent as the actuators'
   feed-forward effort.
+* **Trust.** With ``trust_plan`` the prior reads the plan fused with the body's
+  state by the plan's own measured sampling noise (``latent/plan_trust.py``):
+  ``now + K (plan - now)``, so a generator's arbitrary details are not turned
+  into joint motion; the biped's plans keep ``K ≈ 1``. With ``slow_tilt`` the
+  trunk's planned tilt is its mean over the plan's commitment: the feet and
+  loads are what a plan says about contact, the trunk's sway within a stride is
+  left to the residual's feedback.
 * **The residual.** ``q_target = q_prior + scale * a``. The prior commutes with
   the body's mirror, so the residual mirrors as the joints do, without offset on
   the legs; the default pose keeps its offset on the other joints, as in
@@ -137,7 +144,15 @@ class PhysicsPriorAction(JointPositionAction):
         base = rotation[:, self._base]
         heading = yaw_rotation(base)
 
-        plan = term.generator.skill_norm.inverse(term.upcoming()[:, 0])
+        rows = torch.arange(term.num_envs, device=self.device)
+        window = term.age[:, None] + torch.arange(term.commit, device=self.device)
+        ahead = term.plan[rows[:, None], window.clamp(max=term.plan.shape[1] - 1)]
+        if self.cfg.trust_plan:
+            gain = term.plan_gain()
+            ahead = term._true_now[:, None] + gain[:, None] * (ahead - term._true_now[:, None])
+        ahead = term.generator.skill_norm.inverse(ahead)
+        plan = ahead[:, 0]
+        tilt = ahead[..., _TILT].mean(dim=1) if self.cfg.slow_tilt else plan[:, _TILT]
         planned_feet = plan[:, _FEET].reshape(-1, 2, 3)
         load = plan[:, _LOAD].clamp(min=0.0)
         has_plan = term.has_plan
@@ -147,7 +162,7 @@ class PhysicsPriorAction(JointPositionAction):
         if self.cfg.kinematic:
             # The planned pose in the base frame, where only the joints move the soles: the
             # plan's feet relative to the CoM and flat feet, seen from a base at the plan's tilt.
-            to_planned = tilt_from_gravity(plan[:, _TILT]).transpose(-1, -2)[:, None]
+            to_planned = tilt_from_gravity(tilt).transpose(-1, -2)[:, None]
             to_base = base.transpose(-1, -2)[:, None]
             wanted = to_planned @ (length * planned_feet)[..., None]
             current = to_base @ (soles - c[:, None])[..., None]
@@ -247,6 +262,13 @@ class PhysicsPriorActionCfg(JointPositionActionCfg):
 
     mimic: dict[str, str] | None = None
     """Mimic joints the action does not drive, ``{follower: driver}``, one-to-one."""
+
+    trust_plan: bool = False
+    """Read the plan fused with the body's state by its measured sampling noise (needs the
+    command's ``plan_trust``)."""
+
+    slow_tilt: bool = False
+    """Aim the trunk at the plan's tilt averaged over its commitment, not its next step's."""
 
     kinematic: bool = True
     """Move the legs' targets by the least-squares step towards the plan's feet."""

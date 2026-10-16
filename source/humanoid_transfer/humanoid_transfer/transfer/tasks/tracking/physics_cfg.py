@@ -26,6 +26,14 @@ must predict it (:class:`~humanoid_transfer.transfer.latent.physics_model.Physic
 PRIOR = os.environ.get("HUMANOID_PRIOR", "full")
 """Ablations: ``full``; ``kinematic`` (no feed-forward); ``static`` (feed-forward only)."""
 
+PLAN_TRUST = os.environ.get("HUMANOID_PLAN_TRUST", "0") == "1"
+"""The prior trusts a plan by its measured sampling noise and aims the trunk at its slow tilt;
+the biped's plans carry the generator's measured noise and the gait's trunk sway (§9.1)."""
+
+SWAY = 0.035
+"""Largest procedural trunk sway, radians: twice the walk teacher's (0.015 pitch, 0.017 roll),
+as the family's other ranges reach beyond the one task they were checked against."""
+
 PHYSICS_ACTOR = "humanoid_transfer.transfer.latent.physics_model:PhysicsActor"
 PHYSICS_PPO = "humanoid_transfer.transfer.latent.physics_model:PhysicsPPO"
 
@@ -54,11 +62,23 @@ def add_physics_observations(observations, command_name: str = "base_velocity") 
 
 
 def prior_switches() -> dict[str, bool]:
-    """The action term's ``kinematic`` and ``feedforward`` flags for ``HUMANOID_PRIOR``."""
+    """The action term's flags for ``HUMANOID_PRIOR`` and ``HUMANOID_PLAN_TRUST``."""
     return {
         "kinematic": PRIOR in ("full", "kinematic"),
         "feedforward": PRIOR in ("full", "static"),
+        "trust_plan": PLAN_TRUST,
+        "slow_tilt": PLAN_TRUST,
     }
+
+
+def trust_plans(command) -> None:
+    """With ``HUMANOID_PLAN_TRUST=1``: the command measures its plans' noise, and its biped's
+    plans carry that noise and the gait's trunk sway."""
+    if not PLAN_TRUST:
+        return
+    command.plan_trust = True
+    command.procedural_plan_noise = True
+    command.procedural_sway = SWAY
 
 
 @configclass
@@ -86,6 +106,9 @@ def with_physics_heads(runner) -> None:
 
 __all__ = [
     "HEADS",
+    "PLAN_TRUST",
+    "SWAY",
+    "trust_plans",
     "PhysicsActorCfg",
     "with_physics_heads",
     "PHYSICS_ACTOR",

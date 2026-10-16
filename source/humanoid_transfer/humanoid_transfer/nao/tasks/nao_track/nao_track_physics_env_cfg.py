@@ -15,7 +15,11 @@ import os
 
 from isaaclab.utils import configclass
 
-from ....transfer.tasks.tracking.physics_cfg import add_physics_observations, prior_switches
+from ....transfer.tasks.tracking.physics_cfg import (
+    add_physics_observations,
+    prior_switches,
+    trust_plans,
+)
 from ....transfer.tasks.tracking.physics_prior import PhysicsPriorActionCfg
 from ...assets import nao_kinematics as nk
 from .nao_track_env_cfg import (
@@ -60,6 +64,7 @@ class NaoTrackPhysicsEnvCfg(NaoTrackEnvCfg):
         super().__post_init__()
         self.actions.joint_pos = _prior_action()
         add_physics_observations(self.observations, COMMAND)
+        trust_plans(self.commands.base_velocity)
 
 
 @configclass
@@ -68,3 +73,4 @@ class NaoTrackPhysicsEnvCfg_PLAY(NaoTrackEnvCfg_PLAY):
         super().__post_init__()
         self.actions.joint_pos = _prior_action()
         add_physics_observations(self.observations, COMMAND)
+        trust_plans(self.commands.base_velocity)

@@ -25,6 +25,16 @@ iterations="${DECODER_ITERATIONS:-2000}"
 export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt"
 
 task_of() { if [ "$1" = v1 ]; then echo G1Track-v0; else echo G1TrackPhysics-v0; fi; }
+# v2h: the prior with the physics heads and the critic's balance; v2t: the same, the prior
+# trusting each plan by its measured sampling noise, the biped's plans carrying that noise and
+# the gait's trunk sway (HUMANOID_PLAN_TRUST, §9.1).
+variant_flags() {
+  case "$1" in
+    v2h) export HUMANOID_HEADS=1 HUMANOID_PLAN_TRUST=0 ;;
+    v2t) export HUMANOID_HEADS=1 HUMANOID_PLAN_TRUST=1 ;;
+    *) export HUMANOID_HEADS=0 HUMANOID_PLAN_TRUST=0 ;;
+  esac
+}
 
 if [ "$stage" = smoke ]; then
   echo "smoke start $(date +%H:%M)" >> "$status"
@@ -68,7 +78,7 @@ fi
 if [ "$stage" = train ]; then
   export HUMANOID_PROCEDURAL=0.7 HUMANOID_SYMMETRY=loss HUMANOID_PRIOR=full
   for variant in "${variants[@]}"; do
-    if [ "$variant" = v2h ]; then export HUMANOID_HEADS=1; else export HUMANOID_HEADS=0; fi
+    variant_flags "$variant"
     echo "train ${variant} start $(date +%H:%M)" >> "$status"
     "$python" -u scripts/train.py --task "$(task_of "$variant")" --headless --num_envs 4096 \
       --max_iterations "$iterations" --seed 41 --run_name "decoder_${variant}" \
@@ -82,7 +92,7 @@ if [ "$stage" = evaluate ]; then
   export ZS_REFERENCE=autonomous ZS_ESTIMATOR="${ZS_ESTIMATOR:-kinematic}"
   for variant in "${variants[@]}"; do
     if [ "$variant" = v1 ]; then experiment=g1_track; else experiment=g1_track_physics; fi
-    if [ "$variant" = v2h ]; then export HUMANOID_HEADS=1; else export HUMANOID_HEADS=0; fi
+    variant_flags "$variant"
     run="$(ls -d logs/rsl_rl/${experiment}/*_decoder_${variant} | tail -1)"
     checkpoint="model_$((iterations - 1))"
     export ZS_TASK_ID="$(task_of "$variant" | sed 's/-v0/-Play-v0/')"

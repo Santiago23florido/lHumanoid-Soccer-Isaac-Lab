@@ -166,7 +166,7 @@ def main() -> int:
         "base_quat", "base_pos", "contract_due", "contract_error", "contract_error_other",
         "contract_error_state", "contract_fields", "contract_age", "done", "terminated",
         "encoder_input", "procedural", "biped_fallen", "biped_recovering", "estimate",
-        "balance", "biped_phase",
+        "balance", "biped_phase", "plan_gain",
     )  # fmt: skip
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
@@ -194,6 +194,8 @@ def main() -> int:
         record["balance"].append(balance_state(inner, COMMAND).cpu().numpy())
         phase = np.zeros(inner.num_envs, dtype=np.float32)
         record["biped_phase"].append(phase if biped is None else biped.phase.cpu().numpy())
+        # How far each env's plan is trusted (1 everywhere without the command's plan_trust).
+        record["plan_gain"].append(term.plan_gain().cpu().numpy())
         with torch.inference_mode():
             action = driver(obs["policy"])
         record["action_executed"].append(action.cpu().numpy())

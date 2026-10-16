@@ -1,22 +1,27 @@
 """How far to trust a plan: its own sampling noise, measured online, weighs it against the body.
 
-A task's generator is a sampler: two plans drawn a commitment apart predict the
-same stretch of the future differently, by how much its details are arbitrary.
-Measured on the steps two successive plans share, that disagreement is the
-plan's noise, component by component; the plan's own change from step to step
-is the variation it is meant to carry. A prior that turns the plan into joint
-targets fuses the two as a Kalman filter fuses a measurement with a prediction
-(Kalman 1960; the adaptive form estimates the noise from the innovations,
-Mehra 1970):
+A task's generator is a sampler: two plans drawn from the same history at the
+same moment differ by how much their details are arbitrary. Row by row -- each
+row a lead time -- that disagreement is the plan's noise ``R_k``, component by
+component; how far the plan's row lies from the body's state now,
+``E[(plan_k - now)^2] = S_k + R_k``, holds the motion it is meant to carry,
+``S_k``, plus that noise. A prior that turns the plan into joint targets fuses
+the two as a Kalman filter fuses a measurement with a prediction (Kalman 1960;
+the noise estimated online, Mehra 1970):
 
-    target = now + K (plan - now),    K = variation / (variation + noise)
+    target_k = now + K_k (plan_k - now),    K_k = S_k / (S_k + R_k) = 1 - R_k / E[(plan_k - now)^2]
 
-per component of ``z*``. The point-mass biped's plans are deterministic between
-redraws, so they are trusted fully (``K ≈ 1``); a generator's are trusted where
-its samples agree. No threshold is chosen: both terms are measured.
+per lead time and component of ``z*``. The point-mass biped's plans are
+deterministic; their noise is the one added to them (:func:`smooth_noise`),
+known exactly. No threshold is chosen: every term is measured.
 
-The same noise, applied to the biped's plans while a tracker trains
-(:func:`smooth_noise`), lets the tracker practise the plans it will be given.
+(Two first versions are superseded. One compared each plan with the one it
+replaced on the steps they share, where the replaced plan predicts them a
+commitment further ahead: that measured how a forecast's uncertainty grows
+with its lead, and trusted the generators' plans 0.2-0.3. One compared two
+samples but pooled their noise over a commitment against a single step's
+change: 0.35-0.67, still mixing lead times.)
+
 :func:`sway` adds the trunk's sway in the gait, which the point mass leaves free.
 
 Pure torch, batched over environments; ``z*`` in the contract's normalised units.
@@ -29,64 +34,47 @@ import math
 import torch
 
 
-def overlap_disagreement(
-    old_plan: torch.Tensor, old_age: torch.Tensor, new_plan: torch.Tensor
-) -> torch.Tensor:
-    """``(n, size)``: mean squared difference of two plans over the steps they share.
-
-    ``old_plan`` and ``new_plan`` are ``(n, length, size)``, on the body's control steps;
-    the old plan has been held ``old_age`` steps, so its row ``old_age + k`` and the new
-    plan's row ``k`` predict the same step.
-    """
-    length = old_plan.shape[1]
-    shared = length - int(old_age.max())
-    if shared <= 0:
-        return torch.zeros(old_plan.shape[0], old_plan.shape[2], device=old_plan.device)
-    rows = old_age[:, None] + torch.arange(shared, device=old_plan.device)
-    index = rows.clamp(max=length - 1)[..., None].expand(-1, -1, old_plan.shape[2])
-    old = torch.gather(old_plan, 1, index)
-    return (new_plan[:, :shared] - old).pow(2).mean(dim=1)
-
-
 def step_variation(plan: torch.Tensor) -> torch.Tensor:
     """``(n, size)``: mean squared change of a plan from one step to the next."""
     return (plan[:, 1:] - plan[:, :-1]).pow(2).mean(dim=1)
 
 
 class PlanTrust:
-    """Running estimates of a plan source's noise and variation, and the gain they give.
+    """Running estimates, per plan source, lead time and component, of a plan's noise and reach.
 
-    One row per source (a task's generator, the biped). The disagreement of two
-    independent samples has twice a sample's variance, so the noise is half of it.
+    ``noise`` is half the disagreement of two independent samples (their difference
+    has twice a sample's variance); ``reach`` is the mean squared distance of a plan's
+    row from the body's state when it was drawn.
     """
 
-    def __init__(self, sources: int, size: int, rate: float, device) -> None:
+    def __init__(self, sources: int, length: int, size: int, rate: float, device) -> None:
         self.rate = rate
-        self.noise = torch.zeros(sources, size, device=device)
-        self.variation = torch.zeros(sources, size, device=device)
+        self.noise = torch.zeros(sources, length, size, device=device)
+        self.reach = torch.zeros(sources, length, size, device=device)
         self.seen = torch.zeros(sources, dtype=torch.bool, device=device)
 
-    def update(self, source: int, disagreement: torch.Tensor, variation: torch.Tensor) -> None:
+    def update(self, source: int, disagreement: torch.Tensor, reach: torch.Tensor) -> None:
+        """``disagreement`` and ``reach``: ``(n, length, size)``, from ``n`` plans just drawn."""
         if len(disagreement) == 0:
             return
-        noise, var = 0.5 * disagreement.mean(dim=0), variation.mean(dim=0)
+        noise, far = 0.5 * disagreement.mean(dim=0), reach.mean(dim=0)
         if not bool(self.seen[source]):
-            self.noise[source], self.variation[source] = noise, var
+            self.noise[source], self.reach[source] = noise, far
             self.seen[source] = True
             return
         self.noise[source] += self.rate * (noise - self.noise[source])
-        self.variation[source] += self.rate * (var - self.variation[source])
+        self.reach[source] += self.rate * (far - self.reach[source])
 
     def gain(self, source: int) -> torch.Tensor:
-        """``(size,)``: ``K = variation / (variation + noise)``; 1 before anything is measured."""
-        variation, noise = self.variation[source], self.noise[source]
-        return torch.where(
-            variation + noise > 0, variation / (variation + noise).clamp(min=1e-12), 1.0
-        )
+        """``(length, size)``: ``K = 1 - noise / reach`` in ``[0, 1]``; 1 before any measure."""
+        reach, noise = self.reach[source], self.noise[source]
+        gain = 1.0 - noise / reach.clamp(min=1e-12)
+        return torch.where(reach > 0, gain.clamp(0.0, 1.0), 1.0)
 
 
 def fuse(now: torch.Tensor, plan: torch.Tensor, gain: torch.Tensor) -> torch.Tensor:
-    """``now + K (plan - now)``: the plan, trusted component by component."""
+    """``now + K (plan - now)``: the plan ``(n, rows, size)``, trusted row and component by
+    component (``gain`` broadcast against it)."""
     return now[:, None] + gain * (plan - now[:, None])
 
 
@@ -96,15 +84,14 @@ def smooth_noise(
     """``(n, length, size)``: noise shaped like a sampler's -- an offset and a drift per plan.
 
     Two samples of a smooth generator differ by a smooth function of time, not by
-    white noise; its two lowest modes (a constant and a ramp, each of half the
-    variance) carry ``noise`` per component.
+    white noise; its two lowest modes (a constant and a ramp, of equal variance)
+    carry ``noise``, per component or per row and component, on average over the plan.
     """
     n, length, size = shape
-    std = noise.clamp(min=0.0).sqrt()
-    offset = torch.randn(n, 1, size, device=device, generator=generator) * std / math.sqrt(2)
+    offset = torch.randn(n, 1, size, device=device, generator=generator) / math.sqrt(2)
+    slope = torch.randn(n, 1, size, device=device, generator=generator) / math.sqrt(2)
     ramp = torch.linspace(-1.0, 1.0, length, device=device)[None, :, None] * math.sqrt(3)
-    slope = torch.randn(n, 1, size, device=device, generator=generator) * std / math.sqrt(2)
-    return offset + ramp * slope
+    return (offset + ramp * slope) * noise.clamp(min=0.0).sqrt()
 
 
 def sway(gravity: torch.Tensor, pitch: torch.Tensor, roll: torch.Tensor) -> torch.Tensor:
@@ -122,7 +109,6 @@ def sway(gravity: torch.Tensor, pitch: torch.Tensor, roll: torch.Tensor) -> torc
 __all__ = [
     "PlanTrust",
     "fuse",
-    "overlap_disagreement",
     "smooth_noise",
     "step_variation",
     "sway",

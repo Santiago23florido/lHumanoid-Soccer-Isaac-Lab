@@ -148,8 +148,10 @@ class PhysicsPriorAction(JointPositionAction):
         window = term.age[:, None] + torch.arange(term.commit, device=self.device)
         ahead = term.plan[rows[:, None], window.clamp(max=term.plan.shape[1] - 1)]
         if self.cfg.trust_plan:
-            gain = term.plan_gain()
-            ahead = term._true_now[:, None] + gain[:, None] * (ahead - term._true_now[:, None])
+            # Each row by the gain of its own lead time since the plan was drawn.
+            lead = window.clamp(max=term.plan.shape[1] - 1)
+            gain = term.plan_gain()[rows[:, None], lead]
+            ahead = term._true_now[:, None] + gain * (ahead - term._true_now[:, None])
         ahead = term.generator.skill_norm.inverse(ahead)
         plan = ahead[:, 0]
         tilt = ahead[..., _TILT].mean(dim=1) if self.cfg.slow_tilt else plan[:, _TILT]

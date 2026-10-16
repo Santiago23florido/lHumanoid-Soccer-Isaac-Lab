@@ -50,7 +50,7 @@ from ....common.similarity import UnitSystem
 from ....common.skill_state import SKILL_LAYOUT
 from ...latent.contract import load_contract, plan_integrals
 from ...latent.memory import TimeGrid
-from ...latent.plan_trust import PlanTrust, overlap_disagreement, smooth_noise, step_variation, sway
+from ...latent.plan_trust import PlanTrust, smooth_noise, sway
 from ...latent.procedural import GaitRanges, PointMassBiped
 from ...latent.skill_torch import BodyConstants, proprioceptive_skill_state, skill_state
 
@@ -235,7 +235,7 @@ class ReferenceCommand(UniformVelocityCommand):
         # generator, row 1 the biped.
         self.trust = None
         if cfg.plan_trust or cfg.procedural_plan_noise:
-            self.trust = PlanTrust(2, size, cfg.trust_rate, self.device)
+            self.trust = PlanTrust(2, length, size, cfg.trust_rate, self.device)
         self.sway_amplitude = torch.zeros(n, 2, device=self.device)
         """Each procedural episode's trunk sway, pitch and roll, radians."""
 
@@ -595,6 +595,17 @@ class ReferenceCommand(UniformVelocityCommand):
         integrals = plan_integrals(self.generator.skill_norm.inverse(plan), step)
         integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
         integrals = torch.einsum("lk,nkd->nld", self.plan_matrix, integrals)
+        if self.trust is not None:
+            # A second sample from the same history: two plans at the same lead time differ
+            # by the generator's sampling noise exactly, over the steps a prior reads.
+            with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
+                second = self.generator.sample(window, command, torch.randn_like(noise)).float()
+            second = torch.nan_to_num(second, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
+            second = torch.einsum(
+                "lk,nkd->nld", self.plan_matrix, torch.cat([window[:, -1:], second], dim=1)
+            )
+            task_disagreement = (rows - second).pow(2)
+        applied = torch.zeros(rows.shape[1:], device=self.device)
         if self.biped is not None:
             # The biped's trajectory, read at the body's own instants, with its exact
             # displacement and turn for integrals.
@@ -617,23 +628,19 @@ class ReferenceCommand(UniformVelocityCommand):
                 and bool(self.trust.seen[0])
             ):
                 # The biped's plans carry the noise the task's generator is measured to have.
-                ahead = ahead + smooth_noise(
-                    tuple(ahead.shape), self.trust.noise[0], device=self.device
-                )
+                applied = self.trust.noise[0].clone()
+                ahead = ahead + smooth_noise(tuple(ahead.shape), applied, device=self.device)
             chosen = self.procedural[ids]
             rows = torch.where(chosen[:, None, None], ahead, rows)
             integrals = torch.where(chosen[:, None, None], moved, integrals)
         if self.trust is not None:
-            # Each continuing plan against the one it replaces, on the steps they share.
-            going = (self.has_plan[ids] & ~anchor).nonzero().squeeze(-1)
-            if len(going) > 0:
-                disagreement = overlap_disagreement(
-                    self.plan[ids[going]], self.age[ids[going]], rows[going]
-                )
-                variation = step_variation(rows[going])
-                source = self.procedural[ids[going]]
-                self.trust.update(0, disagreement[~source], variation[~source])
-                self.trust.update(1, disagreement[source], variation[source])
+            # Row by row, the noise against how far the plan reaches from the body now; the
+            # biped's noise is the one added to it, known exactly.
+            far = (rows - self._true_now[ids][:, None]).pow(2)
+            biped = self.procedural[ids]
+            self.trust.update(0, task_disagreement[~biped], far[~biped])
+            known = (2.0 * applied).expand(int(biped.sum()), -1, -1)
+            self.trust.update(1, known, far[biped])
         self.plan[ids] = rows
         self.integrals[ids] = integrals
         com, yaw = self._frame_now
@@ -754,11 +761,12 @@ class ReferenceCommand(UniformVelocityCommand):
         self.estimate = estimate
 
     def plan_gain(self) -> torch.Tensor:
-        """``(N, 27)``: how far each env's plan is trusted, by its source (1 without trust)."""
+        """``(N, length, 27)``: how far each env's plan is trusted at each lead time, by its
+        source (1 without trust)."""
         if self.trust is None:
-            return torch.ones_like(self._true_now)
+            return torch.ones_like(self.plan)
         task, biped = self.trust.gain(0), self.trust.gain(1)
-        return torch.where(self.procedural[:, None], biped, task)
+        return torch.where(self.procedural[:, None, None], biped, task)
 
     # -- what the tracker and its critic read --------------------------------
 

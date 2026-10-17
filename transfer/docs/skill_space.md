@@ -1755,6 +1755,57 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     - the published flat policy, the same and passing every command on both;
     - the NAO still misses the duty on rough's fast and turning commands at its own rate.
 - **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
+- **F4 at equal competence: the warm study** (`transfer/scripts/warm_study.sh`). Both arms
+  start from the incumbent (r3, iteration 6194) and get 1000 PPO iterations under the
+  study's conditions:
+  - `warm_r3` continues the incumbent's PPO in the plain task;
+  - `warm_v2t` distils the incumbent into the physics task (`distill_tracker.py`) and goes on
+    from there.
+
+  The physics arm's first two rounds collapsed within PPO's first 50 iterations. Reward at
+  iteration 50 was −14 and −17, against +31 for the control (`logs/contract/train_warm_*.log`).
+  Both rounds are superseded. Three faults were found, in this order:
+  1. *A fresh optimizer and untrained heads.* Round 2 handed PPO the distillation's own Adam
+     and heads already fitted on the trunk, and collapsed the same way: this was not the cause.
+  2. *The rate cost read the residual.* The inherited `action_rate_l2` read the residual
+     (scale 0.25) where the plain task's reads its own action (0.5). The same joint motion
+     therefore cost four times as much: −1.86 against −0.50 at iteration 50. Every move of the
+     prior the policy did not cancel was also charged to it, which rewards following the
+     prior: a strategy, not the task. With `HUMANOID_TARGET_RATE=1` the cost is the joint
+     targets' rate in the plain task's units.
+  3. *The teacher was shown the wrong input. This decided it.* The physics task's policy
+     group begins with the plain tracker's terms, but its `actions` term is the residual: other
+     units, and relative to the prior. The labels were the teacher's answers to an input it
+     never saw. The student matched them to 0.01 rad, yet at iteration 11 it already left
+     episodes far more often than the control: falls 0.16 against 0.005 of episode ends.
+     Measured where the labels are drawn (`transfer/scripts/teacher_view_study.sh`,
+     `teacher_in_physics.py`; deterministic, 4096 envs × 600 steps; terminations per 1000
+     steps, `transfer/results/teacher_in_*.json`):
+
+     | the incumbent's targets | its own task | physics task, shown the residual | physics task, shown its own last action |
+     | --- | --- | --- | --- |
+     | as they are | 0.014 | 16.4 | 0.120 |
+     | cut at the soft limits | 0.033 | 1.9 | 1.67 |
+     | cut where the drives saturate | 0.013 | 0.51 | 0.120 |
+     | saturated, less feed-forward / stiffness | | | **0.016** |
+
+     - Shown its own last action (`TeacherView`), the teacher is 137 times safer in the
+       physics task.
+     - The remaining factor of about 8 (0.120 against 0.016) is the prior's feed-forward, which the teacher does not
+       know of. Taking it out of the target (over each joint's stiffness) gives back the
+       teacher's own torque, and its own task's rate.
+     - Cutting the targets at the soft limits, as round 2 did, costs torque the teacher uses.
+       Cutting them where the drives saturate changes nothing.
+     - The distillation now uses its own view, the saturation cut and the compensation.
+
+  What the faults affected:
+  - The round-1 ladder of the physics arm (`*_warm_v2t_round1_*.json`) measured a student
+    distilled from wrong labels and trained under the residual cost. It says nothing about the
+    prior.
+  - The from-scratch rounds above (v2h, v2t) had no teacher, but were trained under the
+    residual cost. Their comparison with v1 carries a smoothness cost four times heavier and a
+    pull towards the prior.
+  - The control arm is untouched.
 
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:
 

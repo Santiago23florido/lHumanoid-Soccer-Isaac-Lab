@@ -1735,6 +1735,25 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
   - *F1, under the deployed estimator, G1:* `rough_b4` falls 0/192 against `rough_b3`'s 4/190
     (about 2 SE). The NAO's half of the re-baseline is left: the run paused when the user's own
     jobs needed the GPU.
+- **F1 decided, under the deployed estimator** (`zero_shot_{g1_r3_6194_sym_v3,nao_r1_3498_sym_v3}_*_auto_kin_l4_*.json`).
+  Falls over the three commands; "passes" is at the body's rate:
+
+  | | G1 | NAO |
+  | --- | --- | --- |
+  | `rough_b3` | 4/190 | 0/192; passes 1 of 3 |
+  | **`rough_b4`** | **0/192** | **0/192; passes 2 of 3** |
+  | `flat_dagger2` | 0/192; passes 3 | 0/192; passes 3 |
+  | `flat_b4` | 0/192; passes 3 | 0/192; forward misses stride |
+
+  - *Rough adopts `rough_b4`.* It improves the G1's falls by 2.02 standard errors, just past the
+    rule's bar, and is no worse on the NAO (`incumbents.json`).
+  - *Flat keeps `flat_dagger2`.* `flat_b4` misses one check of S0 on the NAO.
+  - *Where the transfer stands, with the tasks' learned plans and both trackers frozen and
+    deployed:*
+    - the published rough-terrain policy walks on the G1 and on the NAO without falling (0 of
+      384 episodes);
+    - the published flat policy, the same and passing every command on both;
+    - the NAO still misses the duty on rough's fast and turning commands at its own rate.
 - **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
 
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:

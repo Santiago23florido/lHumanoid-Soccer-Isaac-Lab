@@ -9,8 +9,16 @@ to the incumbent's joint targets on the states it visits itself (DAgger, Ross et
 
 * **Teacher.** The incumbent's deployed (symmetrized) actor, which reads the plain
   tracker's observations: the physics task's policy group extends them, so they are
-  its first columns. Its joint target ``q = q0 + 0.5 a`` becomes the student's residual
-  target ``(q - offset - prior) / scale``.
+  its first columns -- all but its last action, which there is the physics task's
+  residual; the teacher is shown its own previous output instead (:class:`TeacherView`;
+  the first two distillations were not, and their labels were the teacher's answers to
+  an input it never saw). Its joint target ``q = q0 + 0.5 a``, limited by
+  ``--label-limits``, less the prior's feed-forward over the joint's stiffness (the
+  target whose drive torque plus that feed-forward is the teacher's own), becomes the
+  student's residual target ``(q - offset - prior) / scale``. Run so through the physics
+  task the teacher ends 0.016 episodes per 1000 steps, as in its own (0.014); with its
+  targets as they are, 0.12; shown the residual, 16
+  (``transfer/scripts/teacher_view_study.sh``, ``teacher_in_physics.py``).
 * **Rollouts.** Each round runs the student, and a share of the envs, falling from all
   to none over the rounds, runs the teacher's target instead (DAgger's mixture).
 * **Exploration.** The student's action noise is set to the teacher's in joint space,
@@ -56,6 +64,19 @@ parser.add_argument("--replay", type=int, default=12, help="Rounds of data train
 parser.add_argument("--epochs", type=int, default=4)
 parser.add_argument("--batch", type=int, default=8192)
 parser.add_argument("--learning-rate", type=float, default=5e-4)
+parser.add_argument(
+    "--compensate",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="Take the prior's feed-forward out of the teacher's targets (see above).",
+)
+parser.add_argument(
+    "--label-limits",
+    choices=("saturation", "soft", "none"),
+    default="saturation",
+    help="Where the teacher's targets are cut: where its drives saturate (a limit plus effort "
+    "over stiffness, past which a target changes no torque), at the soft limits, or nowhere.",
+)
 parser.add_argument("--seed", type=int, default=41)
 parser.add_argument("--run_name", default="distill_v2t")
 AppLauncher.add_app_launcher_args(parser)
@@ -67,6 +88,7 @@ import gymnasium as gym  # noqa: E402
 import humanoid_transfer.tasks  # noqa: E402, F401
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
+from humanoid_transfer.transfer.tasks.tracking.teacher_view import TeacherView  # noqa: E402
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg  # noqa: E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry  # noqa: E402
@@ -126,6 +148,18 @@ def main() -> int:
         group["lr"] = args_cli.learning_rate
     heads = getattr(actor, "physics_group", None)
     limits = robot.data.soft_joint_pos_limits[:, term._action_joints]
+    if args_cli.label_limits == "saturation":
+        joints = term._action_joints
+        reach = robot.data.joint_effort_limits[:, joints] / robot.data.joint_stiffness[:, joints]
+        limits = torch.stack([limits[..., 0] - reach, limits[..., 1] + reach], dim=-1)
+    stiffness = robot.data.joint_stiffness[:, term._action_joints]
+    view = TeacherView(
+        inner.observation_manager,
+        {"policy": policy_width, "critic": critic_width},
+        env.num_envs,
+        term.action_dim,
+        device,
+    )
     groups = list(actor.obs_groups) + [g for g in critic.obs_groups if g not in actor.obs_groups]
     if heads is not None:
         groups.append(heads)
@@ -137,16 +171,20 @@ def main() -> int:
         falls = 0
         for _ in range(args_cli.steps):
             with torch.no_grad():
-                # A target beyond a joint's limit asks for nothing the limit does not stop.
-                q_teacher = default + args_cli.teacher_scale * teacher(
-                    obs["policy"][:, :policy_width]
-                )
-                q_teacher = torch.maximum(torch.minimum(q_teacher, limits[..., 1]), limits[..., 0])
+                taught = teacher(view.observation(obs, "policy"))
+                q_teacher = default + args_cli.teacher_scale * taught
+                if args_cli.label_limits != "none":
+                    q_teacher = torch.maximum(
+                        torch.minimum(q_teacher, limits[..., 1]), limits[..., 0]
+                    )
+                if args_cli.compensate:
+                    shift = term._feedforward / stiffness.clamp(min=1e-6)
+                    q_teacher = q_teacher - torch.where(stiffness > 0, shift, 0.0)
                 on_prior = torch.where(term._mask, term._targets, 0.0)
                 target = (q_teacher - term._offset - on_prior) / term._scale
                 value = teacher_critic(
                     TensorDict(
-                        {"critic": obs["critic"][:, :critic_width]}, batch_size=obs.batch_size
+                        {"critic": view.observation(obs, "critic")}, batch_size=obs.batch_size
                     )
                 )
                 actor.update_normalization(obs)
@@ -159,6 +197,9 @@ def main() -> int:
             batch["target"].append(target[kept].cpu())
             batch["value"].append(value[kept].cpu())
             obs, _, dones, extras = env.step(action)
+            # The teacher's last action is its own output, whoever acted: its state, as a
+            # recurrent teacher's would be, and the input it was trained and deployed on.
+            view.record(taught, dones)
             timed_out = extras.get("time_outs", torch.zeros_like(dones))
             falls += int(timed_out.logical_not().logical_and(dones).sum())
         replay.append({k: torch.cat(v) for k, v in batch.items()})
@@ -198,7 +239,12 @@ def main() -> int:
     path = os.path.join(log_dir, "model_0.pt")
     saved_dict = runner.alg.save()
     saved_dict["iter"] = 0
-    saved_dict["infos"] = {"distilled_from": str(args_cli.teacher_checkpoint)}
+    saved_dict["infos"] = {
+        "distilled_from": str(args_cli.teacher_checkpoint),
+        "label_limits": args_cli.label_limits,
+        "compensate": args_cli.compensate,
+        "teacher_view": "own last action",
+    }
     torch.save(saved_dict, path)
     Path(log_dir, "distill.json").write_text(json.dumps(history, indent=2) + "\n", encoding="utf-8")
     print(f"distilled into {path}")

@@ -10,6 +10,11 @@
 # autonomous reference, seed 41); then the ladder for both, unsymmetrized alike, with the
 # incumbent generators (rough_b4, flat_dagger2) and the kinematic estimator.
 #
+# The physics arm pays for joint motion as the plain one does (HUMANOID_TARGET_RATE=1, the joint
+# targets' rate in the plain tracker's units): on the residual, the cost was four times the plain
+# task's for the same motion and charged every move of the prior left uncancelled, and both
+# earlier rounds of this arm collapsed under it in PPO's first 50 iterations.
+#
 #   transfer/scripts/warm_study.sh          (from the repository root, under Start-Process)
 set -uo pipefail
 
@@ -24,17 +29,21 @@ export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt"
 export HUMANOID_PROCEDURAL=0.7 HUMANOID_SYMMETRY=loss
 
 note "warm study start"
-# 1. Distil.
+# 1. Distil (WARM_DISTILLED=<run directory> reuses one: the distillation reads no reward).
+distilled="${WARM_DISTILLED:-}"
+if [ -z "$distilled" ]; then
 HUMANOID_HEADS=1 HUMANOID_PLAN_TRUST=1 "$python" -u transfer/scripts/distill_tracker.py --headless \
   --teacher "logs/rsl_rl/g1_track/${incumbent}/exported/model_6194_sym.pt" \
   --teacher-checkpoint "logs/rsl_rl/g1_track/${incumbent}/model_6194.pt" \
   --run_name distill_v2t > logs/contract/distill_v2t.log 2>&1
 distilled="$(ls -d logs/rsl_rl/g1_track_physics/*_distill_v2t 2>/dev/null | tail -1)"
+fi
 if [ -z "$distilled" ] || [ ! -f "$distilled/model_0.pt" ]; then note "distillation FAILED"; exit 1; fi
-note "distilled: $(tail -3 logs/contract/distill_v2t.log | head -1)"
+note "distilled: $distilled $(tail -3 logs/contract/distill_v2t.log | head -1)"
 
 # 2. PPO from the distilled physics tracker.
-HUMANOID_HEADS=1 HUMANOID_PLAN_TRUST=1 "$python" -u scripts/train.py --task G1TrackPhysics-v0 \
+HUMANOID_HEADS=1 HUMANOID_PLAN_TRUST=1 HUMANOID_TARGET_RATE="${HUMANOID_TARGET_RATE:-1}" \
+  "$python" -u scripts/train.py --task G1TrackPhysics-v0 \
   --headless --num_envs 4096 --max_iterations "$iterations" --seed 41 --run_name warm_v2t \
   --resume --load_run "$(basename "$distilled")" --checkpoint model_0.pt \
   > logs/contract/train_warm_v2t.log 2>&1 || note "warm_v2t training FAILED"

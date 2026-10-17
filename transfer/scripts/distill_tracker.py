@@ -118,9 +118,17 @@ def main() -> int:
         )
 
     parameters = [p for p in actor.parameters() if p is not actor.distribution.std_param]
-    optimiser = torch.optim.Adam([*parameters, *critic.parameters()], lr=args_cli.learning_rate)
+    # PPO's own optimizer, so its moments are not empty when PPO takes over from here (a fresh
+    # Adam's first steps are as large as its rate, and broke the first distilled tracker).
+    optimiser = runner.alg.optimizer
+    ppo_rate = [group["lr"] for group in optimiser.param_groups]
+    for group in optimiser.param_groups:
+        group["lr"] = args_cli.learning_rate
+    heads = getattr(actor, "physics_group", None)
     limits = robot.data.soft_joint_pos_limits[:, term._action_joints]
     groups = list(actor.obs_groups) + [g for g in critic.obs_groups if g not in actor.obs_groups]
+    if heads is not None:
+        groups.append(heads)
     replay: deque = deque(maxlen=args_cli.replay)
     history = []
     for round_index in range(args_cli.rounds):
@@ -166,8 +174,13 @@ def main() -> int:
                 part = observations[chunk].to(device)
                 action_loss = F.mse_loss(actor(part), targets[chunk].to(device))
                 value_loss = F.mse_loss(critic(part), values[chunk].to(device))
+                total = action_loss + value_loss
+                if heads is not None:
+                    # The physics heads fitted on the trunk's features as they are, so PPO does
+                    # not start from heads whose loss pulls the trunk.
+                    total = total + actor.physics_loss(actor.trunk(part).detach(), part[heads])
                 optimiser.zero_grad(set_to_none=True)
-                (action_loss + value_loss).backward()
+                total.backward()
                 torch.nn.utils.clip_grad_norm_([*parameters, *critic.parameters()], 1.0)
                 optimiser.step()
                 losses.append((float(action_loss), float(value_loss)))
@@ -179,6 +192,8 @@ def main() -> int:
         cells = (f"{k} {v:.4g}" if isinstance(v, float) else f"{k} {v}" for k, v in row.items())
         print(" ".join(cells), flush=True)
 
+    for group, rate in zip(optimiser.param_groups, ppo_rate, strict=True):
+        group["lr"] = rate
     # The runner's own save, without its logger (set up only by learn()).
     path = os.path.join(log_dir, "model_0.pt")
     saved_dict = runner.alg.save()

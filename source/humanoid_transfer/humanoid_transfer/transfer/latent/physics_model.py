@@ -102,6 +102,14 @@ class PhysicsActor(MLPModel):
             return self.distribution.deterministic_output(output)
         return output
 
+    def trunk(self, obs: TensorDict) -> torch.Tensor:
+        """The last hidden layer's features, which the action and the physics heads both read."""
+        features = self.get_latent(obs)
+        *hidden, _ = list(self.mlp)
+        for layer in hidden:
+            features = layer(features)
+        return features
+
     def physics_loss(self, features: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Gaussian negative log-likelihood of the measured balance, per quantity, averaged."""
         with torch.no_grad():

@@ -40,16 +40,19 @@ HUMANOID_HEADS=1 HUMANOID_PLAN_TRUST=1 "$python" -u scripts/train.py --task G1Tr
   > logs/contract/train_warm_v2t.log 2>&1 || note "warm_v2t training FAILED"
 note "warm_v2t trained"
 
-# 3. PPO continued on the incumbent itself.
+# 3. PPO continued on the incumbent itself (WARM_ARMS=v2t skips it once it has run).
+arms="${WARM_ARMS:-v2t r3}"
+if [[ " $arms " == *" r3 "* ]]; then
 HUMANOID_HEADS=0 HUMANOID_PLAN_TRUST=0 "$python" -u scripts/train.py --task G1Track-v0 \
   --headless --num_envs 4096 --max_iterations "$iterations" --seed 41 --run_name warm_r3 \
   --resume --load_run "$incumbent" --checkpoint model_6194.pt \
   > logs/contract/train_warm_r3.log 2>&1 || note "warm_r3 training FAILED"
 note "warm_r3 trained"
+fi
 
 # 4. The ladder for both.
 export ZS_REFERENCE=autonomous ZS_ESTIMATOR=kinematic
-for arm in warm_v2t warm_r3; do
+for arm in $(for a in $arms; do echo "warm_$a"; done); do
   if [ "$arm" = warm_v2t ]; then
     run="$(ls -d logs/rsl_rl/g1_track_physics/*_warm_v2t | tail -1)"
     export ZS_TASK_ID=G1TrackPhysics-Play-v0 HUMANOID_HEADS=1 HUMANOID_PLAN_TRUST=1

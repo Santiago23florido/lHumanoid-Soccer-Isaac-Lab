@@ -116,6 +116,12 @@ class PhysicsPriorAction(JointPositionAction):
         self._targets = torch.zeros(self.num_envs, self.action_dim, device=self.device)
         self._feedforward = torch.zeros(self.num_envs, self.action_dim, device=self.device)
         self._stamp = -1
+        # The last step's joint targets, for a smoothness cost on what the joints are sent
+        # (joint_target_rate_l2). After a reset they are the default pose, as a plain joint
+        # term's are: its previous action is zero.
+        self._rest = robot.data.default_joint_pos[:, joints].clone()
+        self._previous_targets = self._rest.clone()
+        self._restarted = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
 
     # -- the prior ------------------------------------------------------------
 
@@ -223,6 +229,10 @@ class PhysicsPriorAction(JointPositionAction):
 
     def process_actions(self, actions: torch.Tensor) -> None:
         self.prior()
+        self._previous_targets[:] = torch.where(
+            self._restarted[:, None], self._rest, self._processed_actions
+        )
+        self._restarted[:] = False
         self._raw_actions[:] = actions
         residual = self._raw_actions * self._scale
         on_prior = torch.where(self._mask, self._targets, 0.0)
@@ -239,6 +249,7 @@ class PhysicsPriorAction(JointPositionAction):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         super().reset(env_ids)
         self._stamp = -1
+        self._restarted[slice(None) if env_ids is None else env_ids] = True
 
 
 @configclass
@@ -287,10 +298,26 @@ class PhysicsPriorActionCfg(JointPositionActionCfg):
     feedforward_gain: float = 1.0
 
 
+def joint_target_rate_l2(
+    env: ManagerBasedEnv, action_name: str = "joint_pos", scale: float = 0.5
+) -> torch.Tensor:
+    """``(N,)``: the squared change of the joint targets, in units of ``scale`` radians.
+
+    With ``scale`` the plain tracker's action scale this is that tracker's ``action_rate_l2``
+    term for term (its target is ``q0 + scale * a``): both tasks pay for the same joint motion.
+    On the residual instead, the cost would grow as the residual's scale shrinks, and would
+    charge the policy for every move of the prior it did not cancel -- a reward for following
+    the prior, which is a strategy, not the task.
+    """
+    term = env.action_manager.get_term(action_name)
+    change = (term.processed_actions - term._previous_targets) / scale
+    return torch.sum(torch.square(change), dim=1)
+
+
 def prior_offset(env: ManagerBasedEnv, action_name: str = "joint_pos") -> torch.Tensor:
     """``(N, joints)``: how far the prior's targets are from the joints, zero off its joints."""
     term = env.action_manager.get_term(action_name)
     return term.prior()
 
 
-__all__ = ["PhysicsPriorAction", "PhysicsPriorActionCfg", "prior_offset"]
+__all__ = ["PhysicsPriorAction", "PhysicsPriorActionCfg", "joint_target_rate_l2", "prior_offset"]

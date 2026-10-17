@@ -13,11 +13,12 @@ import os
 
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlMLPModelCfg
 
 from .balance import balance_state
-from .physics_prior import prior_offset
+from .physics_prior import joint_target_rate_l2, prior_offset
 
 HEADS = os.environ.get("HUMANOID_HEADS", "0") == "1"
 """The second layer: the critic reads the body's measured balance, and the actor's features
@@ -29,6 +30,11 @@ PRIOR = os.environ.get("HUMANOID_PRIOR", "full")
 PLAN_TRUST = os.environ.get("HUMANOID_PLAN_TRUST", "0") == "1"
 """The prior trusts a plan by its measured sampling noise and aims the trunk at its slow tilt;
 the biped's plans carry the generator's measured noise and the gait's trunk sway (§9.1)."""
+
+TARGET_RATE = os.environ.get("HUMANOID_TARGET_RATE", "0") == "1"
+"""The smoothness cost on the joint targets, in the plain tracker's units, instead of on the
+residual (:func:`~.physics_prior.joint_target_rate_l2`). Off, the inherited ``action_rate_l2``
+reads the residual: the runs of §9 and §9.1 before the warm study's second round."""
 
 SWAY = 0.035
 """Largest procedural trunk sway, radians: twice the walk teacher's (0.015 pitch, 0.017 roll),
@@ -71,6 +77,20 @@ def prior_switches() -> dict[str, bool]:
     }
 
 
+def rate_on_targets(rewards, plain_scale: float) -> None:
+    """With ``HUMANOID_TARGET_RATE=1``: ``action_rate_l2`` becomes the joint targets' rate, at
+    its weight, in units of the plain tracker's action scale ``plain_scale``."""
+    if not TARGET_RATE or rewards.action_rate_l2 is None:
+        return
+    weight = rewards.action_rate_l2.weight
+    rewards.action_rate_l2 = None
+    rewards.joint_target_rate_l2 = RewTerm(
+        func=joint_target_rate_l2,
+        weight=weight,
+        params={"action_name": "joint_pos", "scale": float(plain_scale)},
+    )
+
+
 def trust_plans(command) -> None:
     """With ``HUMANOID_PLAN_TRUST=1``: the command measures its plans' noise, and its biped's
     plans carry that noise and the gait's trunk sway."""
@@ -108,6 +128,8 @@ __all__ = [
     "HEADS",
     "PLAN_TRUST",
     "SWAY",
+    "TARGET_RATE",
+    "rate_on_targets",
     "trust_plans",
     "PhysicsActorCfg",
     "with_physics_heads",

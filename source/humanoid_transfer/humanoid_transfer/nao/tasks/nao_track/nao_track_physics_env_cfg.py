@@ -18,6 +18,7 @@ from isaaclab.utils import configclass
 from ....transfer.tasks.tracking.physics_cfg import (
     add_physics_observations,
     prior_switches,
+    rate_on_targets,
     trust_plans,
 )
 from ....transfer.tasks.tracking.physics_prior import PhysicsPriorActionCfg
@@ -62,6 +63,7 @@ class NaoTrackPhysicsEnvCfg(NaoTrackEnvCfg):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        rate_on_targets(self.rewards, self.actions.joint_pos.scale)
         self.actions.joint_pos = _prior_action()
         add_physics_observations(self.observations, COMMAND)
         trust_plans(self.commands.base_velocity)
@@ -71,6 +73,7 @@ class NaoTrackPhysicsEnvCfg(NaoTrackEnvCfg):
 class NaoTrackPhysicsEnvCfg_PLAY(NaoTrackEnvCfg_PLAY):
     def __post_init__(self) -> None:
         super().__post_init__()
+        rate_on_targets(self.rewards, self.actions.joint_pos.scale)
         self.actions.joint_pos = _prior_action()
         add_physics_observations(self.observations, COMMAND)
         trust_plans(self.commands.base_velocity)

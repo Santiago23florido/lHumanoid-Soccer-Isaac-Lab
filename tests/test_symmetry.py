@@ -172,3 +172,74 @@ def test_the_priors_feedforward_reflects_as_a_joint_velocity(g1: dict) -> None:
     velocity = observation_mirror([("joint_vel", len(names))], p, mean, std)
     np.testing.assert_allclose(torque.linear, velocity.linear)
     np.testing.assert_allclose(torque.offset, 0.0)
+
+
+def _plain_and_core(g1: dict, history: int):
+    """One random plain observation, and the core's view of the same state with a history."""
+    names = [row["name"] for row in g1["joints"]]
+    joints, skill = len(names), SKILL_LAYOUT.size
+    rng = np.random.default_rng(2)
+    mean = rng.normal(size=skill)
+    std = rng.uniform(0.1, 2.0, size=skill)
+    p = joint_mirror(names, g1)
+    plain_terms = _tracker_terms(joints)
+    plain = observation_mirror(plain_terms, p, mean, std)
+    core_terms = [
+        ("contract_tokens", VIEW * (skill + 3)),
+        ("base_lin_vel", 3 * history),
+        ("base_ang_vel", 3 * history),
+        ("projected_gravity", 3 * history),
+        ("joint_pos", joints * history),
+        ("joint_vel", joints * history),
+        ("actions", joints * history),
+        ("contract_estimate", skill),
+    ]
+    core = observation_mirror(core_terms, p, mean, std)
+    return plain, plain_terms, core, rng, joints, skill
+
+
+def _split(x: np.ndarray, terms) -> dict[str, np.ndarray]:
+    out, at = {}, 0
+    for name, width in terms:
+        out[name] = x[..., at : at + width]
+        at += width
+    return out
+
+
+def test_the_cores_view_reflects_as_the_plain_view_it_rearranges(g1: dict) -> None:
+    """Tokens are the plain view's plan rows and path interleaved; each history step is a
+    plain step. Reflecting the core's view must equal rearranging the reflected plain one."""
+    history = 4
+    plain, plain_terms, core, rng, joints, skill = _plain_and_core(g1, history)
+    steps = [rng.normal(size=(3, plain.offset.shape[0])) for _ in range(history)]
+
+    def core_view(plains: list[np.ndarray]) -> np.ndarray:
+        parts = [_split(x, plain_terms) for x in plains]
+        now = parts[-1]
+        rows = now["contract"][:, : VIEW * skill].reshape(-1, VIEW, skill)
+        path = now["contract_path"].reshape(-1, VIEW, 3)
+        tokens = np.concatenate([rows, path], axis=-1).reshape(rows.shape[0], -1)
+        stacked = [
+            np.concatenate([p[name] for p in parts], axis=-1)
+            for name in ("base_lin_vel", "base_ang_vel", "projected_gravity", "joint_pos",
+                         "joint_vel", "actions")
+        ]  # fmt: skip
+        estimate = now["contract"][:, VIEW * skill :]
+        return np.concatenate([tokens, *stacked, estimate], axis=-1)
+
+    x = core_view(steps)
+    reflected = x @ core.linear.T + core.offset
+    expected = core_view([s @ plain.linear.T + plain.offset for s in steps])
+    np.testing.assert_allclose(reflected, expected, atol=1e-10)
+    np.testing.assert_allclose(reflected @ core.linear.T + core.offset, x, atol=1e-10)
+
+
+def test_a_history_that_is_not_whole_steps_is_refused(g1: dict) -> None:
+    names = [row["name"] for row in g1["joints"]]
+    with pytest.raises(ValueError):
+        observation_mirror(
+            [("joint_pos", len(names) * 4 + 1)],
+            joint_mirror(names, g1),
+            np.zeros(SKILL_LAYOUT.size),
+            np.ones(SKILL_LAYOUT.size),
+        )

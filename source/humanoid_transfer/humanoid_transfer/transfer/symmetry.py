@@ -146,6 +146,13 @@ class AffineMirror:
         return self
 
 
+def _steps(name: str, width: int, base: int) -> int:
+    """How many copies of a ``base``-wide term a ``width``-wide one holds (its history)."""
+    if width % base:
+        raise ValueError(f"term {name!r} is {width} wide, not a whole number of {base}")
+    return width // base
+
+
 def observation_mirror(
     terms: Sequence[tuple[str, int]],
     joints: np.ndarray,
@@ -158,30 +165,40 @@ def observation_mirror(
 
     The names are those of the tracking environments' observation terms; one this
     does not know is an error, never passed through unreflected. The offsets are
-    :func:`joint_offsets`' (zero when the default pose is symmetric).
+    :func:`joint_offsets`' (zero when the default pose is symmetric). A term kept with a
+    history (decoder v2's core) is that many copies of its width, oldest first, each
+    reflected alike.
     """
     skill = SKILL_LAYOUT.size
+    count = joints.shape[0]
     relative, _ = normalised_skill_mirror(skill_mean, skill_std)
     absolute = normalised_skill_mirror(skill_mean, skill_std)
     mirror = AffineMirror(sum(width for _, width in terms))
     for name, width in terms:
         if name in ("base_lin_vel", "projected_gravity"):
-            mirror.add(VECTOR)
+            mirror.add(VECTOR, repeat=_steps(name, width, 3))
         elif name == "base_ang_vel":
-            mirror.add(AXIAL)
+            mirror.add(AXIAL, repeat=_steps(name, width, 3))
         elif name in ("velocity_commands",):
             mirror.add(PLANAR)
         elif name == "joint_pos":
-            mirror.add(joints, position_offset)
+            mirror.add(joints, position_offset, repeat=_steps(name, width, count))
         elif name in ("joint_vel", "prior", "feedforward"):
             # Velocities, the prior's targets relative to the joints, and its feed-forward over
             # each joint's stiffness (a joint torque reflects as a joint velocity): no offset.
-            mirror.add(joints)
+            mirror.add(joints, repeat=_steps(name, width, count))
         elif name == "actions":
-            mirror.add(joints, action_offset)
+            mirror.add(joints, action_offset, repeat=_steps(name, width, count))
         elif name == "contract":
             # The plan over the view relative to ẑ*, then ẑ*.
             mirror.add(relative, repeat=(width - skill) // skill)
+            mirror.add(*absolute)
+        elif name == "contract_tokens":
+            # Row by row of the view: the plan relative to ẑ*, then where the reference is.
+            for _ in range(_steps(name, width, skill + 3)):
+                mirror.add(relative)
+                mirror.add(PLANAR)
+        elif name == "contract_estimate":
             mirror.add(*absolute)
         elif name == "privileged":
             # The plan relative to the true z*, the true z*, the plan's age.

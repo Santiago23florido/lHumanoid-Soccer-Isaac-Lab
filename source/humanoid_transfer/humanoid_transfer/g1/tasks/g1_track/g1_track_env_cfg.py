@@ -74,6 +74,12 @@ def _body_card() -> dict:
     return json.loads(BODY_CARD.read_text(encoding="utf-8"))
 
 
+def _sole_corners(foot: dict) -> list[list[float]]:
+    """The four corners of a foot's sole, in its link frame: its collision box's underside."""
+    low, high = foot["bbox_min_link"], foot["bbox_max_link"]
+    return [[x, y, low[2]] for x in (low[0], high[0]) for y in (low[1], high[1])]
+
+
 @configclass
 class TrackPolicyCfg(ObsGroup):
     """The tracker's input: the teacher's proprioception, the plan, no command."""
@@ -176,6 +182,7 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             base_body=BASE_BODY,
             foot_bodies=list(FOOT_BODIES),
             sole_points=[list(card["foot"][name]["sole_point_link"]) for name in FOOT_BODIES],
+            sole_corners=[_sole_corners(card["foot"][name]) for name in FOOT_BODIES],
             leg_length=float(card["leg_length"]),
             flow_solver="midpoint",
             flow_steps=8,

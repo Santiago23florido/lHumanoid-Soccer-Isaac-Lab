@@ -50,8 +50,9 @@ from ....common.similarity import UnitSystem
 from ....common.skill_state import SKILL_LAYOUT
 from ...latent.contract import load_contract, plan_integrals
 from ...latent.memory import TimeGrid
+from ...latent.plan_trust import PlanTrust, smooth_noise, sway
 from ...latent.procedural import GaitRanges, PointMassBiped
-from ...latent.skill_torch import BodyConstants, skill_state
+from ...latent.skill_torch import BodyConstants, proprioceptive_skill_state, skill_state
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -60,6 +61,8 @@ _TOLERANCE = 1e-6
 _PLAN_LIMIT = 50.0
 _VX = SKILL_LAYOUT.slice_of("com_velocity").start
 _YAW_RATE = SKILL_LAYOUT.slice_of("base_angular_velocity").start + 2
+_LOAD = SKILL_LAYOUT.slice_of("foot_load")
+_TILT = SKILL_LAYOUT.slice_of("gravity")
 """Normalised units: fifty standard deviations of the teacher's ``z*``."""
 
 
@@ -115,6 +118,10 @@ class ReferenceCommand(UniformVelocityCommand):
         inertia = view.get_inertias()[0].to(self.device, torch.float32).reshape(-1, 3, 3)
         com_offset = self.robot.data.body_com_pos_b[0].to(torch.float32)
         sole_points = torch.tensor(cfg.sole_points, device=self.device, dtype=torch.float32)
+        self.sole_corners = None
+        if cfg.sole_corners is not None:
+            corners = torch.tensor(cfg.sole_corners, device=self.device, dtype=torch.float32)
+            self.sole_corners = corners - com_offset[foot_ids][:, None]
         units = UnitSystem(cfg.leg_length, float(masses.sum()))
         self.units = units
         self.body = BodyConstants(
@@ -215,6 +222,7 @@ class ReferenceCommand(UniformVelocityCommand):
             )
             offsets = torch.arange(1, length + 1, dtype=torch.float64) * self.dt_star
             self.biped.set_offsets(offsets)
+            self._row_times = offsets.to(self.device, torch.float32)
             if cfg.procedural_probes:
                 self._set_probes(cfg.procedural_probes)
         self.metrics["procedural"] = torch.zeros(n, device=self.device)
@@ -223,6 +231,13 @@ class ReferenceCommand(UniformVelocityCommand):
         self._reward_stamp = -1
         self._reward_true = torch.zeros(n, size, device=self.device)
         self._true_now = torch.zeros(n, size, device=self.device)
+        # How far each source's plans can be trusted (plan_trust.py): row 0 the task's
+        # generator, row 1 the biped.
+        self.trust = None
+        if cfg.plan_trust or cfg.procedural_plan_noise:
+            self.trust = PlanTrust(2, length, size, cfg.trust_rate, self.device)
+        self.sway_amplitude = torch.zeros(n, 2, device=self.device)
+        """Each procedural episode's trunk sway, pitch and roll, radians."""
 
     def __str__(self) -> str:
         return (
@@ -430,7 +445,23 @@ class ReferenceCommand(UniformVelocityCommand):
         if self.encoder is None:
             return self._true_now + self.sigma * torch.randn_like(self._true_now)
         with torch.no_grad():
-            return self.encoder(self.encoder_input())
+            learned = self.encoder(self.encoder_input())
+        if self.cfg.estimator == "encoder":
+            return learned
+        # The kinematic part of z* from the body's own model, the loads from the encoder.
+        load = self.generator.skill_norm.inverse(learned)[:, _LOAD]
+        data = self.robot.data
+        z = proprioceptive_skill_state(
+            self.body,
+            data.body_link_quat_w,
+            data.body_com_pos_w,
+            data.body_com_lin_vel_w,
+            data.body_com_ang_vel_w,
+            load,
+            base_velocity=self.cfg.base_velocity,
+            corners=self.sole_corners,
+        )
+        return self.generator.skill_norm(z)
 
     # -- the plan ------------------------------------------------------------
 
@@ -564,14 +595,52 @@ class ReferenceCommand(UniformVelocityCommand):
         integrals = plan_integrals(self.generator.skill_norm.inverse(plan), step)
         integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
         integrals = torch.einsum("lk,nkd->nld", self.plan_matrix, integrals)
+        if self.trust is not None:
+            # A second sample from the same history: two plans at the same lead time differ
+            # by the generator's sampling noise exactly, over the steps a prior reads.
+            with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
+                second = self.generator.sample(window, command, torch.randn_like(noise)).float()
+            second = torch.nan_to_num(second, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
+            second = torch.einsum(
+                "lk,nkd->nld", self.plan_matrix, torch.cat([window[:, -1:], second], dim=1)
+            )
+            task_disagreement = (rows - second).pow(2)
+        applied = torch.zeros(rows.shape[1:], device=self.device)
         if self.biped is not None:
             # The biped's trajectory, read at the body's own instants, with its exact
             # displacement and turn for integrals.
             ahead, moved, _ = self.biped.plan(ids)
+            if self.cfg.procedural_sway > 0.0:
+                # The trunk sways with the gait -- pitch twice a stride, roll once -- which
+                # the point mass leaves free and every real gait has.
+                phase = (
+                    self.biped.phase[ids, None].float()
+                    + self._row_times / self.biped.period[ids, None].float()
+                )
+                pitch = self.sway_amplitude[ids, :1] * torch.sin(4 * math.pi * phase)
+                roll = self.sway_amplitude[ids, 1:] * torch.sin(2 * math.pi * phase)
+                ahead = ahead.clone()
+                ahead[..., _TILT] = sway(ahead[..., _TILT], pitch, roll)
             ahead = self.generator.skill_norm(ahead).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
+            if (
+                self.cfg.procedural_plan_noise
+                and self.trust is not None
+                and bool(self.trust.seen[0])
+            ):
+                # The biped's plans carry the noise the task's generator is measured to have.
+                applied = self.trust.noise[0].clone()
+                ahead = ahead + smooth_noise(tuple(ahead.shape), applied, device=self.device)
             chosen = self.procedural[ids]
             rows = torch.where(chosen[:, None, None], ahead, rows)
             integrals = torch.where(chosen[:, None, None], moved, integrals)
+        if self.trust is not None:
+            # Row by row, the noise against how far the plan reaches from the body now; the
+            # biped's noise is the one added to it, known exactly.
+            far = (rows - self._true_now[ids][:, None]).pow(2)
+            biped = self.procedural[ids]
+            self.trust.update(0, task_disagreement[~biped], far[~biped])
+            known = (2.0 * applied).expand(int(biped.sum()), -1, -1)
+            self.trust.update(1, known, far[biped])
         self.plan[ids] = rows
         self.integrals[ids] = integrals
         com, yaw = self._frame_now
@@ -602,6 +671,10 @@ class ReferenceCommand(UniformVelocityCommand):
             else:
                 draw = torch.rand(len(every), device=self.device)
                 self.procedural[every] = draw < self.cfg.procedural_fraction
+            if self.cfg.procedural_sway > 0.0:
+                amplitude = torch.rand(len(every), 2, device=self.device)
+                sign = torch.where(torch.rand(len(every), 2, device=self.device) < 0.5, -1.0, 1.0)
+                self.sway_amplitude[every] = self.cfg.procedural_sway * amplitude * sign
         task = every[~self.procedural[every]]
         if self.starts is not None and self.cfg.start_fraction > 0.0:
             chosen = task[torch.rand(len(task), device=self.device) < self.cfg.start_fraction]
@@ -687,6 +760,14 @@ class ReferenceCommand(UniformVelocityCommand):
         self.just_reset[:] = False
         self.estimate = estimate
 
+    def plan_gain(self) -> torch.Tensor:
+        """``(N, length, 27)``: how far each env's plan is trusted at each lead time, by its
+        source (1 without trust)."""
+        if self.trust is None:
+            return torch.ones_like(self.plan)
+        task, biped = self.trust.gain(0), self.trust.gain(1)
+        return torch.where(self.procedural[:, None, None], biped, task)
+
     # -- what the tracker and its critic read --------------------------------
 
     def observation(self) -> torch.Tensor:
@@ -759,12 +840,27 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     sole_points: list[list[float]] = MISSING
     """Each foot's sole point in its link frame, metres."""
 
+    sole_corners: list[list[list[float]]] | None = None
+    """Each foot's sole corners in its link frame, metres: where a pitched foot touches the
+    ground, for the kinematic estimator's height. None: the sole points."""
+
     leg_length: float = MISSING
     """The body's unit of length, metres."""
 
     sensor_name: str = "contact_forces"
     use_encoder: bool = False
     """Read ``ẑ*`` from the contract's encoder (deployed path) instead of truth plus noise."""
+
+    estimator: str = "encoder"
+    """What ``use_encoder`` reads ``ẑ*`` with. ``encoder``: the learned encoder alone.
+    ``kinematic``: the body's kinematic model for every field but the feet's loads, which
+    stay the encoder's (:func:`~...latent.skill_torch.proprioceptive_skill_state`) -- the
+    encoder learned on the states its body practised and errs far beyond them, where
+    kinematics does not."""
+
+    base_velocity: bool = True
+    """Whether the body senses its base's linear velocity; without it, the kinematic
+    estimator measures velocities from the more loaded foot (leg odometry)."""
 
     noise_scale: float = 1.0
     """Multiplies the encoder error used as noise on the true state while training."""
@@ -820,6 +916,21 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     """``procedural_calibration.json``: the biped's model error per component."""
 
     procedural_seed: int = 0
+
+    plan_trust: bool = False
+    """Measure each plan source's sampling noise online (``latent/plan_trust.py``): two plans a
+    commitment apart, on the steps they share. A physics prior weighs the plan by it."""
+
+    trust_rate: float = 0.02
+    """The running estimates' update rate, per draw."""
+
+    procedural_plan_noise: bool = False
+    """Give the biped's plans the noise measured on the task's generator's, smooth as a
+    sampler's, so a tracker practises the plans it will be handed."""
+
+    procedural_sway: float = 0.0
+    """Largest trunk sway, pitch and roll, radians, of a procedural episode (uniform per
+    episode, either sign). The walk teacher's sways 0.015 and 0.017 rad."""
 
 
 OCTAVES = tuple(2.0**j for j in range(8))

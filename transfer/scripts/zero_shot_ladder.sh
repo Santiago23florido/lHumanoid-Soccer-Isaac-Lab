@@ -6,6 +6,7 @@
 # Stages, all of them by default:
 #   l1       random procedural schedules, as in training (true state):  competence_<body>_<tag>_random
 #   map      the pre-registered probes (true state):                    competence_<body>_<tag>
+#   corners  the family's corners, some beyond its ranges (true state):  competence_<body>_<tag>_corners
 #   encoder  the body's encoder refitted on its own new states -- walk (body's history,
 #            autonomous, starts) and procedural from the spawn pose: logs/contract/walk_zs_<body>_<tag>
 #   walk     L1b, the walk on every path (deployed through the refitted encoder)
@@ -39,6 +40,11 @@ generator_name="$(basename "$(dirname "$task_generator")")"
 reference="${ZS_REFERENCE:-physical}"
 mode=""
 if [ "$reference" = autonomous ]; then mode="_auto"; fi
+# ZS_ESTIMATOR: what the deployed path reads the state with -- the learned encoder, or the
+# body's kinematics for every field but the loads (kinematic; its results carry "_kin").
+estimator="${ZS_ESTIMATOR:-encoder}"
+est=""
+if [ "$estimator" = kinematic ]; then est="_kin"; fi
 if [ "$task" = rough ]; then
   commands="forward 0.25 0 0
 fast 0.6 0 0
@@ -49,13 +55,14 @@ fast 0.6 0 0
 turning 0.3 0.2 0.3"
 fi
 if [ "$body" = g1 ]; then
-  task_id=G1Track-Play-v0
+  # ZS_TASK_ID: another tracking task of the same body (the physics tracker's, say).
+  task_id="${ZS_TASK_ID:-G1Track-Play-v0}"
   walk="logs/contract/walk_dagger3e/generator.pt"
   rollouts=g1/rollouts
   mirror=g1/body/mirror.json
   scale="1 1"
 else
-  task_id=NaoTrack-Play-v0
+  task_id="${ZS_TASK_ID:-NaoTrack-Play-v0}"
   walk="logs/contract/walk_dagger2e/generator.pt"
   rollouts=nao/rollouts
   mirror=nao/body/mirror.json
@@ -101,6 +108,13 @@ if want map; then
   "$python" transfer/scripts/evaluate_competence.py --capture "$rollouts/zs_${tag}_map.npz" \
     --output "transfer/results/competence_${body}_${tag}.json" | head -20
 fi
+if want corners; then
+  # The family's corners, some beyond its ranges (make_gait_probes.py --corners), three envs each.
+  capture corners --num-envs 108 --contract-from-truth --reference autonomous \
+    --gait-probes transfer/probes/corner_probes.json
+  "$python" transfer/scripts/evaluate_competence.py --capture "$rollouts/zs_${tag}_corners.npz" \
+    --output "transfer/results/competence_${body}_${tag}_corners.json" | head -20
+fi
 if want encoder; then
   capture walk_truth --num-envs 32 --contract-from-truth --reference physical
   capture walk_auto --num-envs 32 --contract-from-truth --reference autonomous
@@ -145,15 +159,19 @@ if want l4; then
     vx=$("$python" -c "print($vx * $speed_scale)")
     vy=$("$python" -c "print($vy * $speed_scale)")
     wz=$("$python" -c "print($wz * $turn_scale)")
-    capture "${generator_name}${mode}_${name}_encoder" --num-envs 32 --reference "$reference" \
-      --command "$vx" "$vy" "$wz"
-    capture "${generator_name}${mode}_${name}_truth" --num-envs 32 --reference "$reference" \
-      --contract-from-truth --command "$vx" "$vy" "$wz"
+    capture "${generator_name}${mode}${est}_${name}_encoder" --num-envs 32 \
+      --reference "$reference" --estimator "$estimator" --command "$vx" "$vy" "$wz"
+    # The true-state path does not depend on the estimator: reuse it when it exists.
+    truth="$rollouts/zs_${tag}_${generator_name}${mode}_${name}_truth.npz"
+    if [ -z "$est" ] || [ ! -f "$truth" ]; then
+      capture "${generator_name}${mode}_${name}_truth" --num-envs 32 --reference "$reference" \
+        --contract-from-truth --command "$vx" "$vy" "$wz"
+    fi
     "$python" transfer/scripts/evaluate_contract.py \
       --run "teacher=g1/rollouts/${task}_play_${name}.npz" \
-      --run "encoder=$rollouts/zs_${tag}_${generator_name}${mode}_${name}_encoder.npz" \
-      --run "truth=$rollouts/zs_${tag}_${generator_name}${mode}_${name}_truth.npz" \
-      --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${mode}_l4_${name}.json" \
+      --run "encoder=$rollouts/zs_${tag}_${generator_name}${mode}${est}_${name}_encoder.npz" \
+      --run "truth=$truth" \
+      --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${mode}${est}_l4_${name}.json" \
       | grep -v "^  [^a]"
   done <<< "$commands"
 fi

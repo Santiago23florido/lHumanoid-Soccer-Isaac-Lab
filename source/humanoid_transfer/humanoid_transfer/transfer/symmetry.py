@@ -58,6 +58,25 @@ PLANAR = np.diag([1.0, -1.0, -1.0])
 """``(x, y, yaw)``: a velocity command, or where the reference is and which way it faces."""
 
 
+def _sides(block: np.ndarray) -> np.ndarray:
+    """A per-foot quantity, left then right: the sides swap and each reflects by ``block``."""
+    width = block.shape[0]
+    swapped = np.zeros((2 * width, 2 * width))
+    swapped[:width, width:] = block
+    swapped[width:, :width] = block
+    return swapped
+
+
+BALANCE = np.block(
+    [
+        [_sides(np.diag([1.0, -1.0])), np.zeros((4, 6))],
+        [np.zeros((6, 4)), _sides(VECTOR)],
+    ]
+)
+"""Each foot's centre of pressure ``(x, y)`` then its ground force ``(x, y, z)``, heading frame
+(:mod:`~humanoid_transfer.transfer.tasks.tracking.balance`)."""
+
+
 def joint_mirror(names: Sequence[str], spec: dict) -> np.ndarray:
     """``(J, J)``: the reflected joint vector is ``P @ q`` (``spec`` from ``measure_mirror.py``).
 
@@ -154,7 +173,8 @@ def observation_mirror(
             mirror.add(PLANAR)
         elif name == "joint_pos":
             mirror.add(joints, position_offset)
-        elif name == "joint_vel":
+        elif name in ("joint_vel", "prior"):
+            # Velocities, and the prior's targets relative to the joints: no offset.
             mirror.add(joints)
         elif name == "actions":
             mirror.add(joints, action_offset)
@@ -169,6 +189,8 @@ def observation_mirror(
             mirror.add(np.eye(1))
         elif name == "contract_path":
             mirror.add(PLANAR, repeat=width // 3)
+        elif name == "balance":
+            mirror.add(BALANCE)
         else:
             raise KeyError(f"no mirror for observation term {name!r}")
     return mirror.done()
@@ -177,6 +199,7 @@ def observation_mirror(
 __all__ = [
     "AXIAL",
     "AffineMirror",
+    "BALANCE",
     "PLANAR",
     "VECTOR",
     "joint_mirror",

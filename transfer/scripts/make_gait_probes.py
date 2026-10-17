@@ -16,9 +16,18 @@ family (``transfer/docs/skill_space.md`` §8.3):
   same gait written by the biped, to tell a tracker that cannot do a gait from
   one that cannot follow a task's plans of it.
 
+With ``--corners``, the family's corners instead (``transfer/docs/skill_space.md`` §9, F4),
+fixed before the physics trackers are trained: CoM height {0.80, 0.85, 0.92} ``L`` × swing
+clearance {0.06, 0.10, 0.14} ``L`` × duty {0.55, 0.75} × forward speed {0.15, 0.30} ``V``,
+stride period 1.0 ``T``. The lowest height and the highest clearance lie beyond the family's
+ranges (0.85-1.00, 0.01-0.12), where Isaac Lab's rough-terrain policy walks (0.843, 0.145):
+a tracker has to extrapolate there.
+
 Usage::
 
     python transfer/scripts/make_gait_probes.py --output transfer/probes/gait_probes.json
+    python transfer/scripts/make_gait_probes.py --corners \
+        --output transfer/probes/corner_probes.json
 """
 
 from __future__ import annotations
@@ -63,9 +72,12 @@ def main() -> int:
     parser.add_argument(
         "--coverage", type=Path, default=REPO_ROOT / "transfer/results/procedural_coverage.json"
     )
+    parser.add_argument("--corners", action="store_true", help="The family's corners only.")
     args = parser.parse_args()
     ranges = GaitRanges()
     min_swing = max(ranges.min_swing, SWING_STEPS * G1_STEP)
+    if args.corners:
+        return write(args.output, corners(ranges, min_swing))
     probes = []
     for forward, period, duty in itertools.product(
         (0.0, 0.08, 0.16, 0.25, 0.35), (0.8, 1.2, 1.8, 2.6), (0.4, 0.55, 0.7, 0.85)
@@ -118,10 +130,35 @@ def main() -> int:
                 "duty": measured["duty"],
             }
         )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(probes, indent=1) + "\n", encoding="utf-8")
-    counts = {g: sum(p["group"] == g for p in probes) for g in ("grid", "manoeuvre", "twin")}
-    print(f"{len(probes)} probes {counts}; written {args.output}")
+    return write(args.output, probes)
+
+
+def corners(ranges: GaitRanges, min_swing: float) -> list[dict]:
+    """Crouched, high-swing, long-stance gaits, some beyond the family's ranges."""
+    probes = []
+    for height, clearance, duty, forward in itertools.product(
+        (0.80, 0.85, 0.92), (0.06, 0.10, 0.14), (0.55, 0.75), (0.15, 0.30)
+    ):
+        t = torch.tensor
+        ok = feasible(
+            t([1.0]), t([[duty, duty]]), t([forward]), t([0.0]), t([MIDDLE["width"]]),
+            ranges, min_swing,
+        )  # fmt: skip
+        if bool(ok[0]):
+            name = f"h{height}_c{clearance}_d{duty}_v{forward}"
+            probes.append(
+                gait("corner", name, forward=forward, period=1.0, duty=(duty, duty),
+                     height=height, clearance=clearance)
+            )  # fmt: skip
+    return probes
+
+
+def write(output: Path, probes: list[dict]) -> int:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(probes, indent=1) + "\n", encoding="utf-8")
+    groups = sorted({p["group"] for p in probes})
+    counts = {g: sum(p["group"] == g for p in probes) for g in groups}
+    print(f"{len(probes)} probes {counts}; written {output}")
     return 0
 
 

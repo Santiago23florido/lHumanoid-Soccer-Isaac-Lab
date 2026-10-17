@@ -34,14 +34,17 @@ to the incumbent's joint targets on the states it visits itself (DAgger, Ross et
   teacher's noiseless targets.
 
 * **Mirror.** PPO goes on with the mirror loss ``(π(M o) − P π(o))²``, which the
-  incumbent was trained under and so meets (0.05), but a student fitted only on the states
-  it visits does not: at their first PPO update the distilled core and physics trackers
-  stood at 0.21 and 0.67, and both collapsed within two iterations. Each minibatch is
-  therefore also fitted mirrored (``--mirror-labels``): the mirrored observation, with
-  the mirrored label -- what that loss asks for -- and the same value; each round reports
-  the student's own mirror loss.
+  incumbent was trained under. Each minibatch is also fitted mirrored
+  (``--mirror-labels``): the mirrored observation, with the mirrored label -- what that
+  loss asks for -- and the same value; each round reports the student's own mirror loss
+  (0.013 at the end of round 7, against the incumbent's 0.017). The collapses first put
+  down to the mirror came from PPO's learning rate (``warm_study.sh``).
 
-The result is a checkpoint the physics task's PPO resumes from (``--resume``).
+The result is a checkpoint the physics task's PPO resumes from (``--resume``). The
+same distils the incumbent into any tracking task whose observation keeps the plain
+tracker's policy group -- decoder v2's core reads its own and keeps that one as
+``plain``, which the teacher then reads -- and into the plain task itself (no prior:
+the residual is the plain action).
 
 Usage::
 
@@ -151,7 +154,12 @@ def main() -> int:
     inner = env.unwrapped
     term = inner.action_manager.get_term("joint_pos")
     robot = inner.scene["robot"]
-    default = robot.data.default_joint_pos[:, term._action_joints]
+    joints = getattr(term, "_action_joints", None)  # the physics term's; the plain one's ids
+    if joints is None:
+        ids = term._joint_ids
+        joints = torch.arange(robot.num_joints, device=device) if isinstance(ids, slice) else ids
+    default = robot.data.default_joint_pos[:, joints]
+    prior = hasattr(term, "_mask")
 
     teacher = torch.jit.load(str(args_cli.teacher), map_location=device).eval()
     saved = torch.load(args_cli.teacher_checkpoint, map_location=device, weights_only=False)
@@ -180,15 +188,16 @@ def main() -> int:
     for group in optimiser.param_groups:
         group["lr"] = args_cli.learning_rate
     heads = getattr(actor, "physics_group", None)
-    limits = robot.data.soft_joint_pos_limits[:, term._action_joints]
+    limits = robot.data.soft_joint_pos_limits[:, joints]
     if args_cli.label_limits == "saturation":
-        joints = term._action_joints
         reach = robot.data.joint_effort_limits[:, joints] / robot.data.joint_stiffness[:, joints]
         limits = torch.stack([limits[..., 0] - reach, limits[..., 1] + reach], dim=-1)
-    stiffness = robot.data.joint_stiffness[:, term._action_joints]
+    stiffness = robot.data.joint_stiffness[:, joints]
+    # The plain tracker's own policy group: kept as "plain" where the policy's is another.
+    teacher_group = "plain" if "plain" in obs.keys() else "policy"
     view = TeacherView(
         inner.observation_manager,
-        {"policy": policy_width, "critic": critic_width},
+        {teacher_group: policy_width, "critic": critic_width},
         env.num_envs,
         term.action_dim,
         device,
@@ -213,18 +222,18 @@ def main() -> int:
         falls = 0
         for _ in range(args_cli.steps):
             with torch.no_grad():
-                taught = teacher(view.observation(obs, "policy"))
+                taught = teacher(view.observation(obs, teacher_group))
                 q_teacher = default + args_cli.teacher_scale * taught
                 if args_cli.label_limits != "none":
                     q_teacher = torch.maximum(
                         torch.minimum(q_teacher, limits[..., 1]), limits[..., 0]
                     )
                 shift = torch.zeros_like(q_teacher)
-                if args_cli.compensate:
+                if args_cli.compensate and prior:
                     shift = term._feedforward / stiffness.clamp(min=1e-6)
                     shift = torch.where(stiffness > 0, shift, 0.0)
                     q_teacher = q_teacher - shift
-                on_prior = torch.where(term._mask, term._targets, 0.0)
+                on_prior = torch.where(term._mask, term._targets, 0.0) if prior else 0.0
                 target = (q_teacher - term._offset - on_prior) / term._scale
                 value = teacher_critic(
                     TensorDict(

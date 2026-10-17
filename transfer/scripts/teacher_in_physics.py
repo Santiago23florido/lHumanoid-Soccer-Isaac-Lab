@@ -100,8 +100,9 @@ def main() -> int:
     saved = torch.load(args_cli.teacher_checkpoint, map_location=device, weights_only=False)
     policy_width = saved["actor_state_dict"]["obs_normalizer._mean"].shape[-1]
     teacher_std = saved["actor_state_dict"]["distribution.std_param"]
+    teacher_group = "plain" if "plain" in env.get_observations().keys() else "policy"
     view = TeacherView(
-        inner.observation_manager, {"policy": policy_width}, env.num_envs, len(names), device
+        inner.observation_manager, {teacher_group: policy_width}, env.num_envs, len(names), device
     )
     student = None
     if "student" in args_cli.modes:
@@ -133,7 +134,7 @@ def main() -> int:
                     if args_cli.residual_view:
                         a = teacher(obs["policy"][:, :policy_width])
                     else:
-                        a = teacher(view.observation(obs, "policy"))
+                        a = teacher(view.observation(obs, teacher_group))
                     if args_cli.stochastic:
                         a = a + teacher_std * torch.randn_like(a)
                     q = default + args_cli.teacher_scale * a

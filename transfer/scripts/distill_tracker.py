@@ -31,6 +31,7 @@ import argparse
 import json
 import os
 import sys
+from collections import deque
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
@@ -48,10 +49,12 @@ parser.add_argument("--teacher-checkpoint", type=Path, required=True, help="Its 
 parser.add_argument(
     "--teacher-scale", type=float, default=0.5, help="The plain tracker's action scale."
 )
-parser.add_argument("--rounds", type=int, default=60)
+parser.add_argument("--rounds", type=int, default=100)
 parser.add_argument("--steps", type=int, default=24, help="Control steps per round.")
+parser.add_argument("--keep", type=float, default=0.25, help="Share of each round's samples kept.")
+parser.add_argument("--replay", type=int, default=12, help="Rounds of data trained on together.")
 parser.add_argument("--epochs", type=int, default=4)
-parser.add_argument("--minibatches", type=int, default=8)
+parser.add_argument("--batch", type=int, default=8192)
 parser.add_argument("--learning-rate", type=float, default=5e-4)
 parser.add_argument("--seed", type=int, default=41)
 parser.add_argument("--run_name", default="distill_v2t")
@@ -116,6 +119,9 @@ def main() -> int:
 
     parameters = [p for p in actor.parameters() if p is not actor.distribution.std_param]
     optimiser = torch.optim.Adam([*parameters, *critic.parameters()], lr=args_cli.learning_rate)
+    limits = robot.data.soft_joint_pos_limits[:, term._action_joints]
+    groups = list(actor.obs_groups) + [g for g in critic.obs_groups if g not in actor.obs_groups]
+    replay: deque = deque(maxlen=args_cli.replay)
     history = []
     for round_index in range(args_cli.rounds):
         share = max(0.0, 1.0 - round_index / (0.6 * args_cli.rounds))
@@ -123,9 +129,11 @@ def main() -> int:
         falls = 0
         for _ in range(args_cli.steps):
             with torch.no_grad():
+                # A target beyond a joint's limit asks for nothing the limit does not stop.
                 q_teacher = default + args_cli.teacher_scale * teacher(
                     obs["policy"][:, :policy_width]
                 )
+                q_teacher = torch.maximum(torch.minimum(q_teacher, limits[..., 1]), limits[..., 0])
                 on_prior = torch.where(term._mask, term._targets, 0.0)
                 target = (q_teacher - term._offset - on_prior) / term._scale
                 value = teacher_critic(
@@ -138,26 +146,26 @@ def main() -> int:
                 student = actor(obs)
                 follow = torch.rand(len(target), device=device) < share
                 action = torch.where(follow[:, None], target, student)
-            batch["obs"].append(obs.clone())
-            batch["target"].append(target)
-            batch["value"].append(value)
+                kept = torch.rand(len(target), device=device) < args_cli.keep
+            batch["obs"].append(obs.select(*groups)[kept].to("cpu"))
+            batch["target"].append(target[kept].cpu())
+            batch["value"].append(value[kept].cpu())
             obs, _, dones, extras = env.step(action)
-            falls += int(
-                extras.get("time_outs", torch.zeros_like(dones))
-                .logical_not()
-                .logical_and(dones)
-                .sum()
-            )
-        observations = torch.cat(batch["obs"])
-        targets, values = torch.cat(batch["target"]), torch.cat(batch["value"])
+            timed_out = extras.get("time_outs", torch.zeros_like(dones))
+            falls += int(timed_out.logical_not().logical_and(dones).sum())
+        replay.append({k: torch.cat(v) for k, v in batch.items()})
+        # DAgger's aggregate: the recent rounds' states, each with the teacher's label.
+        observations = torch.cat([r["obs"] for r in replay])
+        targets = torch.cat([r["target"] for r in replay])
+        values = torch.cat([r["value"] for r in replay])
         count = len(targets)
         losses = []
         for _ in range(args_cli.epochs):
-            order = torch.randperm(count, device=device)
-            for chunk in order.chunk(args_cli.minibatches):
-                part = observations[chunk]
-                action_loss = F.mse_loss(actor(part), targets[chunk])
-                value_loss = F.mse_loss(critic(part), values[chunk])
+            order = torch.randperm(count)
+            for chunk in order.split(args_cli.batch):
+                part = observations[chunk].to(device)
+                action_loss = F.mse_loss(actor(part), targets[chunk].to(device))
+                value_loss = F.mse_loss(critic(part), values[chunk].to(device))
                 optimiser.zero_grad(set_to_none=True)
                 (action_loss + value_loss).backward()
                 torch.nn.utils.clip_grad_norm_([*parameters, *critic.parameters()], 1.0)
@@ -166,7 +174,7 @@ def main() -> int:
         action_loss = sum(a for a, _ in losses) / len(losses)
         value_loss = sum(v for _, v in losses) / len(losses)
         row = {"round": round_index, "teacher_share": share, "action_mse": action_loss,
-               "value_mse": value_loss, "falls": falls}  # fmt: skip
+               "value_mse": value_loss, "falls": falls, "samples": count}  # fmt: skip
         history.append(row)
         cells = (f"{k} {v:.4g}" if isinstance(v, float) else f"{k} {v}" for k, v in row.items())
         print(" ".join(cells), flush=True)

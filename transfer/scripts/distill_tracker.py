@@ -32,6 +32,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from importlib import metadata
 from pathlib import Path
 
 from isaaclab.app import AppLauncher
@@ -63,7 +64,7 @@ import gymnasium as gym  # noqa: E402
 import humanoid_transfer.tasks  # noqa: E402, F401
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
-from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # noqa: E402
+from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg  # noqa: E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry  # noqa: E402
 from rsl_rl.models import MLPModel  # noqa: E402
@@ -77,6 +78,8 @@ def main() -> int:
     env_cfg.seed = args_cli.seed
     agent_cfg = load_cfg_from_registry(args_cli.task, "rsl_rl_cfg_entry_point")
     agent_cfg.seed = args_cli.seed
+    # As Isaac Lab's train.py does: drop the keys this rsl-rl no longer takes.
+    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, metadata.version("rsl-rl-lib"))
     root = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
     log_dir = os.path.join(
         root, datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_{args_cli.run_name}"
@@ -168,9 +171,12 @@ def main() -> int:
         cells = (f"{k} {v:.4g}" if isinstance(v, float) else f"{k} {v}" for k, v in row.items())
         print(" ".join(cells), flush=True)
 
-    runner.current_learning_iteration = 0
+    # The runner's own save, without its logger (set up only by learn()).
     path = os.path.join(log_dir, "model_0.pt")
-    runner.save(path)
+    saved_dict = runner.alg.save()
+    saved_dict["iter"] = 0
+    saved_dict["infos"] = {"distilled_from": str(args_cli.teacher_checkpoint)}
+    torch.save(saved_dict, path)
     Path(log_dir, "distill.json").write_text(json.dumps(history, indent=2) + "\n", encoding="utf-8")
     print(f"distilled into {path}")
     env.close()

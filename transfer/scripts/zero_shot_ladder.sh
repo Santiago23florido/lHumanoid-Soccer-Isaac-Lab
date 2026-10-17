@@ -129,13 +129,13 @@ if want encoder; then
 fi
 if want walk; then
   export HUMANOID_CONTRACT="$root/$walk_zs"
-  capture walk_encoder --num-envs 32 --reference physical
+  capture "walk${est}_encoder" --num-envs 32 --reference physical --estimator "$estimator"
   "$python" transfer/scripts/evaluate_contract.py \
     --run teacher=g1/rollouts/closed_loop_teacher.npz \
-    --run "encoder=$rollouts/zs_${tag}_walk_encoder.npz" \
+    --run "encoder=$rollouts/zs_${tag}_walk${est}_encoder.npz" \
     --run "truth=$rollouts/zs_${tag}_walk_truth.npz" \
     --run "autonomous=$rollouts/zs_${tag}_walk_auto.npz" \
-    --output "transfer/results/zero_shot_${body}_${tag}_walk.json" | grep -v "^  "
+    --output "transfer/results/zero_shot_${body}_${tag}_walk${est}.json" | grep -v "^  "
 fi
 if want l3 || want l4; then
   if [ ! -f "$task_zs" ]; then

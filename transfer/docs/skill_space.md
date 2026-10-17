@@ -1698,6 +1698,43 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     - The paths differ, in effect, only in the feet's loads: the contact sensor's single-substep
       spikes against the encoder's smooth estimate.
     - Not the deployed path; to be diagnosed.
+- **F4, round 2 (v2t) and the G1's re-baseline under this code**
+  (`zero_shot_g1_{dec_v2t,r3_6194_sym_v3}_*_auto_kin_l4_*.json`,
+  `competence_g1_{dec_v2t,r3_6194_sym_v3}*.json`). The deployed path's falls over the three
+  commands (forward, fast, turning):
+
+  | | rough_b3 | rough_b4 | flat_dagger2 | flat_b4 |
+  | --- | --- | --- | --- | --- |
+  | r3, sole-point height (F2 run) | 43/187 | | 0/192, passes | |
+  | **r3, sole-corner height** | **4/190** | **0/192** | 0/192, passes | 0/128, passes (turning left) |
+  | v1, from scratch | 24/164 | | 0/192, passes | |
+  | v2h, from scratch | 514/610 | | 0/192; passes 1 of 3 | |
+  | v2t, from scratch | 17/113 | | 4/191; passes none | |
+
+  On the family, true state:
+
+  | | grid passed | corners passed |
+  | --- | --- | --- |
+  | v1 | 32/61 | 27/36 |
+  | v2h | 32/61 | 30/36 |
+  | v2t | 35/61 | 25/36 |
+  | r3 | 39/61 | 31/36 |
+
+  - *The sole-corner height was the missing piece on rough.* The incumbent, deployed through the
+    kinematic estimator, now falls in 2 % of its rough episodes, and in none with B4's generator.
+    Rough on the G1 is nearly solved on the deployed path.
+  - *Round 2 corrects round 1's failure.* With learned plans v2t falls 15 % where v2h fell 84 %.
+    Trusting a plan by its measured noise, aiming the trunk at its slow tilt, and practising
+    noisy, swaying plans works as diagnosed.
+  - *At an equal budget the physics prior is not yet ahead of the plain tracker.* Against v1,
+    v2t is level on rough (15 %), better on the grid (35 against 32), worse on the corners
+    (25 against 27) and on flat (4 falls; the gate missed on speed, ratio up to 1.19). Both
+    from-scratch trackers stay well below the incumbent, which has three times the training.
+    The user's rule applies: a round that does not pass is reported and reframed, not
+    concluded.
+  - *F1, under the deployed estimator, G1:* `rough_b4` falls 0/192 against `rough_b3`'s 4/190
+    (about 2 SE). The NAO's half of the re-baseline is left: the run paused when the user's own
+    jobs needed the GPU.
 - **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
 
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:

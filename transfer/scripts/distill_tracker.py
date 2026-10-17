@@ -22,7 +22,12 @@ to the incumbent's joint targets on the states it visits itself (DAgger, Ross et
 * **Rollouts.** Each round runs the student, and a share of the envs, falling from all
   to none over the rounds, runs the teacher's target instead (DAgger's mixture).
 * **Exploration.** The student's action noise is set to the teacher's in joint space,
-  so PPO afterwards explores as the incumbent did.
+  so PPO afterwards explores as the incumbent did, and every rollout is drawn with that
+  noise (``--explore``): the states PPO visits, and the noisy last actions it observes,
+  are then the ones the student was fitted on. The incumbent's noise is large (median
+  1.42 action units, 0.7 rad), and a student fitted on noiseless rollouts left its first
+  PPO episodes 27 times as often as the incumbent did (§9.1). The labels stay the
+  teacher's noiseless targets.
 
 The result is a checkpoint the physics task's PPO resumes from (``--resume``).
 
@@ -64,6 +69,12 @@ parser.add_argument("--replay", type=int, default=12, help="Rounds of data train
 parser.add_argument("--epochs", type=int, default=4)
 parser.add_argument("--batch", type=int, default=8192)
 parser.add_argument("--learning-rate", type=float, default=5e-4)
+parser.add_argument(
+    "--explore",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="Roll out with the student's exploration noise, as PPO will.",
+)
 parser.add_argument(
     "--compensate",
     action=argparse.BooleanOptionalAction,
@@ -192,6 +203,8 @@ def main() -> int:
                 student = actor(obs)
                 follow = torch.rand(len(target), device=device) < share
                 action = torch.where(follow[:, None], target, student)
+                if args_cli.explore:
+                    action = action + actor.distribution.std_param * torch.randn_like(action)
                 kept = torch.rand(len(target), device=device) < args_cli.keep
             batch["obs"].append(obs.select(*groups)[kept].to("cpu"))
             batch["target"].append(target[kept].cpu())
@@ -243,6 +256,7 @@ def main() -> int:
         "distilled_from": str(args_cli.teacher_checkpoint),
         "label_limits": args_cli.label_limits,
         "compensate": args_cli.compensate,
+        "explore": args_cli.explore,
         "teacher_view": "own last action",
     }
     torch.save(saved_dict, path)

@@ -173,8 +173,9 @@ def observation_mirror(
             mirror.add(PLANAR)
         elif name == "joint_pos":
             mirror.add(joints, position_offset)
-        elif name in ("joint_vel", "prior"):
-            # Velocities, and the prior's targets relative to the joints: no offset.
+        elif name in ("joint_vel", "prior", "feedforward"):
+            # Velocities, the prior's targets relative to the joints, and its feed-forward over
+            # each joint's stiffness (a joint torque reflects as a joint velocity): no offset.
             mirror.add(joints)
         elif name == "actions":
             mirror.add(joints, action_offset)

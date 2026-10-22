@@ -320,4 +320,20 @@ def prior_offset(env: ManagerBasedEnv, action_name: str = "joint_pos") -> torch.
     return term.prior()
 
 
-__all__ = ["PhysicsPriorAction", "PhysicsPriorActionCfg", "joint_target_rate_l2", "prior_offset"]
+def prior_feedforward(env: ManagerBasedEnv, action_name: str = "joint_pos") -> torch.Tensor:
+    """``(N, joints)``: the prior's feed-forward effort over each joint's stiffness, radians --
+    how far it moves a drive's balance point, the half of the prior the offset does not show."""
+    term = env.action_manager.get_term(action_name)
+    term.prior()
+    stiffness = term._asset.data.joint_stiffness[:, term._action_joints]
+    shift = term._feedforward / stiffness.clamp(min=1e-6)
+    return torch.where(stiffness > 0, shift, 0.0)
+
+
+__all__ = [
+    "PhysicsPriorAction",
+    "PhysicsPriorActionCfg",
+    "joint_target_rate_l2",
+    "prior_feedforward",
+    "prior_offset",
+]

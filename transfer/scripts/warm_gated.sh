@@ -11,6 +11,11 @@
 #                standard errors of the difference (Poisson counts); if it does, stop;
 # 4. PPO and the ladder -- warm_study.sh on that distillation (WARM_DISTILLED).
 #
+# The physics task's policy also sees the prior's feed-forward (HUMANOID_FEEDFORWARD_OBS=1, the
+# default here, inherited by every stage): the labels are compensated for it, and a student
+# that had to infer it ended 74 episodes with PPO's noise where the incumbent ended 45-48, while
+# the same distillation into the plain task passed (57 against 53).
+#
 #   transfer/scripts/warm_gated.sh          (from the repository root, under Start-Process)
 set -uo pipefail
 python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
@@ -21,6 +26,7 @@ note() { echo "$1 $(date +%H:%M)" | tee -a "$status"; }
 incumbent=logs/rsl_rl/g1_track/2026-10-14_15-38-39_zs_g1_r3_loss
 export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt"
 export HUMANOID_PROCEDURAL=0.7 HUMANOID_SYMMETRY=loss
+export HUMANOID_FEEDFORWARD_OBS="${HUMANOID_FEEDFORWARD_OBS:-1}"
 teacher=(--teacher "$incumbent/exported/model_6194_sym.pt"
   --teacher-checkpoint "$incumbent/model_6194.pt")
 

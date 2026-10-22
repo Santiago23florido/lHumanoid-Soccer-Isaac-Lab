@@ -18,7 +18,7 @@ from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlMLPModelCfg
 
 from .balance import balance_state
-from .physics_prior import joint_target_rate_l2, prior_offset
+from .physics_prior import joint_target_rate_l2, prior_feedforward, prior_offset
 
 HEADS = os.environ.get("HUMANOID_HEADS", "0") == "1"
 """The second layer: the critic reads the body's measured balance, and the actor's features
@@ -35,6 +35,12 @@ TARGET_RATE = os.environ.get("HUMANOID_TARGET_RATE", "0") == "1"
 """The smoothness cost on the joint targets, in the plain tracker's units, instead of on the
 residual (:func:`~.physics_prior.joint_target_rate_l2`). Off, the inherited ``action_rate_l2``
 reads the residual: the runs of §9 and §9.1 before the warm study's second round."""
+
+FEEDFORWARD_OBS = os.environ.get("HUMANOID_FEEDFORWARD_OBS", "0") == "1"
+"""The policy and critic also see the prior's feed-forward (over each joint's stiffness), not
+only its targets' offset: a residual that must correct the prior then sees all of it. Off,
+the earlier physics trackers' observation (a distilled student had to infer the feed-forward
+the teacher's labels were compensated for, §9.1)."""
 
 SWAY = 0.035
 """Largest procedural trunk sway, radians: twice the walk teacher's (0.015 pitch, 0.017 roll),
@@ -60,6 +66,10 @@ def add_physics_observations(observations, command_name: str = "base_velocity") 
     prior = ObsTerm(func=prior_offset, params={"action_name": "joint_pos"})
     observations.policy.prior = prior
     observations.critic.prior = prior
+    if FEEDFORWARD_OBS:
+        feedforward = ObsTerm(func=prior_feedforward, params={"action_name": "joint_pos"})
+        observations.policy.feedforward = feedforward
+        observations.critic.feedforward = feedforward
     if HEADS:
         observations.critic.balance = ObsTerm(
             func=balance_state, params={"command_name": command_name}
@@ -128,6 +138,7 @@ __all__ = [
     "HEADS",
     "PLAN_TRUST",
     "SWAY",
+    "FEEDFORWARD_OBS",
     "TARGET_RATE",
     "rate_on_targets",
     "trust_plans",

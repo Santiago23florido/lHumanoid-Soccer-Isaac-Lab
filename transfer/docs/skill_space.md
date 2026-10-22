@@ -1764,7 +1764,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
 
   The physics arm's first two rounds collapsed within PPO's first 50 iterations. Reward at
   iteration 50 was −14 and −17, against +31 for the control (`logs/contract/train_warm_*.log`).
-  Those rounds and the next two are superseded. Five faults were found, in this order:
+  Those rounds and the next five are superseded. Seven faults were found, in this order:
   1. *A fresh optimizer and untrained heads.* Round 2 handed PPO the distillation's own Adam
      and heads already fitted on the trunk, and collapsed the same way: this was not the cause.
   2. *The rate cost read the residual.* The inherited `action_rate_l2` read the residual
@@ -1813,6 +1813,37 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
      (`transfer/results/teacher_in_physics_student_v2t.json`). The teacher is now shown the
      executed action in its own units, which is also what its own PPO training showed it, so
      every label is a function of what the student observes.
+  6. *The student did not see the prior's feed-forward* (round 5). Shown the executed action,
+     the imitation error fell from 0.11 to about 0.02, but the gate failed as before: 74
+     terminations against 45. The same distillation into the plain task, with decoder v2's
+     core as the student, passed (57 against 53; `teacher_in_physics_student_core.json`). What
+     the physics task adds that the student did not observe is the feed-forward its labels
+     are compensated for. With `HUMANOID_FEEDFORWARD_OBS=1` the policy and the critic see it
+     (over each joint's stiffness), and round 6 passed: 50 against 58
+     (`teacher_in_physics_student_v2t_round{4,5}.json`, `warm_study.status`).
+  7. *PPO's learning rate* (round 6). Round 6, and the core after it, passed their gates and
+     fell in PPO's first iterations: base contact ended 0.98 of the episodes within six. rsl-rl
+     restarts its adaptive schedule from the config's 1e-3 on a resume. The incumbent survives
+     that; a distilled student does not. Six PPO iterations from round 6's student, one
+     change at a time (`transfer/scripts/ppo_start_ablation.sh`,
+     `transfer/results/ppo_start_ablation_2026-10-22_21-29-34_distill_v2t.json`):
+
+     | change | base contact, iteration 5 | reward, iteration 5 |
+     | --- | --- | --- |
+     | none (as run) | 0.98 | −4.38 |
+     | the optimizer's moments cleared | 0.85 | −4.13 |
+     | no mirror loss | 0.90 | −4.28 |
+     | PPO from the incumbent's adapted rate, 5.06e-5 | **0.001** | **+4.86** |
+
+     The mirror loss PPO reported (0.67 at round 6's first iteration) was a symptom: it is a
+     mean over the update that was breaking the policy. Measured on the starting checkpoint
+     (`mirror_error.py`, `mirror_error_*.json`), the student stood at 0.038 and the incumbent
+     at 0.017. Every warm arm now starts PPO at its incumbent's adapted rate, the control
+     too (`warm_study.sh`: `agent.algorithm.learning_rate`, read from the checkpoint).
+
+  Along the way: on 2026-10-22, from 19:18 to 19:32, Isaac Sim could not fetch the robot's
+  and the scene's USD from the Omniverse asset server, and four stages failed in their first
+  minute. They carry no result; the queue now waits for the server and retries such a stage.
 
   What the faults affected:
   - The round-1 ladder of the physics arm (`*_warm_v2t_round1_*.json`) measured a student

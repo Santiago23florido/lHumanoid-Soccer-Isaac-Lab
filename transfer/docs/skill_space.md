@@ -1764,7 +1764,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
 
   The physics arm's first two rounds collapsed within PPO's first 50 iterations. Reward at
   iteration 50 was −14 and −17, against +31 for the control (`logs/contract/train_warm_*.log`).
-  Both rounds are superseded. Three faults were found, in this order:
+  Those rounds and the next two are superseded. Five faults were found, in this order:
   1. *A fresh optimizer and untrained heads.* Round 2 handed PPO the distillation's own Adam
      and heads already fitted on the trunk, and collapsed the same way: this was not the cause.
   2. *The rate cost read the residual.* The inherited `action_rate_l2` read the residual
@@ -1797,6 +1797,22 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
      - Cutting the targets at the soft limits, as round 2 did, costs torque the teacher uses.
        Cutting them where the drives saturate changes nothing.
      - The distillation now uses its own view, the saturation cut and the compensation.
+
+  4. *The student never saw PPO's noise* (round 3). Distilled on rollouts of its mean
+     action, it ended its distillation with one fall per round, and fell as soon as PPO
+     sampled: at iteration 50, base contact ended 0.27 of its episodes against the control's
+     0.010. The incumbent explores with a large noise (median standard deviation 1.42 action
+     units, about 0.7 rad), so PPO visits states, and feeds back noisy last actions, that
+     noiseless rollouts never reach. The rollouts are now drawn with that noise
+     (`--explore`); the labels stay the teacher's noiseless targets.
+  5. *The teacher was queried on a state the student cannot see* (round 4). It was shown its
+     own noiseless previous output, while the student sees the action it executed. The
+     imitation error stayed at 0.11 from the 19th round on, and the pre-registered gate
+     (`warm_gated.sh`) stopped the arm before PPO: with PPO's noise the student ended 74
+     episodes in 2.46 M steps, the compensated incumbent 48, two standard errors being 22
+     (`transfer/results/teacher_in_physics_student_v2t.json`). The teacher is now shown the
+     executed action in its own units, which is also what its own PPO training showed it, so
+     every label is a function of what the student observes.
 
   What the faults affected:
   - The round-1 ladder of the physics arm (`*_warm_v2t_round1_*.json`) measured a student

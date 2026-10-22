@@ -10,10 +10,14 @@ to the incumbent's joint targets on the states it visits itself (DAgger, Ross et
 * **Teacher.** The incumbent's deployed (symmetrized) actor, which reads the plain
   tracker's observations: the physics task's policy group extends them, so they are
   its first columns -- all but its last action, which there is the physics task's
-  residual; the teacher is shown its own previous output instead (:class:`TeacherView`;
-  the first two distillations were not, and their labels were the teacher's answers to
-  an input it never saw). Its joint target ``q = q0 + 0.5 a``, limited by
-  ``--label-limits``, less the prior's feed-forward over the joint's stiffness (the
+  residual; the teacher is shown instead the action the step executed, noise and all,
+  in its own units (:class:`TeacherView`) -- as in its own PPO training, whose last
+  action was its sampled one. The first two distillations showed it the residual, and
+  their labels were the teacher's answers to an input it never saw; the fourth showed
+  it its own noiseless output, which the student cannot see, and the labels kept an
+  error the student could not fit (0.11 from the 19th round on). Its joint target
+  ``q = q0 + 0.5 a``, limited by ``--label-limits``, less the prior's feed-forward over
+  the joint's stiffness (the
   target whose drive torque plus that feed-forward is the teacher's own), becomes the
   student's residual target ``(q - offset - prior) / scale``. Run so through the physics
   task the teacher ends 0.016 episodes per 1000 steps, as in its own (0.014); with its
@@ -84,9 +88,11 @@ parser.add_argument(
 parser.add_argument(
     "--label-limits",
     choices=("saturation", "soft", "none"),
-    default="saturation",
+    default="none",
     help="Where the teacher's targets are cut: where its drives saturate (a limit plus effort "
-    "over stiffness, past which a target changes no torque), at the soft limits, or nowhere.",
+    "over stiffness, past which a target changes no torque), at the soft limits, or nowhere. "
+    "Cut where they saturate the teacher acts the same (0.120 terminations per 1000 steps "
+    "either way), but the last action it is shown in the envs it drives is no longer its own.",
 )
 parser.add_argument("--seed", type=int, default=41)
 parser.add_argument("--run_name", default="distill_v2t")
@@ -188,9 +194,11 @@ def main() -> int:
                     q_teacher = torch.maximum(
                         torch.minimum(q_teacher, limits[..., 1]), limits[..., 0]
                     )
+                shift = torch.zeros_like(q_teacher)
                 if args_cli.compensate:
                     shift = term._feedforward / stiffness.clamp(min=1e-6)
-                    q_teacher = q_teacher - torch.where(stiffness > 0, shift, 0.0)
+                    shift = torch.where(stiffness > 0, shift, 0.0)
+                    q_teacher = q_teacher - shift
                 on_prior = torch.where(term._mask, term._targets, 0.0)
                 target = (q_teacher - term._offset - on_prior) / term._scale
                 value = teacher_critic(
@@ -206,13 +214,17 @@ def main() -> int:
                 if args_cli.explore:
                     action = action + actor.distribution.std_param * torch.randn_like(action)
                 kept = torch.rand(len(target), device=device) < args_cli.keep
+                # What the teacher would call this step's action: the joint targets it sends,
+                # the compensation given back, in the teacher's units.
+                sent = term._offset + on_prior + term._scale * action
+                executed = (sent + shift - default) / args_cli.teacher_scale
             batch["obs"].append(obs.select(*groups)[kept].to("cpu"))
             batch["target"].append(target[kept].cpu())
             batch["value"].append(value[kept].cpu())
             obs, _, dones, extras = env.step(action)
-            # The teacher's last action is its own output, whoever acted: its state, as a
-            # recurrent teacher's would be, and the input it was trained and deployed on.
-            view.record(taught, dones)
+            # The teacher's last action is the one executed, whoever acted, as the student's
+            # is: the label is then a function of what the student observes.
+            view.record(executed, dones)
             timed_out = extras.get("time_outs", torch.zeros_like(dones))
             falls += int(timed_out.logical_not().logical_and(dones).sum())
         replay.append({k: torch.cat(v) for k, v in batch.items()})

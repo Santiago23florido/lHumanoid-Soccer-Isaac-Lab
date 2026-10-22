@@ -34,12 +34,11 @@ to the incumbent's joint targets on the states it visits itself (DAgger, Ross et
   teacher's noiseless targets.
 
 * **Mirror.** PPO goes on with the mirror loss ``(π(M o) − P π(o))²``, which the
-  incumbent was trained under and so meets (0.05), but a student fitted only on the states
-  it visits does not: at their first PPO update the distilled core and physics trackers
-  stood at 0.21 and 0.67, and both collapsed within two iterations. Each minibatch is
-  therefore also fitted mirrored (``--mirror-labels``): the mirrored observation, with
-  the mirrored label -- what that loss asks for -- and the same value; each round reports
-  the student's own mirror loss.
+  incumbent was trained under. Each minibatch is also fitted mirrored
+  (``--mirror-labels``): the mirrored observation, with the mirrored label -- what that
+  loss asks for -- and the same value; each round reports the student's own mirror loss
+  (0.013 at the end of round 7, against the incumbent's 0.017). The collapses first put
+  down to the mirror came from PPO's learning rate (``warm_study.sh``).
 
 The result is a checkpoint the physics task's PPO resumes from (``--resume``).
 

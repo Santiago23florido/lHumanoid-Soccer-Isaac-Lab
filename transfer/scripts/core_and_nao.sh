@@ -33,6 +33,20 @@ g1_teacher=(--teacher "$g1_run/exported/model_6194_sym.pt"
 nao_teacher=(--teacher "$nao_run/exported/model_3498_sym.pt"
   --teacher-checkpoint "$nao_run/model_3498.pt" --teacher-scale 0.25)
 
+# Every PPO here starts at its incumbent's adapted learning rate (read from its checkpoint), not
+# the config's: rsl-rl restarts its schedule from the config on a resume, and from 1e-3 every
+# distilled tracker fell within six iterations (ppo_start_ablation.sh). The physics arms also see
+# the prior's feed-forward (HUMANOID_FEEDFORWARD_OBS=1), which the labels are compensated for.
+adapted_rate() {  # <checkpoint>: the learning rate its PPO had reached
+  "$python" -c "
+import sys, torch
+saved = torch.load(sys.argv[1], map_location='cpu', weights_only=False)
+print(saved['optimizer_state_dict']['param_groups'][0]['lr'])" "$1"
+}
+g1_rate="$(adapted_rate "$g1_run/model_6194.pt")"
+nao_rate="$(adapted_rate "$nao_run/model_3498.pt")"
+export HUMANOID_FEEDFORWARD_OBS=1
+
 g1_conditions() {
   export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt"
   unset HUMANOID_POSTURE_CONTRACT
@@ -104,6 +118,7 @@ if want core; then
     "$python" -u scripts/train.py --task G1TrackCore-v0 --headless --num_envs 4096 \
       --max_iterations "$iterations" --seed 41 --run_name warm_core \
       --resume --load_run "$(basename "$distilled")" --checkpoint model_0.pt \
+      "agent.algorithm.learning_rate=$g1_rate" \
       > logs/contract/train_warm_core.log 2>&1 || note "warm_core training FAILED"
     note "warm_core trained"
     run="$(ls -d logs/rsl_rl/g1_track_core/*_warm_core | tail -1)"
@@ -132,6 +147,7 @@ if want nao_v2t; then
     HUMANOID_TARGET_RATE=1 "$python" -u scripts/train.py --task NaoTrackPhysics-v0 --headless \
       --num_envs 4096 --max_iterations "$iterations" --seed 31 --run_name warm_nao_v2t \
       --resume --load_run "$(basename "$distilled")" --checkpoint model_0.pt \
+      "agent.algorithm.learning_rate=$nao_rate" \
       > logs/contract/train_warm_nao_v2t.log 2>&1 || note "warm_nao_v2t training FAILED"
     note "warm_nao_v2t trained"
     run="$(ls -d logs/rsl_rl/nao_track_physics/*_warm_nao_v2t | tail -1)"
@@ -145,6 +161,7 @@ if want nao_r1; then
   "$python" -u scripts/train.py --task NaoTrack-v0 --headless --num_envs 4096 \
     --max_iterations "$iterations" --seed 31 --run_name warm_nao_r1 \
     --resume --load_run "$(basename "$nao_run")" --checkpoint model_3498.pt \
+    "agent.algorithm.learning_rate=$nao_rate" \
     > logs/contract/train_warm_nao_r1.log 2>&1 || note "warm_nao_r1 training FAILED"
   note "warm_nao_r1 trained"
   run="$(ls -d logs/rsl_rl/nao_track/*_warm_nao_r1 | tail -1)"

@@ -94,12 +94,29 @@ class PlanCoreNet(nn.Module):
         self.trunk = nn.Sequential(*blocks)
         self.feature_dim = width
         self.head = nn.Linear(width, output_dim)
+        self.recompute = True
+        """In training with gradients, recompute the activations in the backward pass instead
+        of keeping them (activation checkpointing): the same gradients, a third of the memory.
+        PPO's update on 4096 envs otherwise needed 2.5 GB for this actor against 0.9 GB for
+        the plain MLP, and spilled out of an 8 GB card at 82 s per iteration."""
 
-    def features(self, x: torch.Tensor) -> torch.Tensor:
+    def _features(self, x: torch.Tensor) -> torch.Tensor:
         plan = x[:, : self.plan_width].reshape(-1, self.tokens, self.token_width)
         encoded = self.plan_encoder(plan.transpose(1, 2)).flatten(1)
         joined = torch.cat([self.plan_projection(encoded), x[:, self.plan_width :]], dim=-1)
         return self.trunk(self.stem(joined))
+
+    @torch.jit.unused
+    def _recomputed(self, x: torch.Tensor) -> torch.Tensor:
+        from torch.utils.checkpoint import checkpoint
+
+        return checkpoint(self._features, x, use_reentrant=False)
+
+    def features(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.jit.is_scripting() and self.recompute and self.training:
+            if torch.is_grad_enabled():
+                return self._recomputed(x)
+        return self._features(x)
 
     def action(self, features: torch.Tensor) -> torch.Tensor:
         return self.head(features)

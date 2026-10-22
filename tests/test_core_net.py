@@ -121,3 +121,21 @@ def test_the_actor_hosts_the_core_with_or_without_heads(physics_group):
     with torch.no_grad():
         torch.testing.assert_close(actor(obs), actor.mlp(actor.get_latent(obs)))
         assert actor.trunk(obs).shape == (32, 32)
+
+
+def test_recomputing_the_activations_changes_no_gradient():
+    """Activation checkpointing trades memory for compute only: the gradients are the same."""
+    torch.manual_seed(1)
+    x = torch.randn(16, TOKENS * WIDTH + REST)
+    grads = {}
+    for recompute in (False, True):
+        net = _net()
+        net.train()
+        net.recompute = recompute
+        net(x).pow(2).sum().backward()
+        grads[recompute] = [p.grad for p in net.parameters() if p.grad is not None]
+    assert len(grads[False]) == len(grads[True]) > 0
+    for kept, recomputed in zip(grads[False], grads[True], strict=True):
+        torch.testing.assert_close(kept, recomputed)
+    # The scripted network (the exporter's) compiles around the recomputing path.
+    torch.jit.script(_net())

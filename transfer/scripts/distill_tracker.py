@@ -33,6 +33,14 @@ to the incumbent's joint targets on the states it visits itself (DAgger, Ross et
   PPO episodes 27 times as often as the incumbent did (§9.1). The labels stay the
   teacher's noiseless targets.
 
+* **Mirror.** PPO goes on with the mirror loss ``(π(M o) − P π(o))²``, which the
+  incumbent was trained under and so meets (0.05), but a student fitted only on the states
+  it visits does not: at their first PPO update the distilled core and physics trackers
+  stood at 0.21 and 0.67, and both collapsed within two iterations. Each minibatch is
+  therefore also fitted mirrored (``--mirror-labels``): the mirrored observation, with
+  the mirrored label -- what that loss asks for -- and the same value; each round reports
+  the student's own mirror loss.
+
 The result is a checkpoint the physics task's PPO resumes from (``--resume``).
 
 Usage::
@@ -94,6 +102,13 @@ parser.add_argument(
     "Cut where they saturate the teacher acts the same (0.120 terminations per 1000 steps "
     "either way), but the last action it is shown in the envs it drives is no longer its own.",
 )
+parser.add_argument(
+    "--mirror-labels",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="Fit each minibatch mirrored too, as PPO's mirror loss will ask (see above).",
+)
+parser.add_argument("--mirror", type=Path, default=None, help="The body's mirror.json.")
 parser.add_argument("--seed", type=int, default=41)
 parser.add_argument("--run_name", default="distill_v2t")
 AppLauncher.add_app_launcher_args(parser)
@@ -105,6 +120,7 @@ import gymnasium as gym  # noqa: E402
 import humanoid_transfer.tasks  # noqa: E402, F401
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
+from humanoid_transfer.transfer.tasks.tracking.symmetry import TrackerMirror  # noqa: E402
 from humanoid_transfer.transfer.tasks.tracking.teacher_view import TeacherView  # noqa: E402
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg  # noqa: E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
@@ -180,6 +196,15 @@ def main() -> int:
     groups = list(actor.obs_groups) + [g for g in critic.obs_groups if g not in actor.obs_groups]
     if heads is not None:
         groups.append(heads)
+    body = "nao" if args_cli.task.startswith("Nao") else "g1"
+    mirror = TrackerMirror(inner, args_cli.mirror or REPO_ROOT / body / "body" / "mirror.json")
+
+    def reflect(part: TensorDict) -> TensorDict:
+        mirrored = part.clone()
+        for group in part.keys():
+            mirrored[group] = mirror.observation(group, part[group])
+        return mirrored
+
     replay: deque = deque(maxlen=args_cli.replay)
     history = []
     for round_index in range(args_cli.rounds):
@@ -238,8 +263,14 @@ def main() -> int:
             order = torch.randperm(count)
             for chunk in order.split(args_cli.batch):
                 part = observations[chunk].to(device)
-                action_loss = F.mse_loss(actor(part), targets[chunk].to(device))
-                value_loss = F.mse_loss(critic(part), values[chunk].to(device))
+                label, value = targets[chunk].to(device), values[chunk].to(device)
+                if args_cli.mirror_labels:
+                    # The mirrored sample: the label PPO's mirror loss asks for, the same value.
+                    part = torch.cat([part, reflect(part)])
+                    label = torch.cat([label, mirror.action(label)])
+                    value = torch.cat([value, value])
+                action_loss = F.mse_loss(actor(part), label)
+                value_loss = F.mse_loss(critic(part), value)
                 total = action_loss + value_loss
                 if heads is not None:
                     # The physics heads fitted on the trunk's features as they are, so PPO does
@@ -252,8 +283,13 @@ def main() -> int:
                 losses.append((float(action_loss), float(value_loss)))
         action_loss = sum(a for a, _ in losses) / len(losses)
         value_loss = sum(v for _, v in losses) / len(losses)
+        with torch.no_grad():
+            # The student's mirror loss as PPO computes it, on a slice of this round's states.
+            probe = observations[: args_cli.batch].to(device)
+            mirror_loss = float(F.mse_loss(actor(reflect(probe)), mirror.action(actor(probe))))
         row = {"round": round_index, "teacher_share": share, "action_mse": action_loss,
-               "value_mse": value_loss, "falls": falls, "samples": count}  # fmt: skip
+               "value_mse": value_loss, "mirror_loss": mirror_loss, "falls": falls,
+               "samples": count}  # fmt: skip
         history.append(row)
         cells = (f"{k} {v:.4g}" if isinstance(v, float) else f"{k} {v}" for k, v in row.items())
         print(" ".join(cells), flush=True)
@@ -269,6 +305,7 @@ def main() -> int:
         "label_limits": args_cli.label_limits,
         "compensate": args_cli.compensate,
         "explore": args_cli.explore,
+        "mirror_labels": args_cli.mirror_labels,
         "teacher_view": "own last action",
     }
     torch.save(saved_dict, path)

@@ -16,6 +16,7 @@ note "core resumed from $distilled"
 "$python" -u scripts/train.py --task G1TrackCore-v0 --headless --num_envs 4096 \
   --max_iterations "${WARM_ITERATIONS:-1000}" --seed 41 --run_name warm_core \
   --resume --load_run "$(basename "$distilled")" --checkpoint model_0.pt \
+  "agent.algorithm.learning_rate=${WARM_LR:-5.0625e-05}" \
   > logs/contract/train_warm_core.log 2>&1 || { note "warm_core training FAILED"; exit 1; }
 note "warm_core trained"
 run="$(ls -d logs/rsl_rl/g1_track_core/*_warm_core | tail -1)"

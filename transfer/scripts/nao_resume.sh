@@ -58,6 +58,7 @@ PYEOF
     HUMANOID_TARGET_RATE=1 "$python" -u scripts/train.py --task NaoTrackPhysics-v0 --headless \
       --num_envs 4096 --max_iterations "$iterations" --seed 31 --run_name warm_nao_v2t \
       --resume --load_run "$(basename "$distilled")" --checkpoint model_0.pt \
+      "agent.algorithm.learning_rate=${WARM_LR:-0.0005766503906250003}" \
       > logs/contract/train_warm_nao_v2t.log 2>&1 || note "warm_nao_v2t training FAILED"
     note "warm_nao_v2t trained"
     ladder NaoTrackPhysics-Play-v0 "$(ls -d logs/rsl_rl/nao_track_physics/*_warm_nao_v2t | tail -1)" warm_nao_v2t
@@ -69,6 +70,7 @@ if want nao_r1; then
   "$python" -u scripts/train.py --task NaoTrack-v0 --headless --num_envs 4096 \
     --max_iterations "$iterations" --seed 31 --run_name warm_nao_r1 \
     --resume --load_run "$(basename "$nao_run")" --checkpoint model_3498.pt \
+    "agent.algorithm.learning_rate=${WARM_LR:-0.0005766503906250003}" \
     > logs/contract/train_warm_nao_r1.log 2>&1 || { note "warm_nao_r1 training FAILED"; exit 1; }
   note "warm_nao_r1 trained"
   ladder NaoTrack-Play-v0 "$(ls -d logs/rsl_rl/nao_track/*_warm_nao_r1 | tail -1)" warm_nao_r1

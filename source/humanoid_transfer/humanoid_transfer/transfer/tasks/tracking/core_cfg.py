@@ -48,7 +48,9 @@ TOKEN_WIDTH = 30
 class CorePolicyCfg(ObsGroup):
     """The core's policy group: the plan's tokens first, then the rest of the plain group."""
 
-    tokens = ObsTerm(func=contract_tokens, params={"command_name": "base_velocity"})
+    # Named as the mirror knows them (transfer/symmetry.py): a term it does not know leaves
+    # the whole group unmirrored, and the mirror loss fails on it.
+    contract_tokens = ObsTerm(func=contract_tokens, params={"command_name": "base_velocity"})
 
     def __post_init__(self) -> None:
         self.enable_corruption = True
@@ -59,7 +61,7 @@ def core_policy(plain: ObsGroup, command_name: str, history: int = HISTORY) -> C
     """The core's group from the plain one: its proprioception with a history, its plan as
     tokens, ``ẑ*`` after them; any other term kept as it is, in its order."""
     group = CorePolicyCfg()
-    group.tokens.params = {"command_name": command_name}
+    group.contract_tokens.params = {"command_name": command_name}
     group.enable_corruption = plain.enable_corruption
     for name, term in vars(plain).items():
         if not isinstance(term, ObsTerm) or name in PLAN_TERMS:
@@ -69,7 +71,7 @@ def core_policy(plain: ObsGroup, command_name: str, history: int = HISTORY) -> C
             term.history_length = history
             term.flatten_history_dim = True
         setattr(group, name, term)
-    group.estimate = ObsTerm(func=contract_estimate, params={"command_name": command_name})
+    group.contract_estimate = ObsTerm(func=contract_estimate, params={"command_name": command_name})
     return group
 
 

@@ -243,3 +243,32 @@ def test_a_history_that_is_not_whole_steps_is_refused(g1: dict) -> None:
             np.zeros(SKILL_LAYOUT.size),
             np.ones(SKILL_LAYOUT.size),
         )
+
+
+def test_every_term_the_core_adds_has_a_mirror(g1: dict) -> None:
+    """The core's group is mirrored by term name; one the mirror does not know leaves the whole
+    group unmirrored and PPO's mirror loss fails (it did, on the first core run). Its config
+    needs Isaac Lab, so its terms are read from the source."""
+    import ast
+
+    path = REPO_ROOT / "source/humanoid_transfer/humanoid_transfer/transfer/tasks/tracking"
+    tree = ast.parse((path / "core_cfg.py").read_text(encoding="utf-8"))
+    added = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            func = node.value.func
+            if isinstance(func, ast.Name) and func.id == "ObsTerm":
+                for target in node.targets:
+                    added.add(target.attr if isinstance(target, ast.Attribute) else target.id)
+    assert added == {"contract_tokens", "contract_estimate"}, added
+    names = [row["name"] for row in g1["joints"]]
+    widths = {
+        "contract_tokens": VIEW * (SKILL_LAYOUT.size + 3),
+        "contract_estimate": SKILL_LAYOUT.size,
+    }
+    observation_mirror(
+        [(name, widths[name]) for name in sorted(added)],
+        joint_mirror(names, g1),
+        np.zeros(SKILL_LAYOUT.size),
+        np.ones(SKILL_LAYOUT.size),
+    )

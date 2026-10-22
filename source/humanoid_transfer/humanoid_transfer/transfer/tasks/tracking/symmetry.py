@@ -53,19 +53,25 @@ class TrackerMirror:
         self.joints = torch.as_tensor(joints, dtype=torch.float32, device=device)
         self.action_offset = torch.as_tensor(scaled, dtype=torch.float32, device=device)
         self.groups: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+        self.skipped: dict[str, str] = {}
         for group, names in manager.active_terms.items():
             shapes = manager.group_obs_term_dim[group]
             layout = [(n, int(torch.tensor(s).prod())) for n, s in zip(names, shapes, strict=True)]
             try:
                 affine = observation_mirror(layout, joints, mean, std, position, scaled)
-            except KeyError:
-                continue  # a group no learner reads (the teacher's labels)
+            except KeyError as error:
+                # A group no learner reads (the teacher's labels); kept for the error below.
+                self.skipped[group] = str(error)
+                continue
             self.groups[group] = (
                 torch.as_tensor(affine.linear, dtype=torch.float32, device=device),
                 torch.as_tensor(affine.offset, dtype=torch.float32, device=device),
             )
 
     def observation(self, group: str, x: torch.Tensor) -> torch.Tensor:
+        if group not in self.groups:
+            reason = self.skipped.get(group, "not an observation group")
+            raise KeyError(f"no mirror for observation group {group!r}: {reason}")
         linear, offset = self.groups[group]
         return x @ linear.T + offset
 

@@ -87,13 +87,30 @@ if [ "${ZS_SYMMETRIZE:-0}" = 1 ]; then
   policy="$run/exported/${checkpoint}_sym.pt"
 fi
 
+# Isaac Sim fetches the robot's and the scene's USD from the Omniverse asset server at every
+# launch; a capture that could not open one is no result (2026-10-22: two outages took down every
+# capture of a ladder). It is retried, up to three times, once the server answers again.
+assets_online() {
+  local server=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1 url
+  for url in "$server/Isaac/IsaacLab/Robots/Unitree/G1/g1_minimal.usd" \
+    "$server/Isaac/Environments/Grid/default_environment.usd"; do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -I "$url")" = 200 ] || return 1
+  done
+}
+
 capture() {
-  local name="$1"
+  local name="$1" attempt log
   shift
-  "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task_id" \
-    --driver-policy "$policy" --steps 900 --settle-steps 100 "$@" \
-    --output "$rollouts/zs_${tag}_${name}.npz" > "logs/contract/capture_zs_${tag}_${name}.log" 2>&1
-  tail -1 "logs/contract/capture_zs_${tag}_${name}.log"
+  log="logs/contract/capture_zs_${tag}_${name}.log"
+  for attempt in 1 2 3; do
+    until assets_online; do sleep 60; done
+    "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task_id" \
+      --driver-policy "$policy" --steps 900 --settle-steps 100 "$@" \
+      --output "$rollouts/zs_${tag}_${name}.npz" > "$log" 2>&1
+    grep -aqE "Unable to open the usd file at path: https|USD file not found at path at: 'https" "$log" || break
+    echo "capture $name: an asset could not be opened (attempt $attempt); retrying"
+  done
+  tail -1 "$log"
 }
 
 export HUMANOID_CONTRACT="$root/$walk"

@@ -23,6 +23,7 @@
 #
 #   WARM_ARMS="v2t r3"    the arms to run          WARM_DISTILLED=<run>  reuse a distillation
 #   WARM_SUFFIX=_x        appended to run names and result tags, so earlier rounds stay
+#   WARM_LADDER_ONLY=1    only the ladders, on the latest runs of those names
 #   transfer/scripts/warm_study.sh          (from the repository root, under Start-Process)
 set -uo pipefail
 
@@ -44,7 +45,7 @@ saved = torch.load('logs/rsl_rl/g1_track/${incumbent}/model_6194.pt', map_locati
 print(saved['optimizer_state_dict']['param_groups'][0]['lr'])")}"
 
 note "warm study start: arms $arms, suffix '$suffix', PPO from learning rate $rate"
-if want v2t; then
+if want v2t && [ -z "${WARM_LADDER_ONLY:-}" ]; then
   # 1. Distil (WARM_DISTILLED=<run directory> reuses one: the distillation reads no reward).
   distilled="${WARM_DISTILLED:-}"
   if [ -z "$distilled" ]; then
@@ -68,7 +69,7 @@ if want v2t; then
 fi
 
 # 3. PPO continued on the incumbent itself.
-if want r3; then
+if want r3 && [ -z "${WARM_LADDER_ONLY:-}" ]; then
   HUMANOID_HEADS=0 HUMANOID_PLAN_TRUST=0 "$python" -u scripts/train.py --task G1Track-v0 \
     --headless --num_envs 4096 --max_iterations "$iterations" --seed 41 \
     --run_name "warm_r3$suffix" --resume --load_run "$incumbent" --checkpoint model_6194.pt \

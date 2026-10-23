@@ -126,6 +126,25 @@ if want core; then
   fi
 fi
 
+# The distilled control: the incumbent's own network and task, distilled and trained exactly as
+# the core and the physics arms were. Round 8 found both distilled arms free of rough's falls and
+# slow on the walk, against an undistilled control; this arm says how much of either is the
+# distillation's.
+if want plain; then
+  g1_conditions
+  export HUMANOID_HEADS=0 HUMANOID_PLAN_TRUST=0
+  if distilled="$(distil_and_gate G1Track-v0 g1_track plain "${g1_teacher[@]}")"; then
+    "$python" -u scripts/train.py --task G1Track-v0 --headless --num_envs 4096 \
+      --max_iterations "$iterations" --seed 41 --run_name warm_plain \
+      --resume --load_run "$(basename "$distilled")" --checkpoint model_0.pt \
+      "agent.algorithm.learning_rate=$g1_rate" \
+      > logs/contract/train_warm_plain.log 2>&1 || note "warm_plain training FAILED"
+    note "warm_plain trained"
+    run="$(ls -d logs/rsl_rl/g1_track/*_warm_plain | tail -1)"
+    ladder g1 G1Track-Play-v0 "$run" warm_plain map corners encoder walk l4
+  fi
+fi
+
 if want nao_check; then
   nao_conditions
   export HUMANOID_HEADS=1 HUMANOID_PLAN_TRUST=1

@@ -53,9 +53,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("tags", nargs="+")
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--results", type=Path, action="append", default=[],
+        help="Another results directory to read tags from (a worktree's); this repository's is "
+        "always read first.",
+    )  # fmt: skip
     args = parser.parse_args()
+    global RESULTS
+    directories = [RESULTS, *args.results]
     table = {}
     for tag in args.tags:
+        RESULTS = next(d for d in directories if any(d.glob(f"zero_shot_g1_{tag}_*")))
         table[tag] = {
             **{task: ladder(tag, task) for task in TASKS},
             "walk": walk(tag),

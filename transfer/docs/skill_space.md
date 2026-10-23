@@ -1865,6 +1865,16 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
   - *What it costs.* The walk slows to 0.81 of the teacher's speed, below the 0.9 that S0's
     walk check asks; the control holds 1.02. The duty factor on the family's grid moves away
     from the plans'.
+  - *Step 2, decoder v2's deep-learning core*, distilled the same way into the plain task
+    (`feat/decoder-core`: `G1TrackCore-v0`, the plan's temporal encoder and a residual
+    trunk) and trained alike, against the same control (`warm_table_r8_core.json`): rough
+    0/192, flat 0/192 passing 3, walk 0/64 at 0.85 of the teacher's speed, grid 39/61,
+    corners 30/36. On the grid its duty is worse (+0.014 ± 0.003); on the corners its stride
+    period is better (−0.002 ± 0.001).
+  - *What the two distilled arms share.* Both distilled arms do not fall on rough and walk
+    slow, and they share nothing but the distillation. Neither result can yet be put down to
+    the prior or to the core. The arm that separates them is a *distilled control*: the
+    incumbent's own network distilled the same way, then the same PPO.
   - *By the rule it is not adopted:* it regresses on S0 (the walk) and on the family's duty.
     As the user's rule has it, the round is reported and reframed, not concluded. The core,
     distilled the same way, also walks slow (0.85, `zero_shot_g1_warm_core_walk_kin.json`), so

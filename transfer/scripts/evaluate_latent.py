@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -64,6 +65,16 @@ def _settled(done: np.ndarray, already_running: int) -> np.ndarray:
     return age >= SETTLE_STEPS
 
 
+def _repository_path(path: Path) -> str:
+    """The capture's path from the repository root, links left as they are: a worktree that
+    links ``g1/rollouts`` in would otherwise resolve out of its own root. Absolute if outside."""
+    absolute = Path(os.path.normpath(os.path.abspath(path)))
+    try:
+        return absolute.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return absolute.as_posix()
+
+
 def summarise(path: Path) -> dict:
     data = np.load(path)
     units = UnitSystem(float(data["leg_length"]), float(data["total_mass"]))
@@ -79,7 +90,7 @@ def summarise(path: Path) -> dict:
     signature = gait_signature(z, done, dt_star).as_dict()
     rhythm = dominant_rhythm(z, dt_star)
     return {
-        "file": path.resolve().relative_to(REPO_ROOT).as_posix(),
+        "file": _repository_path(path),
         "driver": str(data["driver"]),
         "steps_by_envs": list(done.shape),
         "episodes": episodes,

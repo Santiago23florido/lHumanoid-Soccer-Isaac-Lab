@@ -1841,6 +1841,36 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
      at 0.017. Every warm arm now starts PPO at its incumbent's adapted rate, the control
      too (`warm_study.sh`: `agent.algorithm.learning_rate`, read from the checkpoint).
 
+  **Round 8: the comparison at equal competence.** The physics arm was trained from round 6's
+  distillation, which passed its gate. The control is the incumbent's own continuation. Both
+  ran 1000 PPO iterations from the incumbent's adapted rate, with the study's conditions,
+  and both were laddered unsymmetrized (`transfer/scripts/warm_round8.sh`,
+  `warm_round8_ladders.sh`; table by `warm_table.py`, `transfer/results/warm_table_r8.json`).
+  Results are on the deployed path:
+
+  | arm | rough_b4 L4 falls | flat_dagger2 L4 | walk (L1b), speed / teacher | grid passed | corners passed |
+  | --- | --- | --- | --- | --- | --- |
+  | control, `warm_r3_r8` | 14/194 | 0/192; passes 3 | 0/64, 1.02 | 37/61 | 30/36 |
+  | **physics, `warm_v2t_r8`** | **0/192** | 0/192; passes 3 | 0/64, **0.81** | 36/61 | 26/36 |
+  | earlier control (from 1e-3), `warm_r3` | 0/192 | 0/192; passes 3 | 0/64, 0.97 | 38/61 | 29/36 |
+
+  On the family (`compare_competence.py`, control → physics; mean deviation, bootstrap SE):
+  - grid: speed 0.014 → 0.017 (+0.003 ± 0.005) and stride period unchanged, but duty
+    0.054 → 0.090, **worse** (+0.037 ± 0.006);
+  - corners: duty +0.008 ± 0.003 worse, use +0.004 ± 0.001 worse.
+
+  - *What the prior gains.* On rough it does not fall where its control fell in 7 % of the
+    episodes: 0/192 against 14/194, about 3.9 binomial SE. The earlier control, from the
+    config's rate, fell in none, so rough's falls vary between controls' runs.
+  - *What it costs.* The walk slows to 0.81 of the teacher's speed, below the 0.9 that S0's
+    walk check asks; the control holds 1.02. The duty factor on the family's grid moves away
+    from the plans'.
+  - *By the rule it is not adopted:* it regresses on S0 (the walk) and on the family's duty.
+    As the user's rule has it, the round is reported and reframed, not concluded. The core,
+    distilled the same way, also walks slow (0.85, `zero_shot_g1_warm_core_walk_kin.json`), so
+    the slowdown may come with the distillation rather than with the prior. The next check is
+    a distilled student's walk before PPO.
+
   Along the way: on 2026-10-22, from 19:18 to 19:32, Isaac Sim could not fetch the robot's
   and the scene's USD from the Omniverse asset server, and four stages failed in their first
   minute. They carry no result; the queue now waits for the server and retries such a stage.

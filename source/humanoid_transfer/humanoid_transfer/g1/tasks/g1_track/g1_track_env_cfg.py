@@ -64,6 +64,9 @@ PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
 (``transfer/docs/skill_space.md`` §8); 0 keeps the walk alone."""
 
 CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
+LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
+"""How the reward scores the feet's loads (``ReferenceCommandCfg.load_space``)."""
+LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_g1.json"
 
 BASE_BODY = "pelvis"
 FOOT_BODIES = ["left_ankle_roll_link", "right_ankle_roll_link"]
@@ -197,6 +200,8 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             resync_error=float("inf"),
             procedural_fraction=PROCEDURAL,
             procedural_calibration=str(CALIBRATION),
+            load_space=LOAD_SPACE,
+            load_precision=str(LOAD_PRECISION),
         )
 
         self.observations = TrackObservationsCfg()

@@ -59,6 +59,8 @@ if TYPE_CHECKING:
 
 _TOLERANCE = 1e-6
 _PLAN_LIMIT = 50.0
+LOAD_EPSILON = 0.01
+"""The generator's load warp, ``log(load + LOAD_EPSILON)``."""
 _VX = SKILL_LAYOUT.slice_of("com_velocity").start
 _YAW_RATE = SKILL_LAYOUT.slice_of("base_angular_velocity").start + 2
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
@@ -179,6 +181,13 @@ class ReferenceCommand(UniformVelocityCommand):
         self.far_steps = torch.zeros(n, dtype=torch.long, device=self.device)
         self.resyncs = torch.zeros(n, device=self.device)
         self.plan = torch.zeros(n, length, size, device=self.device)
+        self._load = SKILL_LAYOUT.slice_of("foot_load")
+        self.load_log_tolerance = None
+        if cfg.load_space == "log":
+            report = json.loads(Path(cfg.load_precision).read_text(encoding="utf-8"))
+            self.load_log_tolerance = float(report["log_rms"])
+        elif cfg.load_space != "linear":
+            raise ValueError(f"unknown load_space {cfg.load_space!r}")
         self.plan_second = torch.zeros(n, length, size, device=self.device)
         """With ``plan_trust``: a second sample from the same history, row for row (the plan
         itself where the biped drew it), so a prior can average the two instead of shrinking
@@ -495,6 +504,16 @@ class ReferenceCommand(UniformVelocityCommand):
             widened = self.tolerance_procedural[self.age]
             tolerance = torch.where(self.procedural[:, None], widened, tolerance)
         error = (self._reward_true - due) / tolerance
+        if self.load_log_tolerance is not None:
+            # The loads as the generator models them, log(load + 0.01): a foot left on the
+            # ground with a few per cent of the weight where the plan lifts it -- contact for
+            # the duty factor -- costs several tolerances here, under one in linear units.
+            plain = self.generator.skill_norm.inverse
+            true = plain(self._reward_true)[:, self._load].clamp(min=0.0)
+            asked = plain(due)[:, self._load].clamp(min=0.0)
+            error[:, self._load] = (
+                torch.log(true + LOAD_EPSILON) - torch.log(asked + LOAD_EPSILON)
+            ) / self.load_log_tolerance
         # The same state against the plan another environment holds: if a tracker
         # ignored its plan, the two errors would be alike.
         other = (self._reward_true - due.roll(1, 0)) / tolerance.roll(1, 0)
@@ -879,6 +898,17 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     flow_steps: int | None = None
     """Overrides the generator's integration steps; None keeps them."""
+
+    load_space: str = "linear"
+    """How the reward scores each foot's load: ``linear`` (normalised units, at the encoder's
+    precision) or ``log`` -- ``log(load + 0.01)``, the generator's own space, at the deployed
+    estimator's precision there (``load_precision``). In linear units a foot grazing the ground
+    with 5 % of the weight where the plan lifts it costs under one tolerance; every tracker did
+    so in ~19 % of its planned swing, and the duty factor fails 21-25 of its ~24 failing
+    probes of the family (skill_space.md §9.1)."""
+
+    load_precision: str = ""
+    """With ``load_space="log"``: a ``load_precision.py`` report; its ``log_rms`` is the scale."""
 
     tolerance: str = "precision"
     """``precision``: the encoder's error (a plan is a commitment); ``spread``: the

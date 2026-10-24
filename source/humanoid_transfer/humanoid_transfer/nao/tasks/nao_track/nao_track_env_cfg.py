@@ -71,6 +71,9 @@ PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
 """Share of training episodes following the point-mass biped's plans (§8 of skill_space.md)."""
 
 CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
+LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
+"""How the reward scores the feet's loads (``ReferenceCommandCfg.load_space``)."""
+LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_nao.json"
 
 COMMAND = "base_velocity"
 BASE_BODY = "base_link"
@@ -279,6 +282,8 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             resync_error=float("inf"),
             procedural_fraction=PROCEDURAL,
             procedural_calibration=str(CALIBRATION),
+            load_space=LOAD_SPACE,
+            load_precision=str(LOAD_PRECISION),
         )
 
         self.observations = NaoTrackObservationsCfg()

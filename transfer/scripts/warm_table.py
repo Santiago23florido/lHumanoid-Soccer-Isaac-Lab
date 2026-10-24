@@ -21,11 +21,11 @@ TASKS = {"rough": "rough_b4", "flat": "flat_dagger2"}
 COMMANDS = ("forward", "fast", "turning")
 
 
-def ladder(tag: str, task: str) -> dict:
+def ladder(tag: str, task: str, body: str = "g1") -> dict:
     falls = episodes = passes = 0
     ratios = []
     for command in COMMANDS:
-        path = RESULTS / f"zero_shot_g1_{tag}_{TASKS[task]}_auto_kin_l4_{command}.json"
+        path = RESULTS / f"zero_shot_{body}_{tag}_{TASKS[task]}_auto_kin_l4_{command}.json"
         run = json.loads(path.read_text(encoding="utf-8"))["runs"]["encoder"]
         falls += run["falls"]
         episodes += run["episodes"]
@@ -34,17 +34,22 @@ def ladder(tag: str, task: str) -> dict:
     return {"falls": falls, "episodes": episodes, "passes": passes, "speed_ratio": ratios}
 
 
-def walk(tag: str) -> dict:
-    run = json.loads((RESULTS / f"zero_shot_g1_{tag}_walk_kin.json").read_text(encoding="utf-8"))
+def walk(tag: str, body: str = "g1") -> dict:
+    run = json.loads(
+        (RESULTS / f"zero_shot_{body}_{tag}_walk_kin.json").read_text(encoding="utf-8")
+    )
     encoder = run["runs"]["encoder"]
     return {"falls": encoder["falls"], "episodes": encoder["episodes"],
             "speed_ratio": encoder["verdict"]["speed_ratio"],
             "passes": bool(encoder["verdict"]["passes"])}  # fmt: skip
 
 
-def competence(tag: str, suffix: str, group: str) -> dict:
-    """One group of the competence report's probes: how many pass, of how many."""
-    path = RESULTS / f"competence_g1_{tag}{suffix}.json"
+def competence(tag: str, suffix: str, group: str, body: str = "g1") -> dict:
+    """One group of the competence report's probes: how many pass, of how many (none if it
+    was not run: the NAO's ladders skip the map)."""
+    path = RESULTS / f"competence_{body}_{tag}{suffix}.json"
+    if not path.exists():
+        return {"passed": None, "probes": None}
     summary = json.loads(path.read_text(encoding="utf-8"))["summary"][group]
     return {"passed": summary["passed"], "probes": summary["probes"]}
 
@@ -53,6 +58,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("tags", nargs="+")
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--body", default="g1", choices=("g1", "nao"))
     parser.add_argument(
         "--results", type=Path, action="append", default=[],
         help="Another results directory to read tags from (a worktree's); this repository's is "
@@ -63,12 +69,12 @@ def main() -> int:
     directories = [RESULTS, *args.results]
     table = {}
     for tag in args.tags:
-        RESULTS = next(d for d in directories if any(d.glob(f"zero_shot_g1_{tag}_*")))
+        RESULTS = next(d for d in directories if any(d.glob(f"zero_shot_{args.body}_{tag}_*")))
         table[tag] = {
-            **{task: ladder(tag, task) for task in TASKS},
-            "walk": walk(tag),
-            "map": competence(tag, "", "grid"),
-            "corners": competence(tag, "_corners", "corner"),
+            **{task: ladder(tag, task, args.body) for task in TASKS},
+            "walk": walk(tag, args.body),
+            "map": competence(tag, "", "grid", args.body),
+            "corners": competence(tag, "_corners", "corner", args.body),
         }
     for tag, row in table.items():
         cells = [f"{tag:14s}"]

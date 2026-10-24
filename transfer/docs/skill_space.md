@@ -1926,6 +1926,23 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     14/194, flat unchanged (0/192, passes 3), S0's walk 0/64 at 1.01. The planned-swing
     graze falls only a little (18.1 → 17.3 %), so the duty improves more through the
     stride's timing than through lift-off.
+  - *The adoption check* (`logload_next.sh`). The log-load tracker, deployed symmetrized,
+    was compared with the incumbent `r3_6194_sym`, both under this code
+    (`competence_g1_r3_6194_sym_v4*.json`, `*_warm_r3_logload_sym_*`):
+
+    | | incumbent | log-load |
+    | --- | --- | --- |
+    | grid passed | 39/61 | 40/61 (one probe only it passes) |
+    | grid duty deviation | 0.090 | **0.065** (−0.025 ± 0.004) |
+    | grid speed, use | — | better (−0.003 ± 0.000; −0.003 ± 0.001) |
+    | corners passed | 31/36 | 31/36; stride period and use better |
+    | rough L4, flat L4 | 0/192; 0/192 passing 3 | the same |
+    | S0's walk | 0/64, 1.007 | 0/64, 1.009 |
+
+    It is better or level on every measure and worse on none. It does not clear the
+    pre-registered bar, though: more cells mastered by over two standard errors, where it
+    has one probe. The duty moves by six standard errors, but across the probes' tolerance
+    in few of them.
   - *On the NAO the log space does not help* (`logload_next.sh`, `warm_table_nao_logload.json`).
     The NAO's incumbent was continued as its control, with only the load's space changed.
     Rough: 0/192 falls, passes 0 (the control passes 1). Flat: passes 0 as before. The duty's

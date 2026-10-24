@@ -153,7 +153,12 @@ class PhysicsPriorAction(JointPositionAction):
         rows = torch.arange(term.num_envs, device=self.device)
         window = term.age[:, None] + torch.arange(term.commit, device=self.device)
         ahead = term.plan[rows[:, None], window.clamp(max=term.plan.shape[1] - 1)]
-        if self.cfg.trust_plan:
+        if self.cfg.trust_plan and self.cfg.plan_fusion == "mean":
+            # The two samples' mean: half the sampling variance, and no pull towards the body's
+            # state -- which, for anything that moves, shortens the move (a foot's step).
+            lead = window.clamp(max=term.plan.shape[1] - 1)
+            ahead = 0.5 * (ahead + term.plan_second[rows[:, None], lead])
+        elif self.cfg.trust_plan:
             # Each row by the gain of its own lead time since the plan was drawn.
             lead = window.clamp(max=term.plan.shape[1] - 1)
             gain = term.plan_gain()[rows[:, None], lead]
@@ -279,6 +284,12 @@ class PhysicsPriorActionCfg(JointPositionActionCfg):
     trust_plan: bool = False
     """Read the plan fused with the body's state by its measured sampling noise (needs the
     command's ``plan_trust``)."""
+
+    plan_fusion: str = "shrink"
+    """With ``trust_plan``: ``shrink`` -- ``now + K (plan - now)``, K from the measured noise --
+    or ``mean``, the two samples' average. Shrinking towards the body's state pulls every moving
+    quantity back: the G1's forward foot targets came out at 0.82-0.85 of the plan's on the
+    walk, and the arm stepped 13 % short of its plans (skill_space.md §9.1)."""
 
     slow_tilt: bool = False
     """Aim the trunk at the plan's tilt averaged over its commitment, not its next step's."""

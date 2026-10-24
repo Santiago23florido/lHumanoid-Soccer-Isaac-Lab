@@ -179,6 +179,10 @@ class ReferenceCommand(UniformVelocityCommand):
         self.far_steps = torch.zeros(n, dtype=torch.long, device=self.device)
         self.resyncs = torch.zeros(n, device=self.device)
         self.plan = torch.zeros(n, length, size, device=self.device)
+        self.plan_second = torch.zeros(n, length, size, device=self.device)
+        """With ``plan_trust``: a second sample from the same history, row for row (the plan
+        itself where the biped drew it), so a prior can average the two instead of shrinking
+        the plan towards the body's state."""
         self.age = torch.zeros(n, dtype=torch.long, device=self.device)
         self.estimate = torch.zeros(n, size, device=self.device)
         self.just_reset = torch.ones(n, dtype=torch.bool, device=self.device)
@@ -642,6 +646,11 @@ class ReferenceCommand(UniformVelocityCommand):
             known = (2.0 * applied).expand(int(biped.sum()), -1, -1)
             self.trust.update(1, known, far[biped])
         self.plan[ids] = rows
+        if self.trust is not None:
+            other = second
+            if self.biped is not None:
+                other = torch.where(self.procedural[ids][:, None, None], rows, second)
+            self.plan_second[ids] = other
         self.integrals[ids] = integrals
         com, yaw = self._frame_now
         self.start_com[ids] = torch.where(anchor[:, None], com[ids], reference_com)

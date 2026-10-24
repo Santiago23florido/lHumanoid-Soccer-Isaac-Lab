@@ -7,7 +7,10 @@
 #    equal byte for byte the one recorded when it was measured (chain_study_b4.sh), on the GPU.
 # 2. L1b: the walk on every path, the deployed one through the kinematic estimator, for the
 #    incumbent trackers of both bodies (their truth and autonomous captures carried over from
-#    their own tag: those paths do not read the estimator).
+#    their own tag: those paths do not read the estimator). Since 2026-10-24 S0's check is the
+#    deployed path under the autonomous reference -- the one every tracker trains in and L4
+#    deploys with; the physical reference, which no tracker trains in and a body can steer
+#    towards a slower gait, is kept as instrumentation (skill_space.md §9).
 # (L4 of flat_dagger2 on both bodies, S0's third part, ran in the re-baseline.)
 set -uo pipefail
 
@@ -47,7 +50,9 @@ for body in g1 nao; do
   done
   bash transfer/scripts/zero_shot_ladder.sh "$body" "$run" "$ckpt" "${old}_v3" walk \
     > "logs/contract/regression_s0_walk_${body}.log" 2>&1 || note "walk ${body} FAILED"
-  note "walk ${body}: $(grep -E '^encoder' "logs/contract/regression_s0_walk_${body}.log" | head -1)"
+  log="logs/contract/regression_s0_walk_${body}.log"
+  note "walk ${body} (S0, autonomous): $(grep -E '^encoder' "$log" | sed -n 2p)"
+  note "walk ${body} (physical, instrumentation): $(grep -E '^encoder' "$log" | head -1)"
 done
 rm -rf "$scratch"
 note "s0 done"

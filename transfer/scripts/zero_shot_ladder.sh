@@ -146,6 +146,8 @@ if want encoder; then
 fi
 if want walk; then
   export HUMANOID_CONTRACT="$root/$walk_zs"
+  # The physical reference (plans restarted from the body each commitment): kept as
+  # instrumentation. No tracker trains in it, and a body can steer it towards a slower gait.
   capture "walk${est}_encoder" --num-envs 32 --reference physical --estimator "$estimator"
   "$python" transfer/scripts/evaluate_contract.py \
     --run teacher=g1/rollouts/closed_loop_teacher.npz \
@@ -153,6 +155,14 @@ if want walk; then
     --run "truth=$rollouts/zs_${tag}_walk_truth.npz" \
     --run "autonomous=$rollouts/zs_${tag}_walk_auto.npz" \
     --output "transfer/results/zero_shot_${body}_${tag}_walk${est}.json" | grep -v "^  "
+  # S0's walk since 2026-10-24: the deployed path (the estimator) under the autonomous
+  # reference, the one every tracker trains in and the published skills deploy with (L4).
+  capture "walk_auto${est}_encoder" --num-envs 32 --reference autonomous --estimator "$estimator"
+  "$python" transfer/scripts/evaluate_contract.py \
+    --run teacher=g1/rollouts/closed_loop_teacher.npz \
+    --run "encoder=$rollouts/zs_${tag}_walk_auto${est}_encoder.npz" \
+    --run "autonomous=$rollouts/zs_${tag}_walk_auto.npz" \
+    --output "transfer/results/zero_shot_${body}_${tag}_walk_auto${est}.json" | grep -v "^  "
 fi
 if want l3 || want l4; then
   if [ ! -f "$task_zs" ]; then

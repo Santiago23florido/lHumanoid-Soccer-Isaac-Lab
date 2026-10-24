@@ -28,6 +28,8 @@ PRIOR = os.environ.get("HUMANOID_PRIOR", "full")
 """Ablations: ``full``; ``kinematic`` (no feed-forward); ``static`` (feed-forward only)."""
 
 PLAN_TRUST = os.environ.get("HUMANOID_PLAN_TRUST", "0") == "1"
+PLAN_FUSION = os.environ.get("HUMANOID_PLAN_FUSION", "shrink")
+"""How a trusted plan is fused (``PhysicsPriorActionCfg.plan_fusion``): ``shrink`` or ``mean``."""
 """The prior trusts a plan by its measured sampling noise and aims the trunk at its slow tilt;
 the biped's plans carry the generator's measured noise and the gait's trunk sway (§9.1)."""
 
@@ -84,6 +86,7 @@ def prior_switches() -> dict[str, bool]:
         "feedforward": PRIOR in ("full", "static"),
         "trust_plan": PLAN_TRUST,
         "slow_tilt": PLAN_TRUST,
+        "plan_fusion": PLAN_FUSION,
     }
 
 

@@ -1917,6 +1917,15 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     precision there, measured by `load_precision.py` (G1 0.40, NAO 0.45). The same graze then
     costs about 4.5 tolerances. `logload_study.sh` continues the incumbent exactly as the
     control, with only that change.
+  - *The loads scored in log space improve the limiting check* (`logload_study.sh`,
+    `warm_table_logload.json`). The incumbent was continued exactly as the control,
+    `warm_r3_r8`, with only the load's space changed (`warm_r3_logload`). Grid 37 → 40
+    passed (three probes only it passes, none only the control). On the grid the duty's
+    deviation falls 0.079 → 0.065 (−0.015 ± 0.003) and the stride period's 0.016 → 0.005
+    (−0.011 ± 0.003). Corners 30 → 31, the duty −0.009 ± 0.004. Rough 1/192 falls against
+    14/194, flat unchanged (0/192, passes 3), S0's walk 0/64 at 1.01. The planned-swing
+    graze falls only a little (18.1 → 17.3 %), so the duty improves more through the
+    stride's timing than through lift-off.
   - *Step 4, the physics decoder on the NAO*, at equal competence with the NAO's own control.
     The control is the incumbent r1_3498's PPO continued in its task; the physics arm is
     distilled into `NaoTrackPhysics-v0`, seeing the prior's feed-forward. Its gate passed

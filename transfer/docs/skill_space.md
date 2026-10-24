@@ -1517,6 +1517,14 @@ S0 is:
 - L4 of `flat_dagger2` on both bodies;
 - L1b of the walk.
 
+**Deviation, 2026-10-24.** S0's walk is measured on the deployed path under the *autonomous*
+reference, decided by the user. Until then it used the physical one, in which the reference
+restarts from the body at each plan. No tracker trains in that mode, and a body can steer it
+towards a slower gait. In it, round 8's new decoders walked at 0.81 and 0.85 of the teacher's
+speed; under the autonomous reference, which every tracker trains in and L4 deploys with, they
+walked at 1.02 and 1.00. The physical measure stays as instrumentation; both come from the
+ladder's walk stage (`zero_shot_*_walk_kin.json`, physical; `*_walk_auto_kin.json`, S0).
+
 Training constraints are Lagrangian, with a bound that is measured, not chosen.
 
 | phase | hypothesis | target metric |

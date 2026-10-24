@@ -6,6 +6,8 @@ deterministic actor needs -- the running observation normaliser and the MLP --
 so it is rebuilt here: ``(obs - mean) / (std + 0.01)`` (rsl-rl's
 ``EmpiricalNormalization``), then the MLP with ELU between layers, returning
 the action mean. The result drives ``capture_rollouts.py --driver-policy``.
+Decoder v2's core (:class:`~humanoid_transfer.transfer.latent.core_net.PlanCoreNet`)
+is rebuilt from its own weights in place of the MLP.
 
 Usage::
 
@@ -15,17 +17,21 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
 from torch import nn
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "source" / "humanoid_transfer"))
+from humanoid_transfer.transfer.latent.core_net import core_from_state, is_core_state  # noqa: E402
 
 _EPS = 1e-2
 """rsl-rl's ``EmpiricalNormalization`` default."""
 
 
 class Actor(nn.Module):
-    def __init__(self, mean: torch.Tensor, std: torch.Tensor, mlp: nn.Sequential) -> None:
+    def __init__(self, mean: torch.Tensor, std: torch.Tensor, mlp: nn.Module) -> None:
         super().__init__()
         self.register_buffer("mean", mean)
         self.register_buffer("scale", std + _EPS)
@@ -36,6 +42,11 @@ class Actor(nn.Module):
 
 
 def actor_from(state: dict) -> Actor:
+    if is_core_state(state):
+        core = core_from_state(state)
+        mean = state["obs_normalizer._mean"].reshape(-1)
+        std = state["obs_normalizer._std"].reshape(-1)
+        return Actor(mean, std, core).eval()
     layers = sorted({int(k.split(".")[1]) for k in state if k.startswith("mlp.")})
     modules: list[nn.Module] = []
     for position, index in enumerate(layers):

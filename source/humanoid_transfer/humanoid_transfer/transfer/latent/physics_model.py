@@ -17,6 +17,11 @@ rsl-rl's PPO builds its loss itself. The auxiliary loss joins it through the
 action's backward pass (:class:`_JoinLoss`: an identity on the action whose
 backward also sends a unit gradient to the auxiliary loss), so PPO's update is
 used unchanged; :class:`PhysicsPPO` only reports the loss.
+
+The same actor hosts decoder v2's deep-learning core (``network="plan_core"``,
+:class:`~.core_net.PlanCoreNet`) in place of the MLP, with or without the heads
+(``physics_group=None``): the action and the heads read the network's features
+whichever it is.
 """
 
 from __future__ import annotations
@@ -28,6 +33,8 @@ from rsl_rl.algorithms import PPO
 from rsl_rl.models import MLPModel
 from rsl_rl.modules import MLP, EmpiricalNormalization
 from tensordict import TensorDict
+
+from .core_net import PlanCoreNet
 
 LOG_VARIANCE = (math.log(0.01), math.log(10.0))
 """Bounds on each predicted quantity's log-variance, in its normalised units."""
@@ -46,7 +53,7 @@ class _JoinLoss(torch.autograd.Function):
 
 
 class PhysicsActor(MLPModel):
-    """An MLP actor whose last hidden layer also predicts the group ``physics_group``."""
+    """An actor whose last hidden layer also predicts the group ``physics_group``, if any."""
 
     def __init__(
         self,
@@ -58,8 +65,10 @@ class PhysicsActor(MLPModel):
         activation: str = "elu",
         obs_normalization: bool = False,
         distribution_cfg: dict | None = None,
-        physics_group: str = "physics",
+        physics_group: str | None = "physics",
         head_dims: tuple[int, ...] | list[int] = (128,),
+        network: str = "mlp",
+        network_cfg: dict | None = None,
     ) -> None:
         super().__init__(
             obs,
@@ -71,12 +80,27 @@ class PhysicsActor(MLPModel):
             obs_normalization,
             distribution_cfg,
         )
+        if network == "plan_core":
+            if not isinstance(self.mlp[-1], torch.nn.Linear):
+                raise ValueError("the core takes a distribution read from one output vector")
+            output = self.mlp[-1].out_features
+            self.mlp = PlanCoreNet(
+                self._get_latent_dim(), output, hidden_dims, activation, **(network_cfg or {})
+            )
+            self.feature_dim = self.mlp.feature_dim
+        elif network == "mlp":
+            self.feature_dim = hidden_dims[-1]
+        else:
+            raise ValueError(f"unknown network {network!r}")
+        self.network = network
         self.physics_group = physics_group
+        self._losses: list[torch.Tensor] = []
+        if physics_group is None:
+            return
         size = obs[physics_group].shape[-1]
-        self.head = MLP(hidden_dims[-1], size, list(head_dims), activation)
+        self.head = MLP(self.feature_dim, size, list(head_dims), activation)
         self.log_variance = torch.nn.Parameter(torch.zeros(size))
         self.target_normalizer = EmpiricalNormalization(size)
-        self._losses: list[torch.Tensor] = []
 
     def forward(
         self,
@@ -85,13 +109,15 @@ class PhysicsActor(MLPModel):
         hidden_state=None,
         stochastic_output: bool = False,
     ) -> torch.Tensor:
-        features = self.get_latent(obs, masks, hidden_state)
-        *hidden, last = list(self.mlp)
-        for layer in hidden:
-            features = layer(features)
-        output = last(features)
+        features = self.features(self.get_latent(obs, masks, hidden_state))
+        output = self.action(features)
         # The update's own forward pass: the one whose action log-probability is optimised.
-        if stochastic_output and self.training and torch.is_grad_enabled():
+        if (
+            self.physics_group is not None
+            and stochastic_output
+            and self.training
+            and torch.is_grad_enabled()
+        ):
             loss = self.physics_loss(features, obs[self.physics_group])
             output = _JoinLoss.apply(output, loss)
             self._losses.append(loss.detach())
@@ -102,13 +128,24 @@ class PhysicsActor(MLPModel):
             return self.distribution.deterministic_output(output)
         return output
 
-    def trunk(self, obs: TensorDict) -> torch.Tensor:
-        """The last hidden layer's features, which the action and the physics heads both read."""
-        features = self.get_latent(obs)
+    def features(self, latent: torch.Tensor) -> torch.Tensor:
+        """The last hidden layer's features from the normalised observation."""
+        if self.network == "plan_core":
+            return self.mlp.features(latent)
         *hidden, _ = list(self.mlp)
         for layer in hidden:
-            features = layer(features)
-        return features
+            latent = layer(latent)
+        return latent
+
+    def action(self, features: torch.Tensor) -> torch.Tensor:
+        """The distribution's parameters from the features."""
+        if self.network == "plan_core":
+            return self.mlp.action(features)
+        return self.mlp[-1](features)
+
+    def trunk(self, obs: TensorDict) -> torch.Tensor:
+        """The last hidden layer's features, which the action and the physics heads both read."""
+        return self.features(self.get_latent(obs))
 
     def physics_loss(self, features: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Gaussian negative log-likelihood of the measured balance, per quantity, averaged."""

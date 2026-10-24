@@ -30,6 +30,16 @@ def contract_path(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return _term(env, command_name).path()
 
 
+def contract_tokens(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """The plan as a sequence of tokens, each row's state and path (decoder v2's core)."""
+    return _term(env, command_name).tokens()
+
+
+def contract_estimate(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """``ẑ*``: the core's view ends the plan's tokens with the state they are relative to."""
+    return _term(env, command_name).current()
+
+
 def contract_privileged(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """The critic's view: the plan relative to the true ``z*``, the true ``z*``, the plan's age."""
     return _term(env, command_name).privileged()
@@ -91,6 +101,8 @@ __all__ = [
     "contract_left",
     "contract_likelihood",
     "contract_path",
+    "contract_estimate",
+    "contract_tokens",
     "contract_privileged",
     "contract_tracking",
     "contract_view",

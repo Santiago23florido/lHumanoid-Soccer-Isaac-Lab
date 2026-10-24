@@ -28,6 +28,7 @@ from isaaclab_rl.rsl_rl import (
     RslRlSymmetryCfg,
 )
 
+from .....transfer.tasks.tracking.core_cfg import with_core
 from .....transfer.tasks.tracking.physics_cfg import with_physics_heads
 from ..mirror import augment
 
@@ -94,3 +95,24 @@ class G1TrackPhysicsPPORunnerCfg(G1TrackPPORunnerCfg):
 
     def __post_init__(self) -> None:
         with_physics_heads(self)
+
+
+@configclass
+class G1TrackCorePPORunnerCfg(G1TrackPPORunnerCfg):
+    """The same algorithm for the tracker that reads its plan with decoder v2's core."""
+
+    experiment_name = "g1_track_core"
+
+    def __post_init__(self) -> None:
+        with_core(self)
+
+
+@configclass
+class G1TrackPhysicsCorePPORunnerCfg(G1TrackPhysicsPPORunnerCfg):
+    """The core in the physics task: the prior's residual, the heads with HUMANOID_HEADS=1."""
+
+    experiment_name = "g1_track_physics_core"
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        with_core(self)

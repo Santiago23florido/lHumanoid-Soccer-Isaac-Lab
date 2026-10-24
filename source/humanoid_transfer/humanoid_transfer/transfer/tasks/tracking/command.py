@@ -812,6 +812,20 @@ class ReferenceCommand(UniformVelocityCommand):
         path = torch.where(~self.has_plan[:, None, None], 0.0, path)
         return torch.nan_to_num(path.flatten(1), nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
 
+    def tokens(self) -> torch.Tensor:
+        """``(N, view * 30)``: the view as a sequence, one token per row -- that row's plan
+        relative to ``ẑ*`` (27) and where the reference will be then (3) -- for decoder v2's
+        temporal plan encoder (:class:`~humanoid_transfer.transfer.latent.core_net.PlanCoreNet`).
+        The same numbers as :meth:`observation`'s rows and :meth:`path`, interleaved."""
+        size = self.estimate.shape[-1]
+        relative = self.observation()[:, : self.view * size].reshape(-1, self.view, size)
+        path = self.path().reshape(-1, self.view, 3)
+        return torch.cat([relative, path], dim=-1).flatten(1)
+
+    def current(self) -> torch.Tensor:
+        """``(N, 27)``: ``ẑ*``, as :meth:`observation` ends."""
+        return self.observation()[:, -self.estimate.shape[-1] :]
+
     def privileged(self) -> torch.Tensor:
         """``(N, view * 27 + 28)``: the plan relative to the true ``z*``, the true ``z*``, age."""
         true = self._true_now

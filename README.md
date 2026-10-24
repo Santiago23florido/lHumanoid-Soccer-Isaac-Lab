@@ -133,35 +133,67 @@ similar motions of a 1.3 m and a 0.57 m robot are the same vector.
 A new skill therefore costs one training, on the G1, however many bodies run it:
 **N + M trainings, not N × M.**
 
-The first skill tested is Isaac Lab's published `Isaac-Velocity-Flat-G1-v0`.
-Neither body ever saw its data, and both are frozen. Results are on the
-deployed path, at three commands:
+Both of Isaac Lab's published G1 locomotion policies have been transferred:
+`Isaac-Velocity-Flat-G1-v0` and `Isaac-Velocity-Rough-G1-v0`. Neither body ever
+saw their data, and both trackers are frozen.
 
-| | G1 | NAO |
+**The model as it stands.** These are the incumbents of
+[`transfer/results/incumbents.json`](transfer/results/incumbents.json), changed
+only by a pre-registered rule: more than two bootstrap standard errors better, and
+no worse on the regression suite S0.
+
+| Part | What it is | Trained on |
 | --- | --- | --- |
-| Falls | **0** / 64 | **0** / 64 |
-| Speed vs the policy (Froude-scaled) | 1.06–1.16 | 1.04–1.11 |
-| Stride, period | within 6 % | within 8 % |
-| Duty | within 8.4 % | within 8.2 % at its own control rate (+13–19 % at the G1's) |
-| Before this method | 120–240 falls | shuffling, 14–41 % of the speed |
+| Generator, per skill | plans of `z*` (`flat_dagger2`; `rough_b4`, which reads its noise level) | the G1's expert only |
+| Estimator, per body | `z*` from the body's own kinematics; the loads from a learned encoder | — |
+| Tracker, per body | a plain MLP, symmetrized at deployment (G1 `r3_6194`, NAO `r1_3498`) | a physical family of procedural plans, never a skill |
 
-The NAO's longer stance is its control rate, not the transfer. Its step is
-1.62 × the G1's in body time, and the G1's own plans, sampled at the NAO's rate,
-show the same stance. A **blind test** on `Isaac-Velocity-Rough-G1-v0` was
-pre-registered whole before any of its data existed, and is running.
+Results are on the deployed path, over three commands (forward, fast, turning;
+64 episodes each). "Passes" counts the commands whose gait signature is within
+tolerance of the teacher's:
 
-**→ [`transfer/docs/skill_space.md`](transfer/docs/skill_space.md)** §7–8 has
-the theory, the pre-registered protocol, every deviation from it with its
-reason, and every number with the result file it comes from.
+| Skill | G1 | NAO |
+| --- | --- | --- |
+| Flat | **0 / 192** falls, passes 3 | **0 / 192** falls, passes 3 |
+| Rough | **0 / 192** falls | **0 / 192** falls, passes 2 of 3 at its own rate |
+| Before this method | 120–240 falls on flat | shuffling, 14–41 % of the speed |
+
+The NAO's longer stance on rough is the one shortfall left. Its step is 1.62 × the
+G1's in body time, and the G1's own plans, sampled at the NAO's rate, show the same
+stance.
+
+**What did not win: decoder v2.** It adds physics in the decoder: an IK and
+feed-forward prior with an RL residual, physics heads and a physics critic. It also
+tried a deep-learning core: a temporal plan encoder and a residual trunk. Each was
+tested at equal competence: distilled from the incumbent, then trained alike. Against
+a control distilled the same way, on the G1:
+
+| Arm | Rough falls | Walk speed / teacher | Family duty vs control |
+| --- | --- | --- | --- |
+| Distilled control (the incumbent's network) | 62 / 225 | 0.96 | — |
+| Physics prior | **0 / 192** | 0.81 | worse, +0.034 ± 0.006 |
+| Deep-learning core | **0 / 192** | 0.85 | worse, +0.011 ± 0.002 |
+
+Both new decoders are robust on rough, but they shorten the stride the plans ask
+for. Under the autonomous reference that slows the walk below S0's 0.9, so neither
+is adopted. On the NAO, the physics prior corrects flat's duty (passes 3 of 3
+against none) but not rough's stance. Each arm is a single seed, and rough's falls
+vary widely between runs of one recipe.
+
+**→ [`transfer/docs/skill_space.md`](transfer/docs/skill_space.md)** has the
+theory (§7–8), the pre-registered protocol and every deviation from it, and the
+decoder-v2 log (§9). Every number there comes with the result file it comes from.
 
 ### Open
 
-- **The blind test** is running.
-- **Single seed** per training run, in both tracks.
+- **No blind test is left.** Isaac Lab publishes no other G1 skill. Flat is
+  semi-blind, and rough was diagnosed before it passed.
+- **Single seed** per training run, in every track.
+- **Decoder v2's stride.** Its new decoders keep a shorter stride than the plan
+  asks for (0.100 against 0.115 for the prior), and the autonomous loop turns that
+  into a slower walk.
 - **Locomotion only.** `z*` holds the CoM and the feet; a kick or the hands need
   fields it does not have.
-- **The walk's own fidelity** (L1b) is limited by its generator, which steps
-  about 20 % fast.
 - **The capture-point controller underperforms badly** (27.8 %) and the reason
   is not verified.
 - **No hardware.** Everything is simulation.

@@ -97,23 +97,22 @@ number an assumption.
 
 ## What is implemented
 
-| Module | State |
-| --- | --- |
-| `correspondence.py` | Role map and sign done and tested. Scale map deliberately absent — it is the experiment. |
-| `feasibility.py` | Reachability done and tested. Torque feasibility not implemented. |
-| `scripts/check_reachability.py` | Done. Caught a sign error that affected 100% of samples. |
-| `distillation.py` | Configuration only. The loss terms need the student environment first. |
-| `embodiment.py` | Each body as dimensionless groups and the defect between them. |
-| `latent/` | The shared latent space, G1 side: anchored to the skill state, distilled, walks closed-loop. Not pinned: stride timing misses its criterion. |
-| `scripts/encode_skill.py`, `train_latent.py`, `evaluate_latent.py` | Certify the skill state, train the latent model, compare policies closed-loop. |
-| Student walking task | **Not started.** The critical path. |
+The centroidal signal won, as a **contract**: the short future of `z*`. The
+sections above record how the question was first framed. What runs now:
 
-The losses are unwritten on purpose. Writing a reward term against an
-environment that does not exist is how the balance task acquired a
-centre-of-mass height term that computed 0.00015 instead of 0.149 and ran
-without error for weeks.
+| Part | Where | State |
+| --- | --- | --- |
+| The skill state `z*` (27 dimensionless numbers) | `common/skill_state.py`, `transfer/latent/skill_torch.py` | Certified against Isaac's own quantities; mirror, gauge and similarity tested. |
+| Generators, one per skill (plans of `z*`) | `transfer/latent/contract.py`, `scripts/train_contract.py` | `flat_dagger2` and `rough_b4` (noise-conditional) are the incumbents. They are trained on the G1's expert only. |
+| Estimator, per body | `proprioceptive_skill_state` | `z*` from the body's kinematics, with the height measured from the sole's lowest corner; the loads come from a learned encoder. |
+| Trackers, per body | `tasks/tracking/`, `g1/tasks/g1_track`, `nao/tasks/nao_track` | A plain MLP trained on a procedural family of physical plans, with a mirror loss, deployed symmetrized. The incumbents are G1 `r3_6194` and NAO `r1_3498`. |
+| The ladder and the competence map | `scripts/zero_shot_ladder.sh`, `evaluate_contract.py`, `evaluate_competence.py`, `compare_competence.py` | L1 (walk) to L4 (the published skill, autonomous reference); grid and corner probes with bootstrap comparisons. |
+| Decoder v2 (not adopted) | `tasks/tracking/physics_prior.py`, `physics_cfg.py`, `latent/physics_model.py`, `latent/core_net.py` (on `feat/decoder-core`) | An IK and feed-forward prior with an RL residual, physics heads, a physics critic, and a deep-learning core. |
+| Warm starts at equal competence | `scripts/distill_tracker.py`, `teacher_in_physics.py`, `warm_study.sh`, `ppo_start_ablation.sh` | DAgger from the incumbent, gated on the student's terminations, then PPO from the incumbent's adapted learning rate. |
+| A learned free latent `ζ` | `latent/free_latent.py`, `scripts/train_free_latent.py` | Shared across bodies and blind to the body; informative on the G1, barely on the NAO. Not in the contract yet. |
 
-Code lives in `source/humanoid_transfer/humanoid_transfer/transfer/`.
+Code lives in `source/humanoid_transfer/humanoid_transfer/transfer/`; the scripts
+in `transfer/scripts/`; every result as JSON in `transfer/results/`.
 
 ## What this starts from
 
@@ -136,21 +135,25 @@ that every humanoid shares by construction, and a learned latent space
 anchored to it, with a per-body encoder and decoder around a skill every body
 shares. Full account and results: [`docs/skill_space.md`](docs/skill_space.md).
 
-## Order of work
+## Where it stands
 
-1. **Teacher.** Trained, verified walking, pinned. Done.
-2. **Rollout capture.** Record joint states, CoM, centroidal momentum, contacts.
-3. **Student task.** A NAO *walking* environment. Does not exist. It must be a
-   new task rather than a variant of the balance one, whose zero-step
-   termination defines it and is exactly wrong for a gait. The objective is
-   open — track the command, do not fall — with no condition on whether, when
-   or how the student steps. Whether a gait emerges is the question, so it
-   cannot be an input.
-4. **Baseline.** Train the student with `λ_im = 0`. Without this number none of
-   the comparisons mean anything, and it is the one most likely to be skipped.
-5. **The comparison.** Three signals × masked/unmasked × 3 seeds.
-6. **Ablate the mask** on the best signal.
+1. **Done.**
+   - The teacher, and the walking tasks on both bodies.
+   - The contract: generators trained on the G1's data only, and trackers trained on
+     a procedural family of physical plans only.
+   - Both of Isaac Lab's published G1 locomotion policies, transferred to the NAO
+     zero-shot: 0 falls on either body, on the deployed path.
+2. **Tried and not adopted.**
+   - Decoder v2: the physics prior and the deep-learning core.
+   - At equal competence both are robust on rough (0 falls, against 62 of 225 for a
+     control distilled the same way). They shorten the stride, though, and the walk
+     falls below S0's speed (0.81 and 0.85 of the teacher's). The full log is in
+     [`docs/skill_space.md`](docs/skill_space.md) §9.1.
+3. **Next.**
+   - The new decoders' stride shortfall against the plan.
+   - Seeds for every comparison.
+   - `ζ` in the contract.
+   - Torque-based loads.
+   - The theory section and baselines from the literature.
 
-Step 3 gates everything after it.
-
-Full plan and threats to the result: [`docs/plan.md`](docs/plan.md).
+The plan and the threats to the result are in [`docs/plan.md`](docs/plan.md).

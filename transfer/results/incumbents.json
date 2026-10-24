@@ -4,7 +4,7 @@
     "pytest and ruff",
     "chains of flat_dagger2 and rough_b3 bit-exact on the GPU",
     "L4 of flat_dagger2 on the G1 (r3_6194_sym) and the NAO (r1_3498_sym)",
-    "L1b, the walk on every path"
+    "L1b, the walk on the deployed path under the autonomous reference (since 2026-10-24; the physical reference, which no tracker trains in, is kept as instrumentation)"
   ],
   "trackers": {
     "g1": {
@@ -25,14 +25,20 @@
   "generators": {
     "flat": {
       "contract": "logs/contract/flat_dagger2/generator.pt",
-      "since": "step 3: flat_b3 fell on the G1 where flat_dagger2 does not",
+      "since": "step 3: flat_b3 fell on the G1 where flat_dagger2 does not; F1: flat_b4 misses one NAO check of S0 (forward stride) where flat_dagger2 passes",
       "evidence": "transfer/results/zero_shot_g1_r3_6194_sym_flat_dagger2_auto_l4_*.json"
     },
     "rough": {
-      "contract": "logs/contract/rough_b3/generator.pt",
-      "since": "step 3: no falls on the NAO (10 before); on the G1 better or equal on every command",
-      "evidence": "transfer/results/zero_shot_*_sym_rough_b3_auto_l4_*.json"
+      "contract": "logs/contract/rough_b4/generator.pt",
+      "since": "F1 under the deployed kinematic estimator: G1 falls 0/192 against rough_b3's 4/190 (2.02 SE); NAO 0/192 both, passes 2 of 3 commands at its rate against 1",
+      "evidence": "transfer/results/zero_shot_{g1_r3_6194_sym_v3,nao_r1_3498_sym_v3}_rough_b{3,4}_auto_kin_l4_*.json",
+      "previous": "logs/contract/rough_b3/generator.pt"
     }
   },
-  "reference": "autonomous"
+  "reference": "autonomous",
+  "estimator": {
+    "deployed": "kinematic",
+    "since": "F2: every field of z* but the loads from the body's kinematics; rough_b3 on the G1 45/83 -> 15/64, 94/127 -> 16/62, 24/68 -> 12/61 falls; flat_dagger2 unchanged on both bodies (0/64, passes); height from the sole's lowest corner (G1 rough_b3 43/187 -> 4/190)",
+    "evidence": "transfer/results/zero_shot_*_sym_*_auto_kin_l4_*.json, estimator_error_*_kin.json"
+  }
 }

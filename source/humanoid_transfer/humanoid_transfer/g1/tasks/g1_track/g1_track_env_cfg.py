@@ -64,6 +64,9 @@ PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
 (``transfer/docs/skill_space.md`` §8); 0 keeps the walk alone."""
 
 CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
+LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
+"""How the reward scores the feet's loads (``ReferenceCommandCfg.load_space``)."""
+LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_g1.json"
 
 BASE_BODY = "pelvis"
 FOOT_BODIES = ["left_ankle_roll_link", "right_ankle_roll_link"]
@@ -72,6 +75,12 @@ COMMAND = "base_velocity"
 
 def _body_card() -> dict:
     return json.loads(BODY_CARD.read_text(encoding="utf-8"))
+
+
+def _sole_corners(foot: dict) -> list[list[float]]:
+    """The four corners of a foot's sole, in its link frame: its collision box's underside."""
+    low, high = foot["bbox_min_link"], foot["bbox_max_link"]
+    return [[x, y, low[2]] for x in (low[0], high[0]) for y in (low[1], high[1])]
 
 
 @configclass
@@ -176,6 +185,7 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             base_body=BASE_BODY,
             foot_bodies=list(FOOT_BODIES),
             sole_points=[list(card["foot"][name]["sole_point_link"]) for name in FOOT_BODIES],
+            sole_corners=[_sole_corners(card["foot"][name]) for name in FOOT_BODIES],
             leg_length=float(card["leg_length"]),
             flow_solver="midpoint",
             flow_steps=8,
@@ -190,6 +200,8 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             resync_error=float("inf"),
             procedural_fraction=PROCEDURAL,
             procedural_calibration=str(CALIBRATION),
+            load_space=LOAD_SPACE,
+            load_precision=str(LOAD_PRECISION),
         )
 
         self.observations = TrackObservationsCfg()

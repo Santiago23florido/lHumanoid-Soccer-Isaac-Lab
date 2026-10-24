@@ -1517,6 +1517,14 @@ S0 is:
 - L4 of `flat_dagger2` on both bodies;
 - L1b of the walk.
 
+**Deviation, 2026-10-24.** S0's walk is measured on the deployed path under the *autonomous*
+reference, decided by the user. Until then it used the physical one, in which the reference
+restarts from the body at each plan. No tracker trains in that mode, and a body can steer it
+towards a slower gait. In it, round 8's new decoders walked at 0.81 and 0.85 of the teacher's
+speed; under the autonomous reference, which every tracker trains in and L4 deploys with, they
+walked at 1.02 and 1.00. The physical measure stays as instrumentation; both come from the
+ladder's walk stage (`zero_shot_*_walk_kin.json`, physical; `*_walk_auto_kin.json`, S0).
+
 Training constraints are Lagrangian, with a bound that is measured, not chosen.
 
 | phase | hypothesis | target metric |
@@ -1527,6 +1535,457 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
 | F4, decoder v2 | a deep-learning core with physics in it extrapolates beyond the practised family. The physics: heads, an IK + contact-force prior with an RL residual, a critic and reward with z⁺ | cells mastered on the competence map and on pre-registered corners (crouched, high clearance, long stance), then L4 |
 | F5, a learned latent ζ | entity tokens with attention, bottlenecked to predict balance and falls and aligned across bodies on paired procedural data, carry what z* leaves out without encoding the body | the NAO's falls and CoP predicted by heads trained on the G1 alone; a body classifier at chance |
 | F6 (optional) | projecting a plan towards mastered cells when predicted competence drops reduces falls | falls, at no cost in fidelity |
+
+### 9.1 Log
+
+- **F1, B4 trained** (`contract_{rough,flat}_b4.json`, `chain_fidelity_{rough,flat}_b{3,4}_x*.json`):
+  one generator per task across history noise levels from 0.125 to 32 times the body
+  encoder's precision, the level read as an input. Each chain is scored against the teacher at
+  multiples of that precision:
+
+  | generator | x1 | x3 | x10 | x20 |
+  | --- | --- | --- | --- | --- |
+  | `rough_b3` | **0.033 ± 0.005** | **0.041 ± 0.004** | 0.233 ± 0.016 | 0.609 ± 0.027 |
+  | `rough_b4` | 0.090 ± 0.005 | 0.079 ± 0.005 | **0.096 ± 0.006** | **0.108 ± 0.006** |
+  | `flat_b3` | 0.093 ± 0.008 | 0.127 ± 0.009 | 0.396 ± 0.021 | 1.009 ± 0.108 (5 of 32 chains) |
+  | `flat_b4` | 0.088 ± 0.007 | **0.079 ± 0.006** | **0.055 ± 0.006** | **0.061 ± 0.008** |
+
+  - *B4 holds at any noise level, as designed.* From x1 to x20 its fidelity hardly changes,
+    where B3's falls apart above x3.
+  - *Rough pays for it at the body's own precision:* 0.090 against 0.033.
+  - *Flat is no worse than B3 at any level.*
+  - The bodies decide (L4 next, `b4_on_bodies.sh`).
+- **F2, the encoder's coverage, diagnosed** (`encoder_error.py`,
+  `encoder_error_g1_r3_6194_sym.json`). The G1's encoder error, in units of its precision:
+
+  | states | error |
+  | --- | --- |
+  | its own, practised (walk, procedural family) | 0.4–1.2 |
+  | the published policies' gaits, true state | 4–7 (height 12–21) |
+  | the same, through the encoder | 12–18 |
+
+  - *Not height alone.* At the same CoM height, 0.85–0.90 L, the error is 0.8 on procedural
+    states and 13–34 on the tasks' states. The network learned shortcuts on the manifold it
+    was fitted on, not the kinematics.
+  - *Widening the family's ranges would not be enough,* so the correction is structural.
+    Everything in `z*` but the feet's loads is kinematics: the body computes it from its joint
+    encoders, IMU and model (`proprioceptive_skill_state`). The ground is under the lower sole.
+    Without a base velocity, the more loaded foot is taken as still (leg odometry). The
+    learned encoder supplies only the loads.
+  - L4 with the incumbents under this estimator: `estimator_study.sh`.
+- **F2, run: the kinematic estimator is adopted** (`zero_shot_*_sym_*_auto_kin_l4_*.json`).
+  Falls through the deployed path, forward / fast / turning:
+
+  | | learned encoder | kinematic estimator | true state |
+  | --- | --- | --- | --- |
+  | `rough_b3`, G1 | 45/83, 94/127, 24/68 | **15/64, 16/62, 12/61** | 5/62, 1/61, 7/65 |
+  | `rough_b3`, G1, speed ratio | 0.75, 0.49, 0.88 | **0.99, 0.93, 1.00** | 1.04, 1.01, 1.02 |
+  | `rough_b3`, NAO | 0/64 ×3; at the body's rate, fails ×3 | 0/64 ×3; at the body's rate, **forward passes** | 0/64 ×3 |
+  | `flat_dagger2`, G1 | 0/64 ×3, passes | 0/64 ×3, passes | 9/65, 4/65, 6/64 |
+  | `flat_dagger2`, NAO | 0/64 ×3, passes at the body's rate | 0/64 ×3, passes at the body's rate | 1/64 ×3 |
+
+  - *No regression,* so the rule adopts it (`incumbents.json`).
+  - *What is left* (`encoder_error.py --recorded --lag 1`, `estimator_error_*_kin.json`):
+
+    | field | error, in the contract's sigma |
+    | --- | --- |
+    | every kinematic field | 0.00 |
+    | height | 4–25 |
+    | the learned loads | 1–3.5 |
+
+  - *Why the height errs.* The ground was taken under the lower sole point, but a pitched foot touches the ground with its heel or toe, its sole point centimetres above it. The fix, the lowest sole corner, comes with the decoder branch.
+  - *The captures needed a fix too.* They recorded each estimate one step after its state. The first figures of this table's runs were computed so and are superseded; only those runs were affected.
+  - *The NAO's remaining failure is in its tracker, not the estimator.* Details below.
+- **F1, B4 on both bodies** (`zero_shot_*_sym_{rough,flat}_b4_auto_l4_*.json`; the learned
+  encoder, as step 3 ran). Falls, forward / fast / turning:
+
+  | | G1, encoder | G1, true state | NAO, at the body's rate |
+  | --- | --- | --- | --- |
+  | `rough_b3` | 45/83, 94/127, 24/68 | 5/62, 1/61, 7/65 | 0 falls; fails ×3 |
+  | `rough_b4` | 34/75, 89/122, 27/72 | **0/64 ×3** | 1 fall in 62; **forward passes** |
+  | `flat_dagger2` | 0/64 ×3, passes | 9/65, 4/65, 6/64 | 0 falls; passes ×3 |
+  | `flat_b4` | 0/64 ×3, passes | **0/64 ×3** | 0 falls; forward fails (stride +12.5 %) |
+
+  - *The hypothesis holds where it was aimed.* A generator that reads its noise level no longer
+    collapses on a clean history: none of 384 true-state episodes falls.
+  - *On the G1's encoder path it changes nothing beyond its standard error.*
+  - *The rule keeps both incumbents:*
+    - `flat_b4` fails one check of S0 that `flat_dagger2` passes;
+    - `rough_b4`'s target metric does not improve by more than twice its standard error.
+  - *The deployed estimator is now kinematic,* so the comparison that decides is under it. It
+    is queued with the incumbents' re-baseline.
+- **F5, round 1: the pre-registered cross-body test fails, and it could not have passed**
+  (`free_latent_f5_r1.json`; `train_free_latent.py` on the incumbents' probe and corner captures,
+  289,000 steps per body, 27 probes held out).
+
+  | held-out probes, balance error (standardised) | `z*` alone | `z*` + `ζ` | difference |
+  | --- | --- | --- | --- |
+  | G1 (control) | 0.153 | **0.117** | −0.036 ± 0.004 |
+  | NAO (the test) | 2.97 | 2.98 | +0.010 ± 0.042 |
+
+  - *Training worked:* paired `ζ` aligned (2.9 → 0.008), the KL held its budget, and the body
+    classifier stayed near chance (+0.03 at the end).
+  - *On the G1, `ζ` carries balance that `z*` lacks:* ten standard errors better.
+  - *Falls tell nothing here.* No probe episode fell on either body.
+  - *Why the cross-body test cannot pass.* Even `z*` alone errs twenty times more on the NAO
+    than on the G1. Per dimension:
+
+    | | G1 | NAO |
+    | --- | --- | --- |
+    | vertical load | 0.00 | 0.05 |
+    | ground shear | 0.10–0.15 | 0.9–3.4 |
+    | centre of pressure | 0.23–0.29 | 5.0–6.5 |
+
+    The NAO's centre of pressure spreads twice as wide in leg lengths (0.09 against 0.047 L):
+    its foot is nearly twice as long for its leg. Its shear is 1.4 times larger in its own
+    weight. Two paired states -- the same planned gait at the same phase -- are held up
+    differently on the two bodies. A shared `ζ` read by one shared predictor, and forbidden
+    to encode the body, cannot be right on both. The test asked for the impossible.
+  - *Taken to the user.* The user chose to keep `ζ` shared and body-blind, and give each body
+    its own physics readout (round 2).
+- **F5, round 2: the three pre-registered checks pass** (`free_latent_f5_r2.json`; `ζ` shared,
+  each body's head trained on its own procedural data, centre of pressure as a fraction of
+  each foot's polygon):
+
+  | check | result |
+  | --- | --- |
+  | shared: a classifier on 4,320 held-out pairs | −0.008 ± 0.005 beyond chance; alignment 0.03 |
+  | informative: G1 held-out probes | 0.152 → **0.114** (−0.039 ± 0.003) |
+  | informative: NAO held-out probes | 0.144 → **0.141** (−0.0035 ± 0.0011) |
+  | carried: the NAO's head reading the *G1's* `ζ` | 0.140 → **0.135** (−0.0048 ± 0.0014) |
+
+  - *What it shows.* A latent learned with attention over both bodies can be shared, blind to
+    the body, and still informative about each body's own physics. What a plan written from
+    the G1 hands the NAO carries something about the NAO's balance that `z*` does not.
+  - *What it does not.* On the NAO the effect is small, 2–3 % of the error against 25 % on the
+    G1: `ζ` mostly encodes the G1's balance.
+  - *A detail to fix.* The KL budget was held on the two bodies' mean, so the G1's own ended
+    above it (5.8 nats against 4).
+  - *Next, if `ζ` is to enter the contract:* the generator predicts its future and the trackers
+    read it, with an ablation against `z*` alone.
+- **F4, round 1: decoder v2 (v2h) against the plain control (v1), both from scratch**
+  (2000 iterations, the incumbent's conditions; `competence_g1_dec_*.json`,
+  `compare_g1_dec_v2h_vs_v1*.json`, `zero_shot_g1_dec_*_auto_kin_l4_*.json`).
+
+  On the family, through the true state:
+
+  | | v1 | v2h |
+  | --- | --- | --- |
+  | grid passed | 32/61 | 32/61 |
+  | grid: speed deviation | 0.013 | **0.009** (−0.004 ± 0.001) |
+  | grid: duty deviation | 0.101 | **0.076** (−0.025 ± 0.005) |
+  | corners passed (beyond the family's ranges) | 27/36 | **30/36** |
+  | corners: speed deviation | 0.099 | **0.083** (−0.016 ± 0.005) |
+
+  The incumbent r3 (three times the training) passes 39/61 of the grid.
+
+  Deployed path (kinematic estimator), falls, forward / fast / turning:
+
+  | | rough_b3 | flat_dagger2 |
+  | --- | --- | --- |
+  | r3 | 15/64, 16/62, 12/61 | 0/64 ×3, passes |
+  | v1 | **7/56, 13/55, 4/53** | 0/64 ×3, passes |
+  | v2h | 109/141, 278/310, 127/159 | 0/64 ×3; passes fast only |
+
+  - *v2h extrapolates better on the family, and worse with learned plans.* The diagnosis
+    (offline, from the captures): the generators' plans do not jump at redraws. They sway the
+    trunk and the height step by step, about as the teachers' bodies do, plus about 30 %
+    sampling noise. The biped's plans held the trunk fixed. The prior turned the sway into joint
+    motion its residual never practised.
+  - *Round 2 is the user's choice* (`plan_trust.py`, variant v2t):
+    - the prior trusts each plan by its measured sampling noise;
+    - it aims the trunk at the plan's slow tilt;
+    - the biped's plans carry the measured noise and the gait's trunk sway.
+  - *v1, the plain tracker from scratch, beats the incumbent on rough* (24/164 falls against
+    43/187, about 2 SE) and passes flat.
+  - *An open anomaly.* Through the true state both new trackers fall where the incumbent does
+    not (v1 rough 141/179). It is not the noise: without noise it falls too (127 in 32 envs × 600
+    steps; `diag_v1_rough_truth_noise*.npz`).
+    - The plans the generator asks there differ (0.131 V, period 0.76, against 0.260 V, 0.96
+      through the estimator).
+    - The paths differ, in effect, only in the feet's loads: the contact sensor's single-substep
+      spikes against the encoder's smooth estimate.
+    - Not the deployed path; to be diagnosed.
+- **F4, round 2 (v2t) and the G1's re-baseline under this code**
+  (`zero_shot_g1_{dec_v2t,r3_6194_sym_v3}_*_auto_kin_l4_*.json`,
+  `competence_g1_{dec_v2t,r3_6194_sym_v3}*.json`). The deployed path's falls over the three
+  commands (forward, fast, turning):
+
+  | | rough_b3 | rough_b4 | flat_dagger2 | flat_b4 |
+  | --- | --- | --- | --- | --- |
+  | r3, sole-point height (F2 run) | 43/187 | | 0/192, passes | |
+  | **r3, sole-corner height** | **4/190** | **0/192** | 0/192, passes | 0/128, passes (turning left) |
+  | v1, from scratch | 24/164 | | 0/192, passes | |
+  | v2h, from scratch | 514/610 | | 0/192; passes 1 of 3 | |
+  | v2t, from scratch | 17/113 | | 4/191; passes none | |
+
+  On the family, true state:
+
+  | | grid passed | corners passed |
+  | --- | --- | --- |
+  | v1 | 32/61 | 27/36 |
+  | v2h | 32/61 | 30/36 |
+  | v2t | 35/61 | 25/36 |
+  | r3 | 39/61 | 31/36 |
+
+  - *The sole-corner height was the missing piece on rough.* The incumbent, deployed through the
+    kinematic estimator, now falls in 2 % of its rough episodes, and in none with B4's generator.
+    Rough on the G1 is nearly solved on the deployed path.
+  - *Round 2 corrects round 1's failure.* With learned plans v2t falls 15 % where v2h fell 84 %.
+    Trusting a plan by its measured noise, aiming the trunk at its slow tilt, and practising
+    noisy, swaying plans works as diagnosed.
+  - *At an equal budget the physics prior is not yet ahead of the plain tracker.* Against v1,
+    v2t is level on rough (15 %), better on the grid (35 against 32), worse on the corners
+    (25 against 27) and on flat (4 falls; the gate missed on speed, ratio up to 1.19). Both
+    from-scratch trackers stay well below the incumbent, which has three times the training.
+    The user's rule applies: a round that does not pass is reported and reframed, not
+    concluded.
+  - *F1, under the deployed estimator, G1:* `rough_b4` falls 0/192 against `rough_b3`'s 4/190
+    (about 2 SE). The NAO's half of the re-baseline is left: the run paused when the user's own
+    jobs needed the GPU.
+- **F1 decided, under the deployed estimator** (`zero_shot_{g1_r3_6194_sym_v3,nao_r1_3498_sym_v3}_*_auto_kin_l4_*.json`).
+  Falls over the three commands; "passes" is at the body's rate:
+
+  | | G1 | NAO |
+  | --- | --- | --- |
+  | `rough_b3` | 4/190 | 0/192; passes 1 of 3 |
+  | **`rough_b4`** | **0/192** | **0/192; passes 2 of 3** |
+  | `flat_dagger2` | 0/192; passes 3 | 0/192; passes 3 |
+  | `flat_b4` | 0/192; passes 3 | 0/192; forward misses stride |
+
+  - *Rough adopts `rough_b4`.* It improves the G1's falls by 2.02 standard errors, just past the
+    rule's bar, and is no worse on the NAO (`incumbents.json`).
+  - *Flat keeps `flat_dagger2`.* `flat_b4` misses one check of S0 on the NAO.
+  - *Where the transfer stands, with the tasks' learned plans and both trackers frozen and
+    deployed:*
+    - the published rough-terrain policy walks on the G1 and on the NAO without falling (0 of
+      384 episodes);
+    - the published flat policy, the same and passing every command on both;
+    - the NAO still misses the duty on rough's fast and turning commands at its own rate.
+- **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
+- **F4 at equal competence: the warm study** (`transfer/scripts/warm_study.sh`). Both arms
+  start from the incumbent (r3, iteration 6194) and get 1000 PPO iterations under the
+  study's conditions:
+  - `warm_r3` continues the incumbent's PPO in the plain task;
+  - `warm_v2t` distils the incumbent into the physics task (`distill_tracker.py`) and goes on
+    from there.
+
+  The physics arm's first two rounds collapsed within PPO's first 50 iterations. Reward at
+  iteration 50 was −14 and −17, against +31 for the control (`logs/contract/train_warm_*.log`).
+  Those rounds and the next five are superseded. Seven faults were found, in this order:
+  1. *A fresh optimizer and untrained heads.* Round 2 handed PPO the distillation's own Adam
+     and heads already fitted on the trunk, and collapsed the same way: this was not the cause.
+  2. *The rate cost read the residual.* The inherited `action_rate_l2` read the residual
+     (scale 0.25) where the plain task's reads its own action (0.5). The same joint motion
+     therefore cost four times as much: −1.86 against −0.50 at iteration 50. Every move of the
+     prior the policy did not cancel was also charged to it, which rewards following the
+     prior: a strategy, not the task. With `HUMANOID_TARGET_RATE=1` the cost is the joint
+     targets' rate in the plain task's units.
+  3. *The teacher was shown the wrong input. This decided it.* The physics task's policy
+     group begins with the plain tracker's terms, but its `actions` term is the residual: other
+     units, and relative to the prior. The labels were the teacher's answers to an input it
+     never saw. The student matched them to 0.01 rad, yet at iteration 11 it already left
+     episodes far more often than the control: falls 0.16 against 0.005 of episode ends.
+     Measured where the labels are drawn (`transfer/scripts/teacher_view_study.sh`,
+     `teacher_in_physics.py`; deterministic, 4096 envs × 600 steps; terminations per 1000
+     steps, `transfer/results/teacher_in_*.json`):
+
+     | the incumbent's targets | its own task | physics task, shown the residual | physics task, shown its own last action |
+     | --- | --- | --- | --- |
+     | as they are | 0.014 | 16.4 | 0.120 |
+     | cut at the soft limits | 0.033 | 1.9 | 1.67 |
+     | cut where the drives saturate | 0.013 | 0.51 | 0.120 |
+     | saturated, less feed-forward / stiffness | | | **0.016** |
+
+     - Shown its own last action (`TeacherView`), the teacher is 137 times safer in the
+       physics task.
+     - The remaining factor of about 8 (0.120 against 0.016) is the prior's feed-forward, which the teacher does not
+       know of. Taking it out of the target (over each joint's stiffness) gives back the
+       teacher's own torque, and its own task's rate.
+     - Cutting the targets at the soft limits, as round 2 did, costs torque the teacher uses.
+       Cutting them where the drives saturate changes nothing.
+     - The distillation now uses its own view, the saturation cut and the compensation.
+
+  4. *The student never saw PPO's noise* (round 3). Distilled on rollouts of its mean
+     action, it ended its distillation with one fall per round, and fell as soon as PPO
+     sampled: at iteration 50, base contact ended 0.27 of its episodes against the control's
+     0.010. The incumbent explores with a large noise (median standard deviation 1.42 action
+     units, about 0.7 rad), so PPO visits states, and feeds back noisy last actions, that
+     noiseless rollouts never reach. The rollouts are now drawn with that noise
+     (`--explore`); the labels stay the teacher's noiseless targets.
+  5. *The teacher was queried on a state the student cannot see* (round 4). It was shown its
+     own noiseless previous output, while the student sees the action it executed. The
+     imitation error stayed at 0.11 from the 19th round on, and the pre-registered gate
+     (`warm_gated.sh`) stopped the arm before PPO: with PPO's noise the student ended 74
+     episodes in 2.46 M steps, the compensated incumbent 48, two standard errors being 22
+     (`transfer/results/teacher_in_physics_student_v2t.json`). The teacher is now shown the
+     executed action in its own units, which is also what its own PPO training showed it, so
+     every label is a function of what the student observes.
+  6. *The student did not see the prior's feed-forward* (round 5). Shown the executed action,
+     the imitation error fell from 0.11 to about 0.02, but the gate failed as before: 74
+     terminations against 45. The same distillation into the plain task, with decoder v2's
+     core as the student, passed (57 against 53; `teacher_in_physics_student_core.json`). What
+     the physics task adds that the student did not observe is the feed-forward its labels
+     are compensated for. With `HUMANOID_FEEDFORWARD_OBS=1` the policy and the critic see it
+     (over each joint's stiffness), and round 6 passed: 50 against 58
+     (`teacher_in_physics_student_v2t_round{4,5}.json`, `warm_study.status`).
+  7. *PPO's learning rate* (round 6). Round 6, and the core after it, passed their gates and
+     fell in PPO's first iterations: base contact ended 0.98 of the episodes within six. rsl-rl
+     restarts its adaptive schedule from the config's 1e-3 on a resume. The incumbent survives
+     that; a distilled student does not. Six PPO iterations from round 6's student, one
+     change at a time (`transfer/scripts/ppo_start_ablation.sh`,
+     `transfer/results/ppo_start_ablation_2026-10-22_21-29-34_distill_v2t.json`):
+
+     | change | base contact, iteration 5 | reward, iteration 5 |
+     | --- | --- | --- |
+     | none (as run) | 0.98 | −4.38 |
+     | the optimizer's moments cleared | 0.85 | −4.13 |
+     | no mirror loss | 0.90 | −4.28 |
+     | PPO from the incumbent's adapted rate, 5.06e-5 | **0.001** | **+4.86** |
+
+     The mirror loss PPO reported (0.67 at round 6's first iteration) was a symptom: it is a
+     mean over the update that was breaking the policy. Measured on the starting checkpoint
+     (`mirror_error.py`, `mirror_error_*.json`), the student stood at 0.038 and the incumbent
+     at 0.017. Every warm arm now starts PPO at its incumbent's adapted rate, the control
+     too (`warm_study.sh`: `agent.algorithm.learning_rate`, read from the checkpoint).
+
+  **Round 8: the comparison at equal competence.** The physics arm was trained from round 6's
+  distillation, which passed its gate. The control is the incumbent's own continuation. Both
+  ran 1000 PPO iterations from the incumbent's adapted rate, with the study's conditions,
+  and both were laddered unsymmetrized (`transfer/scripts/warm_round8.sh`,
+  `warm_round8_ladders.sh`; table by `warm_table.py`, `transfer/results/warm_table_r8.json`).
+  Results are on the deployed path:
+
+  | arm | rough_b4 L4 falls | flat_dagger2 L4 | walk (L1b), speed / teacher | grid passed | corners passed |
+  | --- | --- | --- | --- | --- | --- |
+  | control, `warm_r3_r8` | 14/194 | 0/192; passes 3 | 0/64, 1.02 | 37/61 | 30/36 |
+  | **physics, `warm_v2t_r8`** | **0/192** | 0/192; passes 3 | 0/64, **0.81** | 36/61 | 26/36 |
+  | earlier control (from 1e-3), `warm_r3` | 0/192 | 0/192; passes 3 | 0/64, 0.97 | 38/61 | 29/36 |
+
+  On the family (`compare_competence.py`, control → physics; mean deviation, bootstrap SE):
+  - grid: speed 0.014 → 0.017 (+0.003 ± 0.005) and stride period unchanged, but duty
+    0.054 → 0.090, **worse** (+0.037 ± 0.006);
+  - corners: duty +0.008 ± 0.003 worse, use +0.004 ± 0.001 worse.
+
+  - *What the prior gains.* On rough it does not fall where its control fell in 7 % of the
+    episodes: 0/192 against 14/194, about 3.9 binomial SE. The earlier control, from the
+    config's rate, fell in none, so rough's falls vary between controls' runs.
+  - *What it costs.* The walk slows to 0.81 of the teacher's speed, below the 0.9 that S0's
+    walk check asks; the control holds 1.02. The duty factor on the family's grid moves away
+    from the plans'.
+  - *Step 2, decoder v2's deep-learning core*, distilled the same way into the plain task
+    (`feat/decoder-core`: `G1TrackCore-v0`, the plan's temporal encoder and a residual
+    trunk) and trained alike, against the same control (`warm_table_r8_core.json`): rough
+    0/192, flat 0/192 passing 3, walk 0/64 at 0.85 of the teacher's speed, grid 39/61,
+    corners 30/36. On the grid its duty is worse (+0.014 ± 0.003); on the corners its stride
+    period is better (−0.002 ± 0.001).
+  - *What the two distilled arms share.* Both distilled arms do not fall on rough and walk
+    slow, and they share nothing but the distillation. Neither result can yet be put down to
+    the prior or to the core. The arm that separates them is a *distilled control*: the
+    incumbent's own network distilled the same way, then the same PPO.
+  - *The distilled control*, `warm_plain`, separates the two. It is the incumbent's own
+    network and task, distilled and trained exactly as the two arms were (gate passed, 51
+    against 46; `warm_table_g1_all.json`). Rough: 62/225 falls (fast at 0.69 of the
+    teacher's speed). Flat: 0/192, passing 3. Walk: 0/64 at 0.96. Grid 37/61, corners 30/36.
+    - *The slow walk is not the distillation's.* Distilled with its own network the
+      incumbent walks at 0.96; the prior takes it to 0.81 and the core to 0.85.
+    - *Nor is the rough robustness.* Distilled with its own network the incumbent falls in
+      28 % of rough's episodes; with the prior or the core, in none. Against this control the
+      family's duty is worse with the prior (grid +0.034 ± 0.006, corners +0.011 ± 0.003)
+      and with the core (grid +0.011 ± 0.002, corners no difference).
+    - *One seed each.* Rough's falls vary widely between runs of one recipe: 0/192 and
+      14/194 for the two undistilled controls, 62/225 for the distilled one. A claim on them
+      needs seeds; the walk's speed and the duty, measured over many probes, are the firmer
+      results.
+  - *S0's walk, as amended* (the deployed path under the autonomous reference;
+    `walk_auto_all.sh`, `zero_shot_*_walk_auto_kin.json`): every arm and both incumbents
+    pass. G1 incumbent 1.01, control 1.01, distilled control 1.02, physics 1.03, core 1.02;
+    NAO incumbent 0.99, control 0.99, physics 0.99; falls 0–2 of 64. The physical reference
+    had the new G1 decoders slow (0.81, 0.85) and the NAO fast (incumbent 1.42, physics
+    1.64): it drifts both ways, and the NAO's long-standing 1.42 was this artifact.
+  - *What then decides decoder v2* is its pre-registered target: the probes of the family
+    it masters. Against the control, the physics prior passes 36/61 of the grid and 26/36 of
+    the corners (the control 37 and 30; only the control passes four of the corners), and the
+    core 39 and 30 (three grid probes only it passes, one only the control does: not
+    significant). Neither is adopted.
+  - *What limits every tracker* is the duty factor. It alone fails 21–25 of the ~24 grid
+    probes each tracker misses, the incumbent's continuation included. In 18–20 % of the
+    planned swing a foot keeps a few per cent of the weight (mean 0.05), which is contact for
+    the duty factor. The reward scores loads in linear units at the encoder's precision,
+    where that graze costs under one tolerance. With `HUMANOID_LOAD_SPACE=log` it scores
+    them as the generator models them, log(load + 0.01), at the deployed estimator's
+    precision there, measured by `load_precision.py` (G1 0.40, NAO 0.45). The same graze then
+    costs about 4.5 tolerances. `logload_study.sh` continues the incumbent exactly as the
+    control, with only that change.
+  - *The loads scored in log space improve the limiting check* (`logload_study.sh`,
+    `warm_table_logload.json`). The incumbent was continued exactly as the control,
+    `warm_r3_r8`, with only the load's space changed (`warm_r3_logload`). Grid 37 → 40
+    passed (three probes only it passes, none only the control). On the grid the duty's
+    deviation falls 0.079 → 0.065 (−0.015 ± 0.003) and the stride period's 0.016 → 0.005
+    (−0.011 ± 0.003). Corners 30 → 31, the duty −0.009 ± 0.004. Rough 1/192 falls against
+    14/194, flat unchanged (0/192, passes 3), S0's walk 0/64 at 1.01. The planned-swing
+    graze falls only a little (18.1 → 17.3 %), so the duty improves more through the
+    stride's timing than through lift-off.
+  - *The adoption check* (`logload_next.sh`). The log-load tracker, deployed symmetrized,
+    was compared with the incumbent `r3_6194_sym`, both under this code
+    (`competence_g1_r3_6194_sym_v4*.json`, `*_warm_r3_logload_sym_*`):
+
+    | | incumbent | log-load |
+    | --- | --- | --- |
+    | grid passed | 39/61 | 40/61 (one probe only it passes) |
+    | grid duty deviation | 0.090 | **0.065** (−0.025 ± 0.004) |
+    | grid speed, use | — | better (−0.003 ± 0.000; −0.003 ± 0.001) |
+    | corners passed | 31/36 | 31/36; stride period and use better |
+    | rough L4, flat L4 | 0/192; 0/192 passing 3 | the same |
+    | S0's walk | 0/64, 1.007 | 0/64, 1.009 |
+
+    It is better or level on every measure and worse on none. It does not clear the
+    pre-registered bar, though: more cells mastered by over two standard errors, where it
+    has one probe. The duty moves by six standard errors, but across the probes' tolerance
+    in few of them.
+  - *On the NAO the log space does not help* (`logload_next.sh`, `warm_table_nao_logload.json`).
+    The NAO's incumbent was continued as its control, with only the load's space changed.
+    Rough: 0/192 falls, passes 0 (the control passes 1). Flat: passes 0 as before. The duty's
+    deviation from the teacher's signature stays 0.10–0.18 (control 0.07–0.19), and S0's
+    walk is 1.00. The NAO's duty gap is mostly its control rate: its step is 1.62 × the G1's
+    in body time, and the G1's own plans sampled at the NAO's rate show the same stance.
+    A reward cannot charge that as a graze. On the NAO only the physics prior moved the duty
+    (flat, passes 3 of 3).
+  - *Step 4, the physics decoder on the NAO*, at equal competence with the NAO's own control.
+    The control is the incumbent r1_3498's PPO continued in its task; the physics arm is
+    distilled into `NaoTrackPhysics-v0`, seeing the prior's feed-forward. Its gate passed
+    (student 178 terminations against the compensated incumbent's 571). Both arms ran
+    1000 PPO iterations from the NAO's adapted rate (5.77e-4) and were laddered
+    unsymmetrized (`warm_table_nao.json`):
+
+    | arm | rough_b4 L4 | flat_dagger2 L4 | walk, speed / teacher |
+    | --- | --- | --- | --- |
+    | control, `warm_nao_r1` | 1/192 falls; passes 1 | 0/192; passes 0 | 1.32 |
+    | physics, `warm_nao_v2t` | 0/192; passes 0 | 0/192; **passes 3** | 1.64 |
+
+    - *On flat the prior corrects the NAO's duty factor:* from 0.13–0.19 off the teacher's
+      to 0.01–0.09, and every command passes.
+    - *On rough it does not correct the stance step 4 was aimed at:* the left duty on fast
+      stays 0.14 off, and forward gets worse (0.12 against 0.07).
+    - *Both arms walk too fast* (1.64 and 1.32 of the teacher's speed).
+  - *By the rule it is not adopted:* it regresses on S0 (the walk) and on the family's duty.
+    As the user's rule has it, the round is reported and reframed, not concluded. The core,
+    distilled the same way, also walks slow (0.85, `zero_shot_g1_warm_core_walk_kin.json`), so
+    the slowdown may come with the distillation rather than with the prior. The next check is
+    a distilled student's walk before PPO.
+
+  Along the way: on 2026-10-22, from 19:18 to 19:32, Isaac Sim could not fetch the robot's
+  and the scene's USD from the Omniverse asset server, and four stages failed in their first
+  minute. They carry no result; the queue now waits for the server and retries such a stage.
+
+  What the faults affected:
+  - The round-1 ladder of the physics arm (`*_warm_v2t_round1_*.json`) measured a student
+    distilled from wrong labels and trained under the residual cost. It says nothing about the
+    prior.
+  - The from-scratch rounds above (v2h, v2t) had no teacher, but were trained under the
+    residual cost. Their comparison with v1 carries a smoothness cost four times heavier and a
+    pull towards the prior.
+  - The control arm is untouched.
 
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:
 

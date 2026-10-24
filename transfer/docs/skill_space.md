@@ -1926,6 +1926,14 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     14/194, flat unchanged (0/192, passes 3), S0's walk 0/64 at 1.01. The planned-swing
     graze falls only a little (18.1 → 17.3 %), so the duty improves more through the
     stride's timing than through lift-off.
+  - *On the NAO the log space does not help* (`logload_next.sh`, `warm_table_nao_logload.json`).
+    The NAO's incumbent was continued as its control, with only the load's space changed.
+    Rough: 0/192 falls, passes 0 (the control passes 1). Flat: passes 0 as before. The duty's
+    deviation from the teacher's signature stays 0.10–0.18 (control 0.07–0.19), and S0's
+    walk is 1.00. The NAO's duty gap is mostly its control rate: its step is 1.62 × the G1's
+    in body time, and the G1's own plans sampled at the NAO's rate show the same stance.
+    A reward cannot charge that as a graze. On the NAO only the physics prior moved the duty
+    (flat, passes 3 of 3).
   - *Step 4, the physics decoder on the NAO*, at equal competence with the NAO's own control.
     The control is the incumbent r1_3498's PPO continued in its task; the physics arm is
     distilled into `NaoTrackPhysics-v0`, seeing the prior's feed-forward. Its gate passed

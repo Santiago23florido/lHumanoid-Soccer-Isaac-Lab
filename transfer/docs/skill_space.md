@@ -1897,6 +1897,26 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
       14/194 for the two undistilled controls, 62/225 for the distilled one. A claim on them
       needs seeds; the walk's speed and the duty, measured over many probes, are the firmer
       results.
+  - *S0's walk, as amended* (the deployed path under the autonomous reference;
+    `walk_auto_all.sh`, `zero_shot_*_walk_auto_kin.json`): every arm and both incumbents
+    pass. G1 incumbent 1.01, control 1.01, distilled control 1.02, physics 1.03, core 1.02;
+    NAO incumbent 0.99, control 0.99, physics 0.99; falls 0–2 of 64. The physical reference
+    had the new G1 decoders slow (0.81, 0.85) and the NAO fast (incumbent 1.42, physics
+    1.64): it drifts both ways, and the NAO's long-standing 1.42 was this artifact.
+  - *What then decides decoder v2* is its pre-registered target: the probes of the family
+    it masters. Against the control, the physics prior passes 36/61 of the grid and 26/36 of
+    the corners (the control 37 and 30; only the control passes four of the corners), and the
+    core 39 and 30 (three grid probes only it passes, one only the control does: not
+    significant). Neither is adopted.
+  - *What limits every tracker* is the duty factor. It alone fails 21–25 of the ~24 grid
+    probes each tracker misses, the incumbent's continuation included. In 18–20 % of the
+    planned swing a foot keeps a few per cent of the weight (mean 0.05), which is contact for
+    the duty factor. The reward scores loads in linear units at the encoder's precision,
+    where that graze costs under one tolerance. With `HUMANOID_LOAD_SPACE=log` it scores
+    them as the generator models them, log(load + 0.01), at the deployed estimator's
+    precision there, measured by `load_precision.py` (G1 0.40, NAO 0.45). The same graze then
+    costs about 4.5 tolerances. `logload_study.sh` continues the incumbent exactly as the
+    control, with only that change.
   - *Step 4, the physics decoder on the NAO*, at equal competence with the NAO's own control.
     The control is the incumbent r1_3498's PPO continued in its task; the physics arm is
     distilled into `NaoTrackPhysics-v0`, seeing the prior's feed-forward. Its gate passed

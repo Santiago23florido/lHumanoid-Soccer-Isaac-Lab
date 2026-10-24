@@ -1875,6 +1875,37 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     slow, and they share nothing but the distillation. Neither result can yet be put down to
     the prior or to the core. The arm that separates them is a *distilled control*: the
     incumbent's own network distilled the same way, then the same PPO.
+  - *The distilled control*, `warm_plain`, separates the two. It is the incumbent's own
+    network and task, distilled and trained exactly as the two arms were (gate passed, 51
+    against 46; `warm_table_g1_all.json`). Rough: 62/225 falls (fast at 0.69 of the
+    teacher's speed). Flat: 0/192, passing 3. Walk: 0/64 at 0.96. Grid 37/61, corners 30/36.
+    - *The slow walk is not the distillation's.* Distilled with its own network the
+      incumbent walks at 0.96; the prior takes it to 0.81 and the core to 0.85.
+    - *Nor is the rough robustness.* Distilled with its own network the incumbent falls in
+      28 % of rough's episodes; with the prior or the core, in none. Against this control the
+      family's duty is worse with the prior (grid +0.034 ± 0.006, corners +0.011 ± 0.003)
+      and with the core (grid +0.011 ± 0.002, corners no difference).
+    - *One seed each.* Rough's falls vary widely between runs of one recipe: 0/192 and
+      14/194 for the two undistilled controls, 62/225 for the distilled one. A claim on them
+      needs seeds; the walk's speed and the duty, measured over many probes, are the firmer
+      results.
+  - *Step 4, the physics decoder on the NAO*, at equal competence with the NAO's own control.
+    The control is the incumbent r1_3498's PPO continued in its task; the physics arm is
+    distilled into `NaoTrackPhysics-v0`, seeing the prior's feed-forward. Its gate passed
+    (student 178 terminations against the compensated incumbent's 571). Both arms ran
+    1000 PPO iterations from the NAO's adapted rate (5.77e-4) and were laddered
+    unsymmetrized (`warm_table_nao.json`):
+
+    | arm | rough_b4 L4 | flat_dagger2 L4 | walk, speed / teacher |
+    | --- | --- | --- | --- |
+    | control, `warm_nao_r1` | 1/192 falls; passes 1 | 0/192; passes 0 | 1.32 |
+    | physics, `warm_nao_v2t` | 0/192; passes 0 | 0/192; **passes 3** | 1.64 |
+
+    - *On flat the prior corrects the NAO's duty factor:* from 0.13–0.19 off the teacher's
+      to 0.01–0.09, and every command passes.
+    - *On rough it does not correct the stance step 4 was aimed at:* the left duty on fast
+      stays 0.14 off, and forward gets worse (0.12 against 0.07).
+    - *Both arms walk too fast* (1.64 and 1.32 of the teacher's speed).
   - *By the rule it is not adopted:* it regresses on S0 (the walk) and on the family's duty.
     As the user's rule has it, the round is reported and reframed, not concluded. The core,
     distilled the same way, also walks slow (0.85, `zero_shot_g1_warm_core_walk_kin.json`), so

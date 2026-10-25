@@ -74,12 +74,17 @@ def read(name: str) -> dict | None:
 def l4(body: str, tag: str, generator: str, kinematic: bool = True) -> dict | None:
     """The deployed path's L4 over the three commands, or None until all three exist."""
     est = "_kin" if kinematic else ""
+    return l4_files(f"zero_shot_{body}_{tag}_{generator}_auto{est}_l4_{{}}.json", "encoder")
+
+
+def l4_files(pattern: str, name: str) -> dict | None:
+    """Run ``name`` of the L4 reports ``pattern.format(command)``, summed over the commands."""
     total = {"falls": 0, "episodes": 0, "passes": 0, "speed_ratio": []}
     for command in COMMANDS:
-        report = read(f"zero_shot_{body}_{tag}_{generator}_auto{est}_l4_{command}.json")
+        report = read(pattern.format(command))
         if report is None:
             return None
-        run = report["runs"]["encoder"]
+        run = report["runs"][name]
         total["falls"] += run["falls"]
         total["episodes"] += run["episodes"]
         total["passes"] += bool(run["verdict"]["passes"])
@@ -126,7 +131,7 @@ def section(title: str, note: str, header: list[str], rows: list[list[str]]) -> 
 
 
 def build() -> tuple[str, dict]:
-    sections, data = [], {"M": {}, "S": {}, "B1": {}, "T": {}, "A": {}, "D": {}}
+    sections, data = [], {"M": {}, "S": {}, "B1": {}, "B2": {}, "T": {}, "A": {}, "D": {}}
 
     rows = []
     for body, tag in MODEL.items():
@@ -180,6 +185,27 @@ def build() -> tuple[str, dict]:
                 "B1 — zero-shot against a tracker trained on the skill's own plans (N × M)",
                 "Source: `paper_queue.sh` stages `b1_nao`, `b1_g1`.",
                 ["Body", "Skill", "Zero-shot (adopted)", "Task-specific tracker"],
+                rows,
+            )
+        )
+
+    rows = []
+    for skill, generator in GENERATOR.items():
+        oracle = l4_files(f"oracle_nao_{skill}_l4_{{}}.json", "oracle")
+        if oracle is None:
+            continue
+        zero = l4("nao", MODEL["nao"], generator)
+        data["B2"][f"nao/{skill}"] = {"zero_shot": zero, "oracle": oracle}
+        rows.append(["NAO", skill, cell_l4(zero), cell_l4(oracle)])
+    if rows:
+        sections.append(
+            section(
+                "B2 — zero-shot against the oracle: the NAO trained on the skill's own task",
+                "The oracle is Isaac Lab's G1 recipe in the NAO's units "
+                "(`nao/tasks/nao_velocity`), scored against the G1's teacher like the zero-shot "
+                "tracker. Its gait is its own: it was rewarded for the task, not the G1's gait. "
+                "Source: `paper_baselines.sh` stage `b2`.",
+                ["Body", "Skill", "Zero-shot (adopted)", "Oracle"],
                 rows,
             )
         )

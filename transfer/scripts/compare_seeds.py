@@ -29,11 +29,16 @@ DEVIATIONS = ("speed", "stride_period", "duty_left", "duty_right")
 
 
 def load(paths: list[Path], group: str) -> tuple[list[str], np.ndarray, np.ndarray]:
-    """``(probes, passes (seeds, probes), deviations (seeds, probes, checks))``."""
+    """``(probes, passes (seeds, probes), deviations (seeds, probes, checks))``.
+
+    A path may name several reports of one seed joined by commas (the map and its corners),
+    and ``group`` several groups joined by commas: their probes are then pooled."""
+    groups = set(group.split(","))
     names, passes, deviations = None, [], []
     for path in paths:
-        probes = [p for p in json.loads(path.read_text(encoding="utf-8"))["probes"]
-                  if p["group"] == group]  # fmt: skip
+        probes = [p for part in str(path).split(",")
+                  for p in json.loads(Path(part).read_text(encoding="utf-8"))["probes"]
+                  if p["group"] in groups]  # fmt: skip
         these = [p["name"] for p in probes]
         if names is None:
             names = these

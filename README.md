@@ -146,7 +146,7 @@ no worse on the regression suite S0.
 | --- | --- | --- |
 | Generator, per skill | plans of `z*` (`flat_dagger2`; `rough_b4`, which reads its noise level) | the G1's expert only |
 | Estimator, per body | `z*` from the body's own kinematics; the loads from a learned encoder | — |
-| Tracker, per body | a plain MLP, symmetrized at deployment (G1 `r3_6194`, NAO `r1_3498`) | a physical family of procedural plans, never a skill |
+| Tracker, per body | a plain MLP, symmetrized at deployment (G1 `warm_r3_logload`, NAO `r1_3498`) | a physical family of procedural plans, never a skill |
 
 Results are on the deployed path, over three commands (forward, fast, turning;
 64 episodes each). "Passes" counts the commands whose gait signature is within
@@ -181,11 +181,18 @@ the core gains two grid probes, which is not significant. On the NAO, the physic
 corrects flat's duty (passes 3 of 3 against none) but not rough's stance. Each arm is
 a single seed, and rough's falls vary widely between runs of one recipe.
 
-**What limits every tracker, the incumbent included, is the duty factor.** It alone
-fails 21–25 of the ~24 grid probes each tracker misses. In about 19 % of the planned
-swing, a foot stays on the ground with a few per cent of the weight. That is contact
-for the duty factor, but the reward, which scores loads in linear units, barely charges
-it. A study now scores the loads in the generator's log space instead.
+**What limited every tracker, the incumbent included, was the duty factor.** It alone
+failed 21–25 of the ~24 grid probes each tracker missed. In about 19 % of the planned
+swing, a foot stayed on the ground with a few per cent of the weight. That is contact
+for the duty factor, but the reward, which scored loads in linear units, barely charged
+it. Scoring the loads as the generator models them, log(load + 0.01), at the deployed
+estimator's measured precision there, fixes much of it.
+
+The test: the G1's incumbent continued the same way with each scoring, three seeds
+each. Probes mastered went from 37, 35, 36 to **40, 41, 43** on the grid (+5.3 ± 2.1),
+and to +7.3 ± 2.7 pooled with the corners. The duty improves on both feet, with no
+regression on S0. That continuation is now the G1's tracker. On the NAO the same change
+does not move the duty, whose gap is mostly its control rate.
 
 S0's walk check runs under the autonomous reference since 2026-10-24, a recorded
 deviation. The physical reference, which no tracker trains in, made the new decoders
@@ -199,9 +206,9 @@ decoder-v2 log (§9). Every number there comes with the result file it comes fro
 
 - **No blind test is left.** Isaac Lab publishes no other G1 skill. Flat is
   semi-blind, and rough was diagnosed before it passed.
-- **Single seed** per training run, in every track.
-- **The duty factor** limits every tracker's competence map (above); the log-space
-  load study is running.
+- **Single seed** per training run in most comparisons; the adoption of the
+  log-space loads rests on three.
+- **The NAO's stance** against the G1 teacher's signature, mostly its control rate.
 - **Locomotion only.** `z*` holds the CoM and the feet; a kick or the hands need
   fields it does not have.
 - **The capture-point controller underperforms badly** (27.8 %) and the reason

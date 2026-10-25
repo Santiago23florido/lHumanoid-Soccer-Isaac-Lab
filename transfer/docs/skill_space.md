@@ -1943,6 +1943,24 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     pre-registered bar, though: more cells mastered by over two standard errors, where it
     has one probe. The duty moves by six standard errors, but across the probes' tolerance
     in few of them.
+  - *Seeds decide it* (`logload_seeds.sh`, `compare_seeds.py`; the user's choice of
+    2026-10-25). Three seeds per arm (41, 42, 43), each the incumbent continued as the
+    control, with only the load's space differing. Statistic: the difference in probes passed
+    per seed; standard error from a hierarchical bootstrap over the probes and, within each
+    arm, the seeds.
+
+    | | control | log-load | difference |
+    | --- | --- | --- | --- |
+    | grid | 37, 35, 36 | 40, 41, 43 | **+5.33 ± 2.06** |
+    | corners | 30, 27, 30 | 31, 31, 31 | +2.00 ± 1.47 |
+    | grid and corners pooled | 67, 62, 66 | 71, 72, 74 | **+7.33 ± 2.67** |
+
+    Duty's deviation, pooled: −0.016 ± 0.005 (left), −0.021 ± 0.004 (right). Every
+    log-load seed masters more probes than every control seed. The grid alone and the pool
+    clear two standard errors; the corners alone do not, though they improve. By the rule
+    (more cells mastered by over two SE, no worse on S0) the log-load tracker is adopted:
+    seed 41, deployed symmetrized (`warm_r3_logload_sym`). Its S0: chains unchanged, flat L4
+    0/192 passing 3, the walk 0/64 at 1.009, tests at its commit.
   - *On the NAO the log space does not help* (`logload_next.sh`, `warm_table_nao_logload.json`).
     The NAO's incumbent was continued as its control, with only the load's space changed.
     Rough: 0/192 falls, passes 0 (the control passes 1). Flat: passes 0 as before. The duty's

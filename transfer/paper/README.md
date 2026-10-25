@@ -9,7 +9,11 @@ The experiments run from two queues: [`transfer/scripts/paper_queue.sh`](../scri
 (S, B1) and, after it, [`transfer/scripts/paper_baselines.sh`](../scripts/paper_baselines.sh)
 (B2, B3). Each stage skips itself when its results already exist, so either queue
 can be resumed after an interruption. [`transfer/scripts/paper_tables.py`](../scripts/paper_tables.py)
-rebuilds every table below from the result files.
+rebuilds every table below from the result files, and
+[`transfer/scripts/paper_figures.py`](../scripts/paper_figures.py) draws the figures
+from the same files into `transfer/paper/figures/` (gitignored; rerun it): the gait
+signature against gate C, the decomposition, the log-load seeds, and the baselines
+once they exist.
 
 ## The claim
 
@@ -46,6 +50,7 @@ Metrics are those of the ladder, `transfer/scripts/zero_shot_ladder.sh`:
 - **B2, the oracle.** `nao/tasks/nao_velocity`: Isaac Lab's recipe for `Isaac-Velocity-{Flat,Rough}-G1-v0` (rewards, commands, terrain, PPO and iterations) on the NAO. Every dimensioned constant is converted with `UnitSystem.convert_to`, each reward weight by its term's dimension times a time, so a dynamically similar motion earns the same return. The control rate, actions, exploration noise, ground and fall definition are the zero-shot trackers'. The policy observes its base velocity, as the published G1 policies do. It is scored against the G1's teacher like the trackers, through `capture_velocity.py`, which `paper_baselines.sh` first holds to `capture_rollouts.py` on the published rough policy.
 - **B3, joint retargeting.** `transfer/retarget.py` maps the teacher's joint angles through `correspondence.py`'s names and signs, by each of three value maps (copy; offset about each robot's nominal posture; fraction of range), clamped to the NAO's limits, on the NAO's clock (one NAO step reads the teacher 1.625 steps on). `nao/tasks/nao_imitate` imitates them DeepMimic-style (reference state initialisation; pose 0.65, joint rates 0.1, base velocity 0.1, yaw rate 0.1) on the trackers' body. It trains on the teacher's DART capture and is tested on the teacher's own play capture at each L4 command.
 - **T.** `paper_decomposition.py`: for each L4 command, the gait's signed deviation from the teacher split exactly into the generator's part (what the plans asked − teacher) and the tracker's (body − asked), and the estimate's effect (deployed path − true-state path).
+  - *Reading the last term on flat.* It is large there (G1 0.19–0.36), and the deficit is the true-state path's, not the deployed one's. On the G1 the true-state path's stride period is 0.60–0.64 `T` against the teacher's 0.98–1.03, with 7–16 falls per command; the deployed path's is 0.95–1.01 `T`, with none. On the NAO the true-state path's is 0.77–0.81 `T`. Fed the clean state, the flat generator shortens the stride; the estimate's noise is what it was trained to read (`zero_shot_<body>_<tag>_flat_dagger2_auto_kin_l4_*.json`, runs `encoder` and `truth`).
 - **A, D.** Rows read from runs that differ by the one change the row names (`ABLATIONS` in `paper_tables.py`).
 
 ## Tables

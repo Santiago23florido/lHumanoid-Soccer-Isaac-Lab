@@ -50,6 +50,8 @@ ABLATIONS = [
 MAPS = [("loads linear -> log space, 3 seeds each", "compare_seeds_logload_grid_and_corners.json")]
 FAMILY = [("walk plans only -> 70 % procedural family", "nao", "nao2", "r1_3498_sym")]
 """Competence-map ablations: (change, body, tag before, tag after)."""
+RETARGET = ("copy", "offset", "range")
+"""The joint-target baseline's value maps (``transfer/retarget.py``)."""
 DECODERS = [
     ("v1, distilled control", "warm_plain"),
     ("v2, physics prior", "warm_v2t_r8"),
@@ -131,7 +133,7 @@ def section(title: str, note: str, header: list[str], rows: list[list[str]]) -> 
 
 
 def build() -> tuple[str, dict]:
-    sections, data = [], {"M": {}, "S": {}, "B1": {}, "B2": {}, "T": {}, "A": {}, "D": {}}
+    sections, data = [], {"M": {}, "S": {}, "B1": {}, "B2": {}, "B3": {}, "T": {}, "A": {}, "D": {}}
 
     rows = []
     for body, tag in MODEL.items():
@@ -206,6 +208,27 @@ def build() -> tuple[str, dict]:
                 "tracker. Its gait is its own: it was rewarded for the task, not the G1's gait. "
                 "Source: `paper_baselines.sh` stage `b2`.",
                 ["Body", "Skill", "Zero-shot (adopted)", "Oracle"],
+                rows,
+            )
+        )
+
+    rows = []
+    for skill, generator in GENERATOR.items():
+        maps = {m: l4_files(f"retarget_nao_{skill}_{m}_l4_{{}}.json", "imitate") for m in RETARGET}
+        if all(r is None for r in maps.values()):
+            continue
+        zero = l4("nao", MODEL["nao"], generator)
+        data["B3"][f"nao/{skill}"] = {"zero_shot": zero, **maps}
+        rows.append(["NAO", skill, cell_l4(zero), *(cell_l4(maps[m]) for m in RETARGET)])
+    if rows:
+        sections.append(
+            section(
+                "B3 — zero-shot against joint retargeting: the NAO imitating the G1's joints",
+                "The teacher's joint trajectories through the correspondence, on the NAO's clock, "
+                "imitated DeepMimic-style (`nao/tasks/nao_imitate`); one column per value map "
+                "(`transfer/retarget.py`). At test time each imitates the teacher's own play "
+                "capture at the command. Source: `paper_baselines.sh` stage `b3`.",
+                ["Body", "Skill", "Zero-shot (adopted)", *(f"Retarget, {m}" for m in RETARGET)],
                 rows,
             )
         )

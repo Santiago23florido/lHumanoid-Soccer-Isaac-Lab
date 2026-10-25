@@ -1,4 +1,4 @@
-"""Capture a velocity policy on any body, in the form ``evaluate_contract.py`` reads.
+"""Capture a velocity or imitation policy on any body, in the form ``evaluate_contract.py`` reads.
 
 ``capture_contract.py`` needs a contract task, whose command term computes ``z*``. A
 velocity task (Isaac Lab's, or the NAO oracle's ``NaoVelocity*``) has none, so here
@@ -9,7 +9,9 @@ sole points from the body's own record (``g1/body/body_card.json``; the NAO's UR
 
 The archive has what the L4 verdict reads -- ``skill_state``, ``done``, ``terminated``,
 ``command``, the body's units and control step -- so an oracle is scored against the
-G1's teacher exactly as a zero-shot tracker is.
+G1's teacher exactly as a zero-shot tracker is. A reference-motion task (the
+joint-target baseline, ``NaoImitate-Play-v0``) replays ``--reference`` instead of
+holding a ``--command``.
 
 Usage::
 
@@ -43,7 +45,13 @@ parser.add_argument(
 )
 parser.add_argument("--body", choices=("g1", "nao"), required=True)
 parser.add_argument("--driver-policy", type=Path, required=True, help="TorchScript policy.")
-parser.add_argument("--command", type=float, nargs=3, required=True, metavar=("VX", "VY", "WZ"))
+which = parser.add_mutually_exclusive_group(required=True)
+which.add_argument("--command", type=float, nargs=3, metavar=("VX", "VY", "WZ"))
+which.add_argument(
+    "--reference",
+    type=Path,
+    help="On a reference-motion task (NaoImitate-Play-v0), the retargeted clips to replay.",
+)
 parser.add_argument("--num-envs", type=int, default=32)
 parser.add_argument("--steps", type=int, default=900)
 parser.add_argument("--settle-steps", type=int, default=100)
@@ -90,12 +98,15 @@ def main() -> int:
     cfg = parse_env_cfg(args_cli.task_id, num_envs=args_cli.num_envs)
     cfg.seed = args_cli.seed
     command_cfg = getattr(cfg.commands, COMMAND)
-    vx, vy, wz = args_cli.command
-    command_cfg.ranges.lin_vel_x = (vx, vx)
-    command_cfg.ranges.lin_vel_y = (vy, vy)
-    command_cfg.ranges.ang_vel_z = (wz, wz)
-    command_cfg.heading_command = False
-    command_cfg.rel_standing_envs = 0.0
+    if args_cli.reference is not None:
+        command_cfg.reference = str(args_cli.reference)
+    else:
+        vx, vy, wz = args_cli.command
+        command_cfg.ranges.lin_vel_x = (vx, vx)
+        command_cfg.ranges.lin_vel_y = (vy, vy)
+        command_cfg.ranges.ang_vel_z = (wz, wz)
+        command_cfg.heading_command = False
+        command_cfg.rel_standing_envs = 0.0
     env = gym.make(args_cli.task_id, cfg=cfg)
     inner = env.unwrapped
     device = inner.device

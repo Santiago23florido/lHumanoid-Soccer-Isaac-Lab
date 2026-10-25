@@ -7,15 +7,19 @@
 #   b2      the oracle: NaoVelocityFlat-v0 and NaoVelocityRough-v0 trained by Isaac Lab's G1
 #           recipe in the NAO's units, then each skill's three L4 commands on the plane
 #           (transfer/results/oracle_nao_<skill>_l4_<command>.json)
+#   b3      joint retargeting: NaoImitate-v0 trained on the teacher's DART capture retargeted by
+#           each value map (copy, offset, range; transfer/retarget.py), then each skill's L4
+#           commands, the teacher's play capture at each retargeted the same way
+#           (transfer/results/retarget_nao_<skill>_<map>_l4_<command>.json)
 #
-#   bash transfer/scripts/paper_baselines.sh [stages]     (default: "check b2")
+#   bash transfer/scripts/paper_baselines.sh [stages]     (default: "check b2 b3")
 set -uo pipefail
 python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
 status=logs/contract/paper_baselines.status
 note() { echo "$1 $(date +%H:%M)" | tee -a "$status"; }
-stages="${1:-check b2}"
+stages="${1:-check b2 b3}"
 want() { [[ " $stages " == *" $1 "* ]]; }
 results=transfer/results
 seed=42
@@ -99,6 +103,40 @@ if want b2; then
         --output "$results/oracle_nao_${skill}_l4_${command}.json" | grep -v "^  "
     done < <(commands "$skill")
     note "evaluated $name"
+  done
+fi
+
+if want b3; then
+  for skill in flat rough; do
+    for map in copy offset range; do
+      [ -f "$results/retarget_nao_${skill}_${map}_l4_turning.json" ] && { note "retarget $skill $map: already done"; continue; }
+      reference="nao/rollouts/retarget_${skill}_dart_${map}.npz"
+      [ -f "$reference" ] || "$python" transfer/scripts/retarget_reference.py \
+        --source "g1/rollouts/${skill}_dart.npz" --mode "$map" --output "$reference"
+      name="imitate_${skill}_${map}"
+      if ! ls -d logs/rsl_rl/nao_imitate/*_"$name" > /dev/null 2>&1; then
+        HUMANOID_REFERENCE="$root/$reference" "$python" -u scripts/train.py --task NaoImitate-v0 \
+          --headless --num_envs 4096 --seed "$seed" --run_name "$name" \
+          > "logs/contract/train_${name}.log" 2>&1 || { note "$name training FAILED"; continue; }
+        note "$name trained"
+      fi
+      run="$(ls -d logs/rsl_rl/nao_imitate/*_"$name" | tail -1)"
+      checkpoint="$(latest "$run")"
+      "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt" | tail -1
+      while read -r command _; do
+        clip="nao/rollouts/retarget_${skill}_play_${command}_${map}.npz"
+        "$python" transfer/scripts/retarget_reference.py \
+          --source "g1/rollouts/${skill}_play_${command}.npz" --mode "$map" --output "$clip"
+        capture "${name}_${command}" --body nao --task-id NaoImitate-Play-v0 \
+          --driver-policy "$run/exported/$checkpoint.pt" --reference "$clip" \
+          --output "nao/rollouts/${name}_${command}.npz" || { note "$name $command capture FAILED"; continue; }
+        "$python" transfer/scripts/evaluate_contract.py \
+          --run "teacher=g1/rollouts/${skill}_play_${command}.npz" \
+          --run "imitate=nao/rollouts/${name}_${command}.npz" \
+          --output "$results/retarget_nao_${skill}_${map}_l4_${command}.json" | grep -v "^  "
+      done < <(commands "$skill")
+      note "evaluated $name"
+    done
   done
 fi
 

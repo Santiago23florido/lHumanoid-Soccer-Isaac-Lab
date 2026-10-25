@@ -5,9 +5,10 @@ repository. A number here is quoted with the script and the result file it comes
 from. The prose of the paper is not written here; this folder holds what it
 reports.
 
-The experiments run from one queue, [`transfer/scripts/paper_queue.sh`](../scripts/paper_queue.sh).
-Each stage skips itself when its results already exist, so the queue can be
-resumed after an interruption. [`transfer/scripts/paper_tables.py`](../scripts/paper_tables.py)
+The experiments run from two queues: [`transfer/scripts/paper_queue.sh`](../scripts/paper_queue.sh)
+(S, B1) and, after it, [`transfer/scripts/paper_baselines.sh`](../scripts/paper_baselines.sh)
+(B2, B3). Each stage skips itself when its results already exist, so either queue
+can be resumed after an interruption. [`transfer/scripts/paper_tables.py`](../scripts/paper_tables.py)
 rebuilds every table below from the result files.
 
 ## The claim
@@ -34,9 +35,18 @@ on the G1, however many bodies run it: **N + M trainings, not N × M**.
 
 Metrics are those of the ladder, `transfer/scripts/zero_shot_ladder.sh`:
 
-- **L4:** the published skill, autonomous reference, deployed path. Falls over 3 commands × 64 episodes, and how many commands pass the teacher's gait signature.
+- **L4:** the published skill at three commands (forward 0.25 m/s; fast 0.6 m/s; turning 0.3 m/s with 0.3 rad/s, and 0.2 m/s lateral on flat), in the G1's units and Froude-scaled onto the NAO. Each command is 32 environments × 900 control steps after 100 to settle; its episodes are the 32 plus every reset. A command *passes* the teacher's gait signature (gate C, `evaluate_latent.py`) when the speed is at least 0.90 of the teacher's, the fall rate at most 0.02 above it, and the stride length, stride period and both duty factors within 10 %. The deployed path is the autonomous reference with the kinematic estimator.
 - **Competence map:** the share of the family's probes a tracker masters, on 61 grid probes and 36 corners.
 - **S0's walk:** autonomous reference.
+
+## How each experiment is built
+
+- **S.** Each body's last training stage repeated with other seeds from the same start: on the G1 the log-load continuation of `r3_6194` (seeds 41, 42, 43; 41 is the incumbent), on the NAO the round-1 continuation (31, 32, 33). Every seed is laddered as the incumbents are, symmetrized.
+- **B1.** The N × M alternative in the same architecture: each body's incumbent tracker continued for 1000 iterations on one skill's own plans (the skill's generator with that body's encoder; no procedural family), then laddered on that skill. It sees the task; the zero-shot tracker does not.
+- **B2, the oracle.** `nao/tasks/nao_velocity`: Isaac Lab's recipe for `Isaac-Velocity-{Flat,Rough}-G1-v0` (rewards, commands, terrain, PPO and iterations) on the NAO. Every dimensioned constant is converted with `UnitSystem.convert_to`, each reward weight by its term's dimension times a time, so a dynamically similar motion earns the same return. The control rate, actions, exploration noise, ground and fall definition are the zero-shot trackers'. The policy observes its base velocity, as the published G1 policies do. It is scored against the G1's teacher like the trackers, through `capture_velocity.py`, which `paper_baselines.sh` first holds to `capture_rollouts.py` on the published rough policy.
+- **B3, joint retargeting.** `transfer/retarget.py` maps the teacher's joint angles through `correspondence.py`'s names and signs, by each of three value maps (copy; offset about each robot's nominal posture; fraction of range), clamped to the NAO's limits, on the NAO's clock (one NAO step reads the teacher 1.625 steps on). `nao/tasks/nao_imitate` imitates them DeepMimic-style (reference state initialisation; pose 0.65, joint rates 0.1, base velocity 0.1, yaw rate 0.1) on the trackers' body. It trains on the teacher's DART capture and is tested on the teacher's own play capture at each L4 command.
+- **T.** `paper_decomposition.py`: for each L4 command, the gait's signed deviation from the teacher split exactly into the generator's part (what the plans asked − teacher) and the tracker's (body − asked), and the estimate's effect (deployed path − true-state path).
+- **A, D.** Rows read from runs that differ by the one change the row names (`ABLATIONS` in `paper_tables.py`).
 
 ## Tables
 

@@ -73,6 +73,19 @@ parser.add_argument(
     action="store_true",
     help="Feed the generator the true z* plus its noise, not the body's encoder.",
 )
+parser.add_argument(
+    "--estimator",
+    choices=("encoder", "kinematic"),
+    default=None,
+    help="On the deployed path: the learned encoder alone, or the body's kinematics for every "
+    "field but the loads.",
+)
+parser.add_argument(
+    "--noise-scale",
+    type=float,
+    default=None,
+    help="On the true-state path: the noise on z* as a multiple of the contract's (0: none).",
+)
 parser.add_argument("--start-fraction", type=float, default=None)
 parser.add_argument(
     "--procedural-fraction",
@@ -100,6 +113,7 @@ import torch
 
 import humanoid_transfer.tasks  # noqa: F401
 from humanoid_transfer.common.skill_state import SKILL_LAYOUT
+from humanoid_transfer.transfer.tasks.tracking.balance import balance_state
 
 COMMAND = "base_velocity"
 
@@ -114,6 +128,10 @@ def main() -> int:
         command_cfg.autonomous = args_cli.reference == "autonomous"
     # The deployed path reads the body's encoder; --contract-from-truth the true state.
     command_cfg.use_encoder = not args_cli.contract_from_truth
+    if args_cli.noise_scale is not None:
+        command_cfg.noise_scale = args_cli.noise_scale
+    if args_cli.estimator is not None:
+        command_cfg.estimator = args_cli.estimator
     if args_cli.start_fraction is not None:
         command_cfg.start_fraction = args_cli.start_fraction
     if args_cli.standing_fraction is not None:
@@ -155,7 +173,8 @@ def main() -> int:
         "skill_state", "command", "action_executed", "base_lin_vel", "base_ang_vel",
         "base_quat", "base_pos", "contract_due", "contract_error", "contract_error_other",
         "contract_error_state", "contract_fields", "contract_age", "done", "terminated",
-        "encoder_input", "procedural", "biped_fallen", "biped_recovering",
+        "encoder_input", "procedural", "biped_fallen", "biped_recovering", "estimate",
+        "balance", "biped_phase", "plan_gain",
     )  # fmt: skip
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
@@ -163,6 +182,9 @@ def main() -> int:
         # The state is read before the step; the plan's due state is the target of the
         # state this step reaches (the next row of skill_state).
         record["skill_state"].append(skill_now())
+        # What the generator and the tracker read for that same state (computed when the
+        # previous step ended): the row it estimates is this row of skill_state.
+        record["estimate"].append(term.generator.skill_norm.inverse(term.estimate).cpu().numpy())
         record["encoder_input"].append(term.encoder_input().cpu().numpy())
         record["command"].append(inner.command_manager.get_command(COMMAND).cpu().numpy())
         record["base_lin_vel"].append(robot.data.root_lin_vel_b.cpu().numpy())
@@ -175,6 +197,13 @@ def main() -> int:
         none = np.zeros(inner.num_envs, dtype=bool)
         record["biped_fallen"].append(none if biped is None else biped.fallen.cpu().numpy())
         record["biped_recovering"].append(none if biped is None else biped.recovering.cpu().numpy())
+        # How the body is held up (each foot's centre of pressure and ground force), and where
+        # in its gait the biped is: what pairs the same gait's states across bodies.
+        record["balance"].append(balance_state(inner, COMMAND).cpu().numpy())
+        phase = np.zeros(inner.num_envs, dtype=np.float32)
+        record["biped_phase"].append(phase if biped is None else biped.phase.cpu().numpy())
+        # How far each env's plan is trusted (1 everywhere without the command's plan_trust).
+        record["plan_gain"].append(term.plan_gain()[:, 0].cpu().numpy())
         with torch.inference_mode():
             action = driver(obs["policy"])
         record["action_executed"].append(action.cpu().numpy())

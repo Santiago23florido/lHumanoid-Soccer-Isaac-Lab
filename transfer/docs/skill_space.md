@@ -1265,7 +1265,7 @@ Limits and stopping rules:
   - *Map, against the walk-only NAO (`nao2`):*
     - grid 6 → 33 of 57;
     - manoeuvres 0 → 6 of 6;
-    - twins 0 → 1 of 4 — the other two flat twins fail on the right foot's duty alone,
+    - twins 0 → 1 of 3 — the other two flat twins fail on the right foot's duty alone,
       +10 and +13 %;
     - left-right duty gap −0.037 → −0.009;
     - grid stance excess +0.138 → +0.039.

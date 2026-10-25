@@ -1,0 +1,285 @@
+"""The paper's tables, rebuilt from the result files into ``transfer/paper/README.md``.
+
+Every cell is read from a JSON in ``transfer/results/`` (or another directory, with
+``--results``); a row whose files do not exist yet is left out, so the tables grow as
+the queue (``paper_queue.sh``) runs. The tables go between the README's
+``<!-- tables:start -->`` and ``<!-- tables:end -->`` markers, and their data to
+``transfer/paper/data/tables.json``.
+
+Usage::
+
+    python transfer/scripts/paper_tables.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+PAPER = ROOT / "transfer" / "paper"
+COMMANDS = ("forward", "fast", "turning")
+GENERATOR = {"rough": "rough_b4", "flat": "flat_dagger2"}
+MODEL = {"g1": "warm_r3_logload_sym", "nao": "r1_3498_sym_v3"}
+"""The adopted model's tags (``incumbents.json``), deployed symmetrized."""
+SEEDS = {
+    "g1": [("41", MODEL["g1"]), ("42", "warm_r3_s42_log_sym"), ("43", "warm_r3_s43_log_sym")],
+    "nao": [(s, f"warm_nao_r1_s{s}_sym") for s in ("31", "32", "33")],
+}
+ABLATIONS = [
+    # (change, body, (tag, generator, kinematic) before, the same after)
+    ("learned encoder -> kinematic estimator", "g1",
+     ("r3_6194_sym", "rough_b3", False), ("r3_6194_sym", "rough_b3", True)),
+    ("learned encoder -> kinematic estimator", "nao",
+     ("r1_3498_sym", "rough_b3", False), ("r1_3498_sym", "rough_b3", True)),
+    ("height at the sole point -> the sole's lowest corner", "g1",
+     ("r3_6194_sym", "rough_b3", True), ("r3_6194_sym_v3", "rough_b3", True)),
+    ("generator B3 -> B4 (noise-conditional)", "g1",
+     ("r3_6194_sym_v3", "rough_b3", True), ("r3_6194_sym_v3", "rough_b4", True)),
+    ("generator B3 -> B4 (noise-conditional)", "nao",
+     ("r1_3498_sym_v3", "rough_b3", True), ("r1_3498_sym_v3", "rough_b4", True)),
+    ("loads scored linearly -> in log space (same continuation, seed 41)", "g1",
+     ("warm_r3", "rough_b4", True), ("warm_r3_logload", "rough_b4", True)),
+    ("loads scored linearly -> in log space (same continuation, seed 31)", "nao",
+     ("warm_nao_r1", "rough_b4", True), ("warm_nao_r1_logload", "rough_b4", True)),
+    ("unsymmetrized -> symmetrized deployment", "g1",
+     ("warm_r3_logload", "rough_b4", True), ("warm_r3_logload_sym", "rough_b4", True)),
+]  # fmt: skip
+MAPS = [("loads linear -> log space, 3 seeds each", "compare_seeds_logload_grid_and_corners.json")]
+FAMILY = [("walk plans only -> 70 % procedural family", "nao", "nao2", "r1_3498_sym")]
+"""Competence-map ablations: (change, body, tag before, tag after)."""
+DECODERS = [
+    ("v1, distilled control", "warm_plain"),
+    ("v2, physics prior", "warm_v2t_r8"),
+    ("v2, deep-learning core", "warm_core"),
+]
+
+directories: list[Path] = [ROOT / "transfer" / "results"]
+
+
+def find(name: str) -> Path | None:
+    for directory in directories:
+        if (directory / name).exists():
+            return directory / name
+    return None
+
+
+def read(name: str) -> dict | None:
+    path = find(name)
+    return None if path is None else json.loads(path.read_text(encoding="utf-8"))
+
+
+def l4(body: str, tag: str, generator: str, kinematic: bool = True) -> dict | None:
+    """The deployed path's L4 over the three commands, or None until all three exist."""
+    est = "_kin" if kinematic else ""
+    total = {"falls": 0, "episodes": 0, "passes": 0, "speed_ratio": []}
+    for command in COMMANDS:
+        report = read(f"zero_shot_{body}_{tag}_{generator}_auto{est}_l4_{command}.json")
+        if report is None:
+            return None
+        run = report["runs"]["encoder"]
+        total["falls"] += run["falls"]
+        total["episodes"] += run["episodes"]
+        total["passes"] += bool(run["verdict"]["passes"])
+        total["speed_ratio"].append(run["verdict"]["speed_ratio"])
+    return total
+
+
+def walk(body: str, tag: str) -> dict | None:
+    report = read(f"zero_shot_{body}_{tag}_walk_auto_kin.json")
+    if report is None:
+        return None
+    run = report["runs"]["encoder"]
+    return {"falls": run["falls"], "episodes": run["episodes"], "speed_ratio": run["verdict"]["speed_ratio"]}  # fmt: skip  # noqa: E501
+
+
+def competence(body: str, tag: str, suffix: str, group: str) -> dict | None:
+    report = read(f"competence_{body}_{tag}{suffix}.json")
+    if report is None:
+        return None
+    return {k: report["summary"][group][k] for k in ("passed", "probes")}
+
+
+def cell_l4(r: dict | None) -> str:
+    if r is None:
+        return "—"
+    low, high = min(r["speed_ratio"]), max(r["speed_ratio"])
+    return f"{r['falls']}/{r['episodes']}, passes {r['passes']}/3, speed {low:.2f}–{high:.2f}"
+
+
+def cell_walk(r: dict | None) -> str:
+    return "—" if r is None else f"{r['falls']}/{r['episodes']}, {r['speed_ratio']:.2f}"
+
+
+def cell_competence(r: dict | None) -> str:
+    return "—" if r is None else f"{r['passed']}/{r['probes']}"
+
+
+def section(title: str, note: str, header: list[str], rows: list[list[str]]) -> str:
+    lines = [f"### {title}", "", note, ""]
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("| " + " | ".join("---" for _ in header) + " |")
+    lines += ["| " + " | ".join(row) + " |" for row in rows]
+    return "\n".join(lines)
+
+
+def build() -> tuple[str, dict]:
+    sections, data = [], {"M": {}, "S": {}, "B1": {}, "T": {}, "A": {}, "D": {}}
+
+    rows = []
+    for body, tag in MODEL.items():
+        for skill, generator in GENERATOR.items():
+            r = data["M"][f"{body}/{skill}"] = l4(body, tag, generator)
+            rows.append([body.upper(), skill, cell_l4(r)])
+    sections.append(
+        section(
+            "M — the adopted model, zero-shot, deployed path",
+            "Falls over the episodes of 3 commands × 64, commands that pass the teacher's gait "
+            "signature, and speed over the teacher's. Source: "
+            f"`zero_shot_<body>_<tag>_<generator>_auto_kin_l4_*.json`, tags `{MODEL['g1']}`, "
+            f"`{MODEL['nao']}`.",
+            ["Body", "Skill", "L4"],
+            rows,
+        )
+    )
+
+    rows = []
+    for body, entries in SEEDS.items():
+        for seed, tag in entries:
+            r = {s: l4(body, tag, g) for s, g in GENERATOR.items()} | {"walk": walk(body, tag)}
+            if all(v is None for v in r.values()):
+                continue
+            data["S"][f"{body}/{seed}"] = r
+            cells = [cell_l4(r["rough"]), cell_l4(r["flat"]), cell_walk(r["walk"])]
+            rows.append([body.upper(), seed, *cells])
+    if rows:
+        sections.append(
+            section(
+                "S — seeds of each body's final training stage, symmetrized",
+                "Walk: S0's check, autonomous reference, falls and speed over the teacher's. "
+                "Source: `paper_queue.sh` stages `s_g1`, `s_nao`.",
+                ["Body", "Seed", "Rough L4", "Flat L4", "Walk"],
+                rows,
+            )
+        )
+
+    rows = []
+    for body, tag in MODEL.items():
+        for skill, generator in GENERATOR.items():
+            task = l4(body, f"{body}_task_{skill}_sym", generator)
+            if task is None:
+                continue
+            zero = l4(body, tag, generator)
+            data["B1"][f"{body}/{skill}"] = {"zero_shot": zero, "task_specific": task}
+            rows.append([body.upper(), skill, cell_l4(zero), cell_l4(task)])
+    if rows:
+        sections.append(
+            section(
+                "B1 — zero-shot against a tracker trained on the skill's own plans (N × M)",
+                "Source: `paper_queue.sh` stages `b1_nao`, `b1_g1`.",
+                ["Body", "Skill", "Zero-shot (adopted)", "Task-specific tracker"],
+                rows,
+            )
+        )
+
+    decomposition = PAPER / "data" / "decomposition.json"
+    if decomposition.exists():
+        report = json.loads(decomposition.read_text(encoding="utf-8"))
+        data["T"] = report["summary"]
+        rows = [
+            [key, term] + [f"{values[k]:.3f}" for k in report["features"]]
+            for key, terms in report["summary"].items()
+            for term, values in terms.items()
+        ]
+        sections.append(
+            section(
+                "T — the gait's deviation from the teacher, decomposed",
+                "Mean over the three commands of the |signed relative deviation|. Signed, "
+                "total = generator + tracker exactly; estimation = deployed path − true-state "
+                "path. Source: `paper_decomposition.py`, `transfer/paper/data/decomposition.json`.",
+                ["Body/skill", "Term", *report["features"]],
+                rows,
+            )
+        )
+
+    rows = []
+    for change, body, before, after in ABLATIONS:
+        a, b = l4(body, *before), l4(body, *after)
+        if a is None or b is None:
+            continue
+        data["A"][f"{body}: {change}"] = {"before": a, "after": b}
+        rows.append([body.upper(), change.replace("->", "→"), cell_l4(a), cell_l4(b)])
+    for change, name in MAPS:
+        r = read(name)
+        if r is None:
+            continue
+        data["A"][f"g1 map: {change}"] = r
+        per_seed = r["passed_per_seed"]
+        before = ", ".join(f"{x:.0f}" for x in per_seed["reference"])
+        after = ", ".join(f"{x:.0f}" for x in per_seed["candidate"])
+        after += f" ({r['passed_difference']:+.2f} ± {r['passed_se']:.2f})"
+        rows.append(["G1", f"map + corners passed: {change}".replace("->", "→"), before, after])
+    for change, body, before, after in FAMILY:
+        a, b = read(f"competence_{body}_{before}.json"), read(f"competence_{body}_{after}.json")
+        if a is None or b is None:
+            continue
+        data["A"][f"{body} map: {change}"] = {"before": a["summary"], "after": b["summary"]}
+        cells = [
+            ", ".join(f"{g} {s[g]['passed']}/{s[g]['probes']}" for g in s)
+            for s in (a["summary"], b["summary"])
+        ]
+        rows.append([body.upper(), f"map passed: {change}".replace("->", "→"), *cells])
+    if rows:
+        sections.append(
+            section(
+                "A — ablations",
+                "Rough L4 on the deployed path, one change at a time, unless the row says "
+                "otherwise. The tags are in `paper_tables.py`'s `ABLATIONS`.",
+                ["Body", "Change", "Before", "After"],
+                rows,
+            )
+        )
+
+    rows = []
+    for arm, tag in DECODERS:
+        rough = l4("g1", tag, "rough_b4")
+        if rough is None:
+            continue
+        grid = competence("g1", tag, "", "grid")
+        corners = competence("g1", tag, "_corners", "corner")
+        data["D"][arm] = {"rough": rough, "grid": grid, "corners": corners}
+        rows.append([arm, cell_l4(rough), cell_competence(grid), cell_competence(corners)])
+    if rows:
+        sections.append(
+            section(
+                "D — decoder v2 at equal competence (G1, warm-started from the same incumbent)",
+                "Grid and corners: probes mastered. Source: `warm_study.sh`, `core_and_nao.sh`.",
+                ["Decoder", "Rough L4", "Grid", "Corners"],
+                rows,
+            )
+        )
+    return "\n\n".join(sections), data
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--results", type=Path, action="append", default=[])
+    args = parser.parse_args()
+    directories.extend(args.results)
+    text, data = build()
+    readme = PAPER / "README.md"
+    start, end = "<!-- tables:start -->", "<!-- tables:end -->"
+    head, rest = readme.read_text(encoding="utf-8").split(start, 1)
+    tail = rest.split(end, 1)[1]
+    readme.write_text(f"{head}{start}\n\n{text}\n\n{end}{tail}", encoding="utf-8", newline="\n")
+    (PAPER / "data").mkdir(parents=True, exist_ok=True)
+    (PAPER / "data" / "tables.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
+    print(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

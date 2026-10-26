@@ -60,6 +60,8 @@ ladder() {  # <body> <run dir> <tag> <tasks> <rough stages...>: symmetrized, as 
   for task in $tasks; do
     local generator stages
     if [ "$task" = rough ]; then generator=rough_b4; stages=("$@"); else generator=flat_dagger2; stages=(l4); fi
+    # L4 reads the body's refitted encoder: a ladder of one skill alone (B1) fits it first.
+    [ -f "logs/contract/walk_zs_${body}_${tag}/generator.pt" ] || stages=(encoder "${stages[@]}")
     ZS_REFERENCE=autonomous ZS_ESTIMATOR=kinematic ZS_SYMMETRIZE=1 ZS_TASK_ID="$task_id" \
       ZS_TASK="$task" ZS_GENERATOR="logs/contract/${generator}/generator.pt" \
       bash transfer/scripts/zero_shot_ladder.sh "$body" "$run" "$(latest "$run")" "$tag" "${stages[@]}" \

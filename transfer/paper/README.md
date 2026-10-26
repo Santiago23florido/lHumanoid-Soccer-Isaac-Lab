@@ -78,6 +78,19 @@ Walk: S0's check, autonomous reference, falls and speed over the teacher's. Sour
 | --- | --- | --- | --- | --- |
 | G1 | 41 | 0/192, passes 0/3, speed 1.00–1.05 | 0/192, passes 3/3, speed 1.06–1.14 | 0/64, 1.01 |
 | G1 | 42 | 3/192, passes 0/3, speed 0.97–1.05 | 0/192, passes 2/3, speed 1.06–1.15 | 0/64, 1.01 |
+| G1 | 43 | 0/192, passes 0/3, speed 1.00–1.05 | 0/192, passes 3/3, speed 1.06–1.13 | 0/64, 1.00 |
+| NAO | 31 | 0/192, passes 1/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.04–1.17 | 0/64, 0.99 |
+| NAO | 32 | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.04–1.11 | 0/64, 1.00 |
+| NAO | 33 | 0/191, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.04–1.12 | 0/64, 1.00 |
+
+### B1 — zero-shot against a tracker trained on the skill's own plans (N × M)
+
+Source: `paper_queue.sh` stages `b1_nao`, `b1_g1`.
+
+| Body | Skill | Zero-shot (adopted) | Task-specific tracker |
+| --- | --- | --- | --- |
+| G1 | rough | 0/192, passes 0/3, speed 1.00–1.05 | 0/192, passes 3/3, speed 1.01–1.05 |
+| NAO | rough | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.00–1.04 |
 
 ### T — the gait's deviation from the teacher, decomposed
 

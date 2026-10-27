@@ -31,8 +31,8 @@ on the G1, however many bodies run it: **N + M trainings, not N × M**.
 | M | The adopted model (`transfer/results/incumbents.json`) on both bodies, both skills | The headline | done |
 | S | Seeds of each body's final training stage, with L4 | How much the headline varies with training | done |
 | B1 | A tracker trained on the skill's own plans (N × M), each body | What zero-shot costs, in the same architecture | done |
-| B2 | Oracle: the NAO trained on each skill's own task, Isaac Lab's G1 recipe in the NAO's units | What the NAO can do when it sees the task | implemented (`nao/tasks/nao_velocity`), running |
-| B3 | Joint retargeting: the NAO imitating the G1's joint trajectories on its own clock, three value maps | The classic baseline (the joint-target signal) | implemented (`nao/tasks/nao_imitate`), queued after B2 |
+| B2 | Oracle: the NAO trained on each skill's own task, Isaac Lab's G1 recipe in the NAO's units | What the NAO can do when it sees the task | flat done; rough training again after a fix to its fall height and spawn (b32565b) |
+| B3 | Joint retargeting: the NAO imitating the G1's joint trajectories on its own clock, three value maps | The classic baseline (the joint-target signal) | implemented (`nao/tasks/nao_imitate`); held: under the copy and range maps the pose reward has no gradient from the action space's centre, a design choice open |
 | T | Decomposition of the transfer error into generator, tracker and estimator | The theory section's measured terms | done (`paper_decomposition.py`) |
 | A | Ablations: estimator, sole height, generator, log-space loads, symmetrization, procedural family | What each piece contributes | done from existing runs |
 | D | Decoder v2 (physics prior, deep-learning core) against the distilled v1 control | Whether a stronger decoder buys competence | done, not adopted |

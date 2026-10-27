@@ -19,14 +19,15 @@ that motion was on the G1:
   over a similar motion is the same on both bodies. The fall penalty is paid once, on
   one control step of 0.02 s on both, and keeps its weight.
 * *Rough terrain:* every length of the terrain generator is scaled by the leg-length
-  ratio (0.379), slopes kept, and the height scan's grid and offset likewise.
+  ratio (0.379), slopes kept, and the height scan's grid and offset likewise, and the
+  spawn's spread about each terrain's origin.
 
 **What stays the NAO's.** The control rate (50 Hz, a body property: the NAO's step is
 0.126 ``T`` against the G1's 0.077), the actions (offsets of 0.25 rad on the 19
 actuated joints around its nominal crouch), the PPO exploration noise (0.5), the
-ground (``NaoTrack``'s plane) and the definition of a fall (the base below 0.18 m or
-tilted past 0.8 rad, besides Isaac Lab's torso contact). These are the zero-shot
-trackers', so the oracle and the trackers are measured on the same body.
+ground (``NaoTrack``'s plane) and the definition of a fall (the base below 0.18 m above
+the ground under it, or tilted past 0.8 rad, besides Isaac Lab's torso contact). These
+are the zero-shot trackers', so the oracle and the trackers are measured on the same body.
 
 Terms of the G1's recipe for joints the NAO does not have (fingers, torso) are dropped.
 The NAO also observes its base velocity, as the published G1 policies do: an oracle.
@@ -66,6 +67,7 @@ from ....common.similarity import (
 from ....transfer.embodiment import G1, NAO
 from ...assets import nao_kinematics as nk
 from ...assets.nao import get_nao_stand_cfg
+from .terminations import base_below
 
 BASE_BODY = "base_link"
 FEET = "[lr]_ankle"
@@ -232,8 +234,11 @@ class NaoVelocityRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.base_com = None
         self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
         self.events.base_external_force_torque.params["asset_cfg"].body_names = [BASE_BODY]
+        # The spawn's spread is a length: unscaled, it puts the NAO on the edge of the
+        # stairs' platform (1.14 m wide here) instead of on it.
+        spread = similar_range((-0.5, 0.5), LENGTH)
         self.events.reset_base.params = {
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
+            "pose_range": {"x": spread, "y": spread, "yaw": (-3.14, 3.14)},
             "velocity_range": {k: (0.0, 0.0) for k in ("x", "y", "z", "roll", "pitch", "yaw")},
         }
 
@@ -260,10 +265,11 @@ class NaoVelocityRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         )
         command.debug_vis = False
 
-        # Terminations: Isaac Lab's torso contact, and a fall as the trackers define it.
+        # Terminations: Isaac Lab's torso contact, and a fall as the trackers define it,
+        # its height measured from the terrain under the base.
         self.terminations.base_contact.params["sensor_cfg"].body_names = BASE_BODY
         self.terminations.base_low = DoneTerm(
-            func=mdp.root_height_below_minimum, params={"minimum_height": 0.18}
+            func=base_below, params={"minimum_height": 0.18, "scanner": "height_scanner"}
         )
         self.terminations.tilted = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
 
@@ -279,6 +285,7 @@ class NaoVelocityFlatEnvCfg(NaoVelocityRoughEnvCfg):
         self.scene.height_scanner = None
         self.observations.policy.height_scan = None
         self.curriculum.terrain_levels = None
+        self.terminations.base_low.params["scanner"] = None
 
         rewards = self.rewards
         rewards.track_ang_vel_z_exp.weight = weight(1.0, DIMENSIONLESS)

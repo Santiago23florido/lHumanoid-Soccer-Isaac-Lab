@@ -61,3 +61,40 @@ def test_every_joint_pattern_matches_a_nao_joint() -> None:
 def test_the_feet_pattern_names_the_nao_feet() -> None:
     feet = re.search(r'^FEET = "([^"]+)"', SOURCE, re.M).group(1)
     assert [b for b in nk.FOOT_BODIES if re.fullmatch(feet, b)] == list(nk.FOOT_BODIES)
+
+
+def test_a_fall_is_measured_from_the_ground_under_the_base() -> None:
+    from types import SimpleNamespace
+
+    import torch
+    from humanoid_transfer.nao.tasks.nao_velocity.terminations import base_below
+
+    def data(**fields) -> SimpleNamespace:
+        return SimpleNamespace(data=SimpleNamespace(**fields))
+
+    # Standing in a sunken sub-terrain, fallen on a raised one, standing on a plane.
+    base = torch.tensor([0.0, 0.25, 0.30])
+    ground = torch.tensor([-0.33, 0.10, 0.0])[:, None].repeat(1, 5)
+    env = SimpleNamespace(
+        scene={
+            "robot": data(root_pos_w=torch.stack([0 * base, 0 * base, base], dim=-1)),
+            "height_scanner": data(ray_hits_w=torch.stack([0 * ground, 0 * ground, ground], -1)),
+        }
+    )
+    assert base_below(env, 0.18, scanner="height_scanner").tolist() == [False, True, False]
+    # Isaac Lab's measure, from the world's zero, gets both terrains wrong.
+    assert base_below(env, 0.18).tolist() == [True, False, False]
+
+
+def test_the_rough_task_reads_the_ground_and_the_flat_one_has_no_scanner_to_read() -> None:
+    rough = r'func=base_below, params=\{"minimum_height": 0\.18, "scanner": "height_scanner"\}'
+    assert re.search(rough, SOURCE)
+    flat = SOURCE[SOURCE.index("class NaoVelocityFlatEnvCfg") :]
+    assert "self.scene.height_scanner = None" in flat
+    assert 'self.terminations.base_low.params["scanner"] = None' in flat
+    assert "root_height_below_minimum" not in SOURCE
+
+
+def test_the_spawn_spread_is_a_converted_length() -> None:
+    assert re.search(r"spread = similar_range\(\(-0\.5, 0\.5\), LENGTH\)", SOURCE)
+    assert re.search(r'"pose_range": \{"x": spread, "y": spread,', SOURCE)

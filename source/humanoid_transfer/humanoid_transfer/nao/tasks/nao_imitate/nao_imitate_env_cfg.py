@@ -15,8 +15,11 @@ the zero-shot study replaces with ``z*``, built to work as well as it can.
   converted to the NAO's units; and the zero-shot trackers' body terms -- the fall
   penalty, action rate, joint limits.
 * **Body.** The zero-shot trackers' and the oracle's: 50 Hz, offsets of 0.25 rad on
-  the 19 actuated joints around the nominal crouch, the same plane, the same falls.
-  Like the oracle, the policy also observes its base velocity.
+  the 19 actuated joints, the same plane, the same falls. The offsets are about the
+  reference's next row instead of the nominal crouch, so the zero action plays the
+  reference back and the policy learns the feedback around it: the baseline gets the
+  joint signal in its most favourable form. Like the oracle, the policy also observes
+  its base velocity.
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ from ...assets import nao_kinematics as nk
 from ...assets.nao import get_nao_stand_cfg
 from ..nao_velocity.nao_velocity_env_cfg import similar
 from .reference import (
+    ReferenceJointPositionActionCfg,
     ReferenceMotionCommandCfg,
     pose_tracking,
     rate_tracking,
@@ -137,12 +141,13 @@ class NaoImitateEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.contact_forces.track_air_time = False
         self.curriculum.terrain_levels = None
 
-        self.actions.joint_pos = mdp.JointPositionActionCfg(
+        # Actions: the trackers' offsets, about the reference's next row.
+        self.actions.joint_pos = ReferenceJointPositionActionCfg(
             asset_name="robot",
             joint_names=list(nk.ACTUATED_JOINTS),
             scale=0.25,
-            use_default_offset=True,
             preserve_order=True,
+            command_name=COMMAND,
         )
         self.commands.base_velocity = ReferenceMotionCommandCfg(
             asset_name="robot", reference=REFERENCE, debug_vis=False

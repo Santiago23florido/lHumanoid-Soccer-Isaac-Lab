@@ -6,6 +6,10 @@ clip with the NAO put in the reference's state there (reference state
 initialisation, Peng et al. 2018), and ends, as a time-out, when the clip runs out.
 ``command`` is the base velocity the reference holds one step ahead, so Isaac Lab's
 velocity-tracking terms apply unchanged.
+
+The actions are joint targets about the reference (:class:`ReferenceJointPositionAction`):
+the policy's zero action plays the reference back, and what it learns is the feedback
+around it.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from dataclasses import MISSING
 
 import numpy as np
 import torch
+from isaaclab.envs.mdp.actions import JointPositionAction, JointPositionActionCfg
 from isaaclab.managers import CommandTerm, CommandTermCfg
 from isaaclab.utils import configclass
 
@@ -26,7 +31,7 @@ class ReferenceMotionCommand(CommandTerm):
         super().__init__(cfg, env)
         self.robot = env.scene[cfg.asset_name]
         data = np.load(cfg.reference)
-        names = [str(n) for n in data["joint_names"]]
+        self.names = names = [str(n) for n in data["joint_names"]]
         self.joint_ids, _ = self.robot.find_joints(names, preserve_order=True)
         # The NAO's right hip yaw-pitch mimics the left one, multiplier 1 (nao.urdf).
         mimic, _ = self.robot.find_joints(["RHipYawPitch"])
@@ -135,6 +140,40 @@ class ReferenceMotionCommandCfg(CommandTermCfg):
     from_start: bool = False
     """Start every episode at its clip's first row instead of a random one."""
     resampling_time_range: tuple[float, float] = (1.0e9, 1.0e9)
+
+
+class ReferenceJointPositionAction(JointPositionAction):
+    """Joint position targets about the reference: ``q_ref(t + 1) + scale · a``.
+
+    Isaac Lab's ``JointPositionAction`` with its offset, the nominal crouch, replaced each
+    step by the reference's next row, the one the step's reward scores. The zero action
+    plays the reference back; the policy learns the feedback around it (residual policy
+    learning, Silver et al. 2018; on a biped's reference motion, Xie et al. 2018). About
+    the crouch instead, the retargeted references sit so far from the zero action that
+    ``exp(-2 Σ Δq²)`` is ~0 there, and the pose reward gave no gradient.
+    """
+
+    cfg: ReferenceJointPositionActionCfg
+
+    def __init__(self, cfg: ReferenceJointPositionActionCfg, env) -> None:
+        super().__init__(cfg, env)
+        self._columns: list[int] | None = None
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        term: ReferenceMotionCommand = self._env.command_manager.get_term(self.cfg.command_name)
+        if self._columns is None:
+            self._columns = [term.names.index(n) for n in self._joint_names]
+        # Actions are processed before the physics and the command's advance: target(1) is
+        # the row the step ends on.
+        self._offset = term.target(1)[:, self._columns]
+        super().process_actions(actions)
+
+
+@configclass
+class ReferenceJointPositionActionCfg(JointPositionActionCfg):
+    class_type: type = ReferenceJointPositionAction
+    command_name: str = MISSING
+    """The :class:`ReferenceMotionCommand` whose next row is the targets' centre."""
 
 
 def reference_joints(env, command_name: str) -> torch.Tensor:

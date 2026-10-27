@@ -98,3 +98,47 @@ def test_the_rough_task_reads_the_ground_and_the_flat_one_has_no_scanner_to_read
 def test_the_spawn_spread_is_a_converted_length() -> None:
     assert re.search(r"spread = similar_range\(\(-0\.5, 0\.5\), LENGTH\)", SOURCE)
     assert re.search(r'"pose_range": \{"x": spread, "y": spread,', SOURCE)
+
+
+def test_a_diverged_simulation_is_reset_and_left_unrewarded() -> None:
+    import importlib
+    import inspect
+    from types import SimpleNamespace
+
+    import torch
+    from humanoid_transfer.nao.tasks.nao_velocity import terminations as t
+
+    # Three environments: a valid state, a NaN joint, a base spinning at 1e10 rad/s.
+    joint = torch.zeros(3, 4)
+    joint[1, 2] = float("nan")
+    spin = torch.zeros(3, 3)
+    spin[2, 0] = 1.0e10
+    robot = SimpleNamespace(
+        data=SimpleNamespace(
+            root_lin_vel_w=torch.zeros(3, 3), root_ang_vel_w=spin, joint_pos=joint,
+            joint_vel=torch.full((3, 4), 5.0),
+        )
+    )  # fmt: skip
+    env = SimpleNamespace(scene={"robot": robot})
+    assert t.diverged(env).tolist() == [False, True, True]
+
+    def speed(env, scale: float) -> torch.Tensor:
+        return torch.tensor([1.0, float("nan"), 1.0e18]) * scale
+
+    guarded = t.finite(speed)
+    assert guarded(env, scale=2.0).tolist() == [2.0, 0.0, 0.0]
+    # Isaac Lab checks the term's parameters against this signature ...
+    assert inspect.signature(guarded) == inspect.signature(speed)
+    # ... and Hydra carries the term as "module:name" and back.
+    module, name = guarded.__module__, guarded.__name__
+    assert getattr(importlib.import_module(module), name) is guarded
+
+
+def test_the_velocity_tasks_guard_every_reward_and_reset_a_diverged_simulation() -> None:
+    rough = SOURCE[SOURCE.index("class NaoVelocityRoughEnvCfg") :]
+    assert "self.terminations.diverged = DoneTerm(func=diverged, time_out=True)" in rough
+    assert re.search(
+        r"for term in vars\(self\.rewards\)\.values\(\):\s+if isinstance\(term, RewTerm\):\s+"
+        r"term\.func = finite\(term\.func\)",
+        rough,
+    )

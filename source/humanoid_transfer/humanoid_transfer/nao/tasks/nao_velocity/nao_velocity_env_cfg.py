@@ -67,7 +67,7 @@ from ....common.similarity import (
 from ....transfer.embodiment import G1, NAO
 from ...assets import nao_kinematics as nk
 from ...assets.nao import get_nao_stand_cfg
-from .terminations import base_below
+from .terminations import base_below, diverged, finite
 
 BASE_BODY = "base_link"
 FEET = "[lr]_ankle"
@@ -272,6 +272,13 @@ class NaoVelocityRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             func=base_below, params={"minimum_height": 0.18, "scanner": "height_scanner"}
         )
         self.terminations.tilted = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
+
+        # A diverged simulation (PhysX, on the rough terrains): the environment is reset and
+        # its step left unrewarded. Neither touches a state the NAO can reach.
+        self.terminations.diverged = DoneTerm(func=diverged, time_out=True)
+        for term in vars(self.rewards).values():
+            if isinstance(term, RewTerm):
+                term.func = finite(term.func)
 
 
 @configclass

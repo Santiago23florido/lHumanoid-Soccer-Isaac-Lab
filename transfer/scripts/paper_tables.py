@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -76,6 +77,17 @@ def find(name: str) -> Path | None:
 def read(name: str) -> dict | None:
     path = find(name)
     return None if path is None else json.loads(path.read_text(encoding="utf-8"))
+
+
+def finite(value):
+    """``value`` with its non-finite numbers as None, which JSON can carry and NaN cannot."""
+    if isinstance(value, dict):
+        return {k: finite(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [finite(v) for v in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 
 def l4(body: str, tag: str, generator: str, kinematic: bool = True) -> dict | None:
@@ -264,15 +276,21 @@ def build() -> tuple[str, dict]:
             if r is None:
                 continue
             data["gait"][f"nao/{skill}/{method}"] = r["deviation"]
-            means = [sum(r["deviation"][f]) / len(COMMANDS) for f in GAIT]
-            rows.append(["NAO", skill, method, *(f"{v:.2f}" for v in means)])
+            # A command on which the NAO takes no stride has no stride length or period.
+            cells = []
+            for f in GAIT:
+                values = r["deviation"][f]
+                gone = [c for c, v in zip(COMMANDS, values, strict=True) if not math.isfinite(v)]
+                cells.append(f"no stride on {', '.join(gone)}" if gone else f"{sum(values) / len(values):.2f}")  # fmt: skip  # noqa: E501
+            rows.append(["NAO", skill, method, *cells])
     if any(row[2] != "zero-shot" for row in rows):
         sections.append(
             section(
                 "B — the NAO's gait against the teacher's, by method",
                 "Mean over the three L4 commands of each gate C feature's |relative deviation| "
                 "(the gate allows 0.10). A method that fails gate C fails it here or on speed and "
-                "falls, in the tables above.",
+                "falls, in the tables above. A command on which the NAO takes no stride has no "
+                "stride length or period; the cell names it.",
                 ["Body", "Skill", "Method", *GAIT.values()],
                 rows,
             )
@@ -369,7 +387,7 @@ def main() -> int:
     tail = rest.split(end, 1)[1]
     readme.write_text(f"{head}{start}\n\n{text}\n\n{end}{tail}", encoding="utf-8", newline="\n")
     (PAPER / "data").mkdir(parents=True, exist_ok=True)
-    (PAPER / "data" / "tables.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    (PAPER / "data" / "tables.json").write_text(json.dumps(finite(data), indent=2) + "\n", encoding="utf-8")  # fmt: skip  # noqa: E501
     sys.stdout.reconfigure(encoding="utf-8")
     print(text)
     return 0

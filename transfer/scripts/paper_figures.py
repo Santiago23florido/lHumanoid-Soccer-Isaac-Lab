@@ -199,10 +199,15 @@ def baselines() -> None:
         results = [by_skill[skill][n] for n in names]
         rate = [np.nan if r is None else r["falls"] / r["episodes"] for r in results]
         ratio = [np.nan if r is None else np.mean(r["speed_ratio"]) for r in results]
-        # Gate C's reading: each command's largest feature deviation, then their mean.
+        # Gate C's reading: each command's largest feature deviation, then their mean. A
+        # command without a stride has no stride features: its largest is among the rest,
+        # and the marker is left open.
         worst = [
-            np.nan if r is None else np.mean(np.max(list(r["deviation"].values()), axis=0))
+            np.nan if r is None else np.mean(np.nanmax(list(r["deviation"].values()), axis=0))
             for r in results
+        ]
+        strideless = [
+            r is not None and not np.isfinite(list(r["deviation"].values())).all() for r in results
         ]
         x = np.arange(len(names)) + (k - 0.5) * 0.38
         for ax, values in ((falls, rate), (speed, ratio)):
@@ -211,6 +216,12 @@ def baselines() -> None:
         # A log axis has no baseline for a bar to start from: markers, shaped per skill.
         (dot,) = gait.plot(x, worst, MARKERS[k], color=SERIES[k], markersize=6,
                            markeredgecolor="white", linestyle="none")  # fmt: skip
+        for xi, yi, open_ in zip(x, worst, strideless, strict=True):
+            if open_:
+                gait.plot(xi, yi, MARKERS[k], markerfacecolor="white", markeredgecolor=SERIES[k],
+                          markersize=6, markeredgewidth=1.2)  # fmt: skip
+                gait.annotate("no stride on\na command", (xi, yi), textcoords="offset points",
+                              xytext=(5, 0), va="center", color=INK_2, fontsize=6)  # fmt: skip
         handles.append((bar, dot))
     falls.set_ylabel("falls / episode (NAO, L4)")
     falls.set_ylim(bottom=0, top=max(0.05, falls.get_ylim()[1]))

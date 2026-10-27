@@ -94,6 +94,26 @@ Source: `paper_queue.sh` stages `b1_nao`, `b1_g1`.
 | NAO | rough | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.00–1.04 |
 | NAO | flat | 0/192, passes 0/3, speed 1.04–1.12 | 0/192, passes 0/3, speed 1.04–1.13 |
 
+### B2 — zero-shot against the oracle: the NAO trained on the skill's own task
+
+The oracle is Isaac Lab's G1 recipe in the NAO's units (`nao/tasks/nao_velocity`), scored against the G1's teacher like the zero-shot tracker. Its gait is its own: it was rewarded for the task, not the G1's gait. Source: `paper_baselines.sh` stage `b2`.
+
+| Body | Skill | Zero-shot (adopted) | Oracle |
+| --- | --- | --- | --- |
+| NAO | flat | 0/192, passes 0/3, speed 1.04–1.12 | 0/192, passes 0/3, speed 0.95–1.18 |
+
+### B — the NAO's gait against the teacher's, by method
+
+Mean over the three L4 commands of each gate C feature's |relative deviation| (the gate allows 0.10). A method that fails gate C fails it here or on speed and falls, in the tables above.
+
+| Body | Skill | Method | Stride length | Stride period | Duty, left | Duty, right |
+| --- | --- | --- | --- | --- | --- | --- |
+| NAO | rough | zero-shot | 0.04 | 0.03 | 0.15 | 0.03 |
+| NAO | rough | B1, task tracker | 0.07 | 0.07 | 0.33 | 0.06 |
+| NAO | flat | zero-shot | 0.04 | 0.03 | 0.14 | 0.17 |
+| NAO | flat | B1, task tracker | 0.19 | 0.13 | 0.67 | 0.47 |
+| NAO | flat | B2, oracle | 7.32 | 7.32 | 0.24 | 0.14 |
+
 ### T — the gait's deviation from the teacher, decomposed
 
 Mean over the three commands of the |signed relative deviation|. Signed, total = generator + tracker exactly; estimation = deployed path − true-state path. Source: `paper_decomposition.py`, `transfer/paper/data/decomposition.json`.

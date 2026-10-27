@@ -1528,6 +1528,86 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
 | F5, a learned latent ζ | entity tokens with attention, bottlenecked to predict balance and falls and aligned across bodies on paired procedural data, carry what z* leaves out without encoding the body | the NAO's falls and CoP predicted by heads trained on the G1 alone; a body classifier at chance |
 | F6 (optional) | projecting a plan towards mastered cells when predicted competence drops reduces falls | falls, at no cost in fidelity |
 
+### 9.1 Log
+
+- **F1, B4 trained** (`contract_{rough,flat}_b4.json`, `chain_fidelity_{rough,flat}_b{3,4}_x*.json`):
+  one generator per task across history noise levels from 0.125 to 32 times the body
+  encoder's precision, the level read as an input. Each chain is scored against the teacher at
+  multiples of that precision:
+
+  | generator | x1 | x3 | x10 | x20 |
+  | --- | --- | --- | --- | --- |
+  | `rough_b3` | **0.033 ± 0.005** | **0.041 ± 0.004** | 0.233 ± 0.016 | 0.609 ± 0.027 |
+  | `rough_b4` | 0.090 ± 0.005 | 0.079 ± 0.005 | **0.096 ± 0.006** | **0.108 ± 0.006** |
+  | `flat_b3` | 0.093 ± 0.008 | 0.127 ± 0.009 | 0.396 ± 0.021 | 1.009 ± 0.108 (5 of 32 chains) |
+  | `flat_b4` | 0.088 ± 0.007 | **0.079 ± 0.006** | **0.055 ± 0.006** | **0.061 ± 0.008** |
+
+  - *B4 holds at any noise level, as designed.* From x1 to x20 its fidelity hardly changes,
+    where B3's falls apart above x3.
+  - *Rough pays for it at the body's own precision:* 0.090 against 0.033.
+  - *Flat is no worse than B3 at any level.*
+  - The bodies decide (L4 next, `b4_on_bodies.sh`).
+- **F2, the encoder's coverage, diagnosed** (`encoder_error.py`,
+  `encoder_error_g1_r3_6194_sym.json`). The G1's encoder error, in units of its precision:
+
+  | states | error |
+  | --- | --- |
+  | its own, practised (walk, procedural family) | 0.4–1.2 |
+  | the published policies' gaits, true state | 4–7 (height 12–21) |
+  | the same, through the encoder | 12–18 |
+
+  - *Not height alone.* At the same CoM height, 0.85–0.90 L, the error is 0.8 on procedural
+    states and 13–34 on the tasks' states. The network learned shortcuts on the manifold it
+    was fitted on, not the kinematics.
+  - *Widening the family's ranges would not be enough,* so the correction is structural.
+    Everything in `z*` but the feet's loads is kinematics: the body computes it from its joint
+    encoders, IMU and model (`proprioceptive_skill_state`). The ground is under the lower sole.
+    Without a base velocity, the more loaded foot is taken as still (leg odometry). The
+    learned encoder supplies only the loads.
+  - L4 with the incumbents under this estimator: `estimator_study.sh`.
+- **F2, run: the kinematic estimator is adopted** (`zero_shot_*_sym_*_auto_kin_l4_*.json`).
+  Falls through the deployed path, forward / fast / turning:
+
+  | | learned encoder | kinematic estimator | true state |
+  | --- | --- | --- | --- |
+  | `rough_b3`, G1 | 45/83, 94/127, 24/68 | **15/64, 16/62, 12/61** | 5/62, 1/61, 7/65 |
+  | `rough_b3`, G1, speed ratio | 0.75, 0.49, 0.88 | **0.99, 0.93, 1.00** | 1.04, 1.01, 1.02 |
+  | `rough_b3`, NAO | 0/64 ×3; at the body's rate, fails ×3 | 0/64 ×3; at the body's rate, **forward passes** | 0/64 ×3 |
+  | `flat_dagger2`, G1 | 0/64 ×3, passes | 0/64 ×3, passes | 9/65, 4/65, 6/64 |
+  | `flat_dagger2`, NAO | 0/64 ×3, passes at the body's rate | 0/64 ×3, passes at the body's rate | 1/64 ×3 |
+
+  - *No regression,* so the rule adopts it (`incumbents.json`).
+  - *What is left* (`encoder_error.py --recorded --lag 1`, `estimator_error_*_kin.json`):
+
+    | field | error, in the contract's sigma |
+    | --- | --- |
+    | every kinematic field | 0.00 |
+    | height | 4–25 |
+    | the learned loads | 1–3.5 |
+
+  - *Why the height errs.* The ground was taken under the lower sole point, but a pitched foot touches the ground with its heel or toe, its sole point centimetres above it. The fix, the lowest sole corner, comes with the decoder branch.
+  - *The captures needed a fix too.* They recorded each estimate one step after its state. The first figures of this table's runs were computed so and are superseded; only those runs were affected.
+  - *The NAO's remaining failure is in its tracker, not the estimator.* Details below.
+- **F1, B4 on both bodies** (`zero_shot_*_sym_{rough,flat}_b4_auto_l4_*.json`; the learned
+  encoder, as step 3 ran). Falls, forward / fast / turning:
+
+  | | G1, encoder | G1, true state | NAO, at the body's rate |
+  | --- | --- | --- | --- |
+  | `rough_b3` | 45/83, 94/127, 24/68 | 5/62, 1/61, 7/65 | 0 falls; fails ×3 |
+  | `rough_b4` | 34/75, 89/122, 27/72 | **0/64 ×3** | 1 fall in 62; **forward passes** |
+  | `flat_dagger2` | 0/64 ×3, passes | 9/65, 4/65, 6/64 | 0 falls; passes ×3 |
+  | `flat_b4` | 0/64 ×3, passes | **0/64 ×3** | 0 falls; forward fails (stride +12.5 %) |
+
+  - *The hypothesis holds where it was aimed.* A generator that reads its noise level no longer
+    collapses on a clean history: none of 384 true-state episodes falls.
+  - *On the G1's encoder path it changes nothing beyond its standard error.*
+  - *The rule keeps both incumbents:*
+    - `flat_b4` fails one check of S0 that `flat_dagger2` passes;
+    - `rough_b4`'s target metric does not improve by more than twice its standard error.
+  - *The deployed estimator is now kinematic,* so the comparison that decides is under it. It
+    is queued with the incumbents' re-baseline.
+- **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
+
 There is no new blind test: Isaac Lab publishes no other G1 skill. The report says what each test is:
 
 - flat is semi-blind;

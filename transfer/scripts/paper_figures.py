@@ -8,7 +8,8 @@ and PNG. A figure whose results do not exist yet is skipped, as a table row is.
 * ``decomposition``: the deviation split into the generator's, the tracker's and the
   estimate's parts (``paper_decomposition.py``).
 * ``seeds``: the log-space loads against linear, three seeds each, probes passed.
-* ``baselines``: falls and speed of the zero-shot model against B1, B2 and B3, per skill.
+* ``baselines``: falls, speed and the gait's largest deviation of the zero-shot model
+  against B1, B2 and B3, per skill.
 
 Usage::
 
@@ -26,6 +27,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+from matplotlib.legend_handler import HandlerTuple  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paper_tables import (  # noqa: E402
@@ -33,9 +35,7 @@ from paper_tables import (  # noqa: E402
     GENERATOR,
     MODEL,
     PAPER,
-    RETARGET,
-    l4,
-    l4_files,
+    nao_methods,
     read,
 )
 
@@ -46,6 +46,7 @@ SERIES = ("#2a78d6", "#eb6834", "#1baf7a")
 NEUTRAL = "#8a8985"
 INK, INK_2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 HATCH = ("", "//", "..")
+MARKERS = ("o", "s", "^")
 FEATURES = {
     "stride_length": "stride\nlength",
     "stride_period": "stride\nperiod",
@@ -188,40 +189,45 @@ def seeds() -> None:
 
 
 def baselines() -> None:
-    columns = {"zero-shot": {}, "B1, task tracker": {}, "B2, oracle": {}}
-    columns.update({f"B3, {m}": {} for m in RETARGET})
-    for skill, generator in GENERATOR.items():
-        columns["zero-shot"][skill] = l4("nao", MODEL["nao"], generator)
-        columns["B1, task tracker"][skill] = l4("nao", f"nao_task_{skill}_sym", generator)
-        columns["B2, oracle"][skill] = l4_files(f"oracle_nao_{skill}_l4_{{}}.json", "oracle")
-        for m in RETARGET:
-            columns[f"B3, {m}"][skill] = l4_files(
-                f"retarget_nao_{skill}_{m}_l4_{{}}.json", "imitate"
-            )
-    present = {k: v for k, v in columns.items() if any(r is not None for r in v.values())}
-    if len(present) < 2:
+    by_skill = {skill: nao_methods(skill) for skill in GENERATOR}
+    names = [n for n in by_skill["flat"] if any(by_skill[s][n] is not None for s in GENERATOR)]
+    if len(names) < 2:
         return
-    figure, (falls, speed) = plt.subplots(1, 2, figsize=(7.2, 2.4))
-    names = list(present)
+    figure, (falls, speed, gait) = plt.subplots(1, 3, figsize=(7.2, 2.4))
+    handles = []
     for k, skill in enumerate(GENERATOR):
-        rate = [
-            (r["falls"] / r["episodes"]) if (r := present[n][skill]) is not None else np.nan
-            for n in names
-        ]
-        ratio = [
-            np.mean(r["speed_ratio"]) if (r := present[n][skill]) is not None else np.nan
-            for n in names
+        results = [by_skill[skill][n] for n in names]
+        rate = [np.nan if r is None else r["falls"] / r["episodes"] for r in results]
+        ratio = [np.nan if r is None else np.mean(r["speed_ratio"]) for r in results]
+        # Gate C's reading: each command's largest feature deviation, then their mean.
+        worst = [
+            np.nan if r is None else np.mean(np.max(list(r["deviation"].values()), axis=0))
+            for r in results
         ]
         x = np.arange(len(names)) + (k - 0.5) * 0.38
         for ax, values in ((falls, rate), (speed, ratio)):
-            ax.bar(x, values, 0.35, color=SERIES[k], hatch=HATCH[k], edgecolor="white",
-                   linewidth=0.6, label=skill)  # fmt: skip
+            bar = ax.bar(x, values, 0.35, color=SERIES[k], hatch=HATCH[k], edgecolor="white",
+                         linewidth=0.6)  # fmt: skip
+        # A log axis has no baseline for a bar to start from: markers, shaped per skill.
+        (dot,) = gait.plot(x, worst, MARKERS[k], color=SERIES[k], markersize=6,
+                           markeredgecolor="white", linestyle="none")  # fmt: skip
+        handles.append((bar, dot))
     falls.set_ylabel("falls / episode (NAO, L4)")
+    falls.set_ylim(bottom=0, top=max(0.05, falls.get_ylim()[1]))
     speed.set_ylabel("speed / teacher's")
     speed.axhline(0.9, color=INK_2, linewidth=0.8, linestyle="--")
-    for ax in (falls, speed):
+    gait.set_ylabel("largest gait |deviation| / teacher")
+    gait.set_yscale("log")
+    gait.axhline(TOLERANCE, color=INK_2, linewidth=0.8, linestyle="--")
+    gait.set_xlim(-0.6, len(names) - 0.4)
+    for ax in (falls, speed, gait):
         ax.set_xticks(np.arange(len(names)), names, rotation=35, ha="right")
-    speed.legend(title="skill", fontsize=7)
+    figure.legend(
+        handles, list(GENERATOR), title="skill", loc="lower center", ncol=len(handles),
+        fontsize=7, title_fontsize=7, bbox_to_anchor=(0.5, 1.0),
+        handler_map={tuple: HandlerTuple(ndivide=None)},
+    )  # fmt: skip
+    figure.subplots_adjust(wspace=0.45)
     save(figure, "baselines")
 
 

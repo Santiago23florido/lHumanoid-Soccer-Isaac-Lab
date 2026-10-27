@@ -52,6 +52,11 @@ FAMILY = [("walk plans only -> 70 % procedural family", "nao", "nao2", "r1_3498_
 """Competence-map ablations: (change, body, tag before, tag after)."""
 RETARGET = ("copy", "offset", "range")
 """The joint-target baseline's value maps (``transfer/retarget.py``)."""
+GAIT = {
+    "stride_length": "Stride length", "stride_period": "Stride period",
+    "duty_factor_0": "Duty, left", "duty_factor_1": "Duty, right",
+}  # fmt: skip
+"""Gate C's signature features, as ``evaluate_contract.py``'s verdicts name them."""
 DECODERS = [
     ("v1, distilled control", "warm_plain"),
     ("v2, physics prior", "warm_v2t_r8"),
@@ -80,8 +85,12 @@ def l4(body: str, tag: str, generator: str, kinematic: bool = True) -> dict | No
 
 
 def l4_files(pattern: str, name: str) -> dict | None:
-    """Run ``name`` of the L4 reports ``pattern.format(command)``, summed over the commands."""
+    """Run ``name`` of the L4 reports ``pattern.format(command)``, summed over the commands.
+
+    ``deviation`` keeps each gate C feature's |relative deviation| per command.
+    """
     total = {"falls": 0, "episodes": 0, "passes": 0, "speed_ratio": []}
+    total["deviation"] = {f: [] for f in GAIT}
     for command in COMMANDS:
         report = read(pattern.format(command))
         if report is None:
@@ -91,7 +100,22 @@ def l4_files(pattern: str, name: str) -> dict | None:
         total["episodes"] += run["episodes"]
         total["passes"] += bool(run["verdict"]["passes"])
         total["speed_ratio"].append(run["verdict"]["speed_ratio"])
+        for f in GAIT:
+            total["deviation"][f].append(abs(run["verdict"]["signature_deviation"][f]))
     return total
+
+
+def nao_methods(skill: str) -> dict[str, dict | None]:
+    """The NAO's L4 on ``skill`` by each method: zero-shot, B1, B2 and B3's value maps."""
+    generator = GENERATOR[skill]
+    methods = {
+        "zero-shot": l4("nao", MODEL["nao"], generator),
+        "B1, task tracker": l4("nao", f"nao_task_{skill}_sym", generator),
+        "B2, oracle": l4_files(f"oracle_nao_{skill}_l4_{{}}.json", "oracle"),
+    }
+    for m in RETARGET:
+        methods[f"B3, {m}"] = l4_files(f"retarget_nao_{skill}_{m}_l4_{{}}.json", "imitate")
+    return methods
 
 
 def walk(body: str, tag: str) -> dict | None:
@@ -133,7 +157,8 @@ def section(title: str, note: str, header: list[str], rows: list[list[str]]) -> 
 
 
 def build() -> tuple[str, dict]:
-    sections, data = [], {"M": {}, "S": {}, "B1": {}, "B2": {}, "B3": {}, "T": {}, "A": {}, "D": {}}
+    sections = []
+    data = {key: {} for key in ("M", "S", "B1", "B2", "B3", "gait", "T", "A", "D")}
 
     rows = []
     for body, tag in MODEL.items():
@@ -229,6 +254,26 @@ def build() -> tuple[str, dict]:
                 "(`transfer/retarget.py`). At test time each imitates the teacher's own play "
                 "capture at the command. Source: `paper_baselines.sh` stage `b3`.",
                 ["Body", "Skill", "Zero-shot (adopted)", *(f"Retarget, {m}" for m in RETARGET)],
+                rows,
+            )
+        )
+
+    rows = []
+    for skill in GENERATOR:
+        for method, r in nao_methods(skill).items():
+            if r is None:
+                continue
+            data["gait"][f"nao/{skill}/{method}"] = r["deviation"]
+            means = [sum(r["deviation"][f]) / len(COMMANDS) for f in GAIT]
+            rows.append(["NAO", skill, method, *(f"{v:.2f}" for v in means)])
+    if any(row[2] != "zero-shot" for row in rows):
+        sections.append(
+            section(
+                "B — the NAO's gait against the teacher's, by method",
+                "Mean over the three L4 commands of each gate C feature's |relative deviation| "
+                "(the gate allows 0.10). A method that fails gate C fails it here or on speed and "
+                "falls, in the tables above.",
+                ["Body", "Skill", "Method", *GAIT.values()],
                 rows,
             )
         )

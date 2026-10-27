@@ -29,9 +29,9 @@ on the G1, however many bodies run it: **N + M trainings, not N × M**.
 | Id | What | Question it answers | Status |
 | --- | --- | --- | --- |
 | M | The adopted model (`transfer/results/incumbents.json`) on both bodies, both skills | The headline | done |
-| S | Seeds of each body's final training stage, with L4 | How much the headline varies with training | queued |
-| B1 | A tracker trained on the skill's own plans (N × M), each body | What zero-shot costs, in the same architecture | queued |
-| B2 | Oracle: the NAO trained on each skill's own task, Isaac Lab's G1 recipe in the NAO's units | What the NAO can do when it sees the task | implemented (`nao/tasks/nao_velocity`), queued after S and B1 |
+| S | Seeds of each body's final training stage, with L4 | How much the headline varies with training | done |
+| B1 | A tracker trained on the skill's own plans (N × M), each body | What zero-shot costs, in the same architecture | done |
+| B2 | Oracle: the NAO trained on each skill's own task, Isaac Lab's G1 recipe in the NAO's units | What the NAO can do when it sees the task | implemented (`nao/tasks/nao_velocity`), running |
 | B3 | Joint retargeting: the NAO imitating the G1's joint trajectories on its own clock, three value maps | The classic baseline (the joint-target signal) | implemented (`nao/tasks/nao_imitate`), queued after B2 |
 | T | Decomposition of the transfer error into generator, tracker and estimator | The theory section's measured terms | done (`paper_decomposition.py`) |
 | A | Ablations: estimator, sole height, generator, log-space loads, symmetrization, procedural family | What each piece contributes | done from existing runs |
@@ -90,7 +90,9 @@ Source: `paper_queue.sh` stages `b1_nao`, `b1_g1`.
 | Body | Skill | Zero-shot (adopted) | Task-specific tracker |
 | --- | --- | --- | --- |
 | G1 | rough | 0/192, passes 0/3, speed 1.00–1.05 | 0/192, passes 3/3, speed 1.01–1.05 |
+| G1 | flat | 0/192, passes 3/3, speed 1.06–1.14 | 0/192, passes 3/3, speed 1.06–1.13 |
 | NAO | rough | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.00–1.04 |
+| NAO | flat | 0/192, passes 0/3, speed 1.04–1.12 | 0/192, passes 0/3, speed 1.04–1.13 |
 
 ### T — the gait's deviation from the teacher, decomposed
 

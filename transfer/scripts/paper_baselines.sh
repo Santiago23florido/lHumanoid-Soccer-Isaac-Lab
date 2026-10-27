@@ -13,6 +13,10 @@
 #           (transfer/results/retarget_nao_<skill>_<map>_l4_<command>.json)
 #
 #   bash transfer/scripts/paper_baselines.sh [stages]     (default: "check b2 b3")
+#
+# SEED (default 42) repeats b2 with another seed: its runs, rollouts and results carry
+# "_s<seed>" after the skill (oracle_rough_s43, oracle_nao_rough_s43_l4_<command>.json).
+# ORACLE_SKILLS (default "flat rough") limits b2 to some skills.
 set -uo pipefail
 python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -22,7 +26,10 @@ note() { echo "$1 $(date +%H:%M)" | tee -a "$status"; }
 stages="${1:-check b2 b3}"
 want() { [[ " $stages " == *" $1 "* ]]; }
 results=transfer/results
-seed=42
+seed="${SEED:-42}"
+tag=""
+[ "$seed" = 42 ] || tag="_s$seed"
+if [ -n "$tag" ] && want b3; then note "SEED repeats b2 only; run b3 without it"; exit 1; fi
 
 assets_online() {
   local server=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1 url
@@ -76,11 +83,11 @@ if want check && [ ! -f "$results/capture_velocity_check_g1.json" ]; then
 fi
 
 if want b2; then
-  for skill in flat rough; do
-    [ -f "$results/oracle_nao_${skill}_l4_turning.json" ] && { note "oracle $skill: already done"; continue; }
+  for skill in ${ORACLE_SKILLS:-flat rough}; do
+    [ -f "$results/oracle_nao_${skill}${tag}_l4_turning.json" ] && { note "oracle $skill$tag: already done"; continue; }
     if [ "$skill" = flat ]; then task=NaoVelocityFlat-v0 play=NaoVelocityFlat-Play-v0; else
       task=NaoVelocityRough-v0 play=NaoVelocityRoughOnFlat-Play-v0; fi
-    name="oracle_${skill}"
+    name="oracle_${skill}${tag}"
     if ! ls -d logs/rsl_rl/nao_velocity_${skill}/*_"$name" > /dev/null 2>&1; then
       "$python" -u scripts/train.py --task "$task" --headless --num_envs 4096 --seed "$seed" \
         --run_name "$name" > "logs/contract/train_${name}.log" 2>&1 \
@@ -100,7 +107,7 @@ if want b2; then
       "$python" transfer/scripts/evaluate_contract.py \
         --run "teacher=g1/rollouts/${skill}_play_${command}.npz" \
         --run "oracle=nao/rollouts/${name}_${command}.npz" \
-        --output "$results/oracle_nao_${skill}_l4_${command}.json" | grep -v "^  "
+        --output "$results/oracle_nao_${skill}${tag}_l4_${command}.json" | grep -v "^  "
     done < <(commands "$skill")
     note "evaluated $name"
   done

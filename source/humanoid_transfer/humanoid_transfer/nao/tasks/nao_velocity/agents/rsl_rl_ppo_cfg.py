@@ -17,7 +17,7 @@ elbow yaw, whose gain is the lowest) every joint's target is out of its range by
 than its torque limit over its gain, from any position, so the torque is saturated.
 Unclipped, the actions are unbounded and the last one is observed: rough seed 43's ran
 away to ~1e11 from iteration ~1450, and the action-rate penalty they earned drove the
-value loss to infinity (``logs/contract/train_oracle_rough_s43.log``). The trained
+value loss to infinity (``logs/contract/train_oracle_rough_s43_crashed.log``). The trained
 oracles' L4 actions stay below 22 (``nao/rollouts/oracle_*.npz``)."""
 
 

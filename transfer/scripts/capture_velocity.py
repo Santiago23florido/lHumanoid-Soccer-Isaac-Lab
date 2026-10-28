@@ -92,10 +92,24 @@ def body_record(body: str) -> tuple[str, list[str], list[list[float]], float]:
     return "base_link", list(nk.FOOT_BODIES), sole_points(), NAO.leg_length
 
 
+def trained_clip(task_id: str) -> float | None:
+    """The action clip the task's rsl-rl runner trained under, or None: the policy is
+    driven as Isaac Lab's ``RslRlVecEnvWrapper`` drove it."""
+    from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry
+
+    try:
+        runner = load_cfg_from_registry(task_id, "rsl_rl_cfg_entry_point")
+    except ValueError:
+        return None
+    return getattr(runner, "clip_actions", None)
+
+
 def main() -> int:
     from isaaclab_tasks.utils import parse_env_cfg
 
     cfg = parse_env_cfg(args_cli.task_id, num_envs=args_cli.num_envs)
+    clip = trained_clip(args_cli.task_id)
+    print(f"{args_cli.task_id}: actions clipped as in training, to {clip}")
     cfg.seed = args_cli.seed
     command_cfg = getattr(cfg.commands, COMMAND)
     if args_cli.reference is not None:
@@ -148,10 +162,14 @@ def main() -> int:
         )
         return z.cpu().numpy()
 
+    def act(obs) -> torch.Tensor:
+        action = driver(obs["policy"])
+        return action if clip is None else action.clamp(-clip, clip)
+
     obs, _ = env.reset()
     for _ in range(args_cli.settle_steps):
         with torch.inference_mode():
-            obs, _, _, _, _ = env.step(driver(obs["policy"]))
+            obs, _, _, _, _ = env.step(act(obs))
 
     keys = (
         "skill_state", "command", "action_executed", "base_lin_vel", "base_ang_vel",
@@ -167,7 +185,7 @@ def main() -> int:
         record["base_quat"].append(robot.data.root_quat_w.cpu().numpy())
         record["base_pos"].append((robot.data.root_pos_w - origins).cpu().numpy())
         with torch.inference_mode():
-            action = driver(obs["policy"])
+            action = act(obs)
         record["action_executed"].append(action.cpu().numpy())
         obs, _, terminated, truncated, _ = env.step(action)
         record["done"].append((terminated | truncated).cpu().numpy())

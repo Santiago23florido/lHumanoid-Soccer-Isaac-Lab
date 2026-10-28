@@ -142,3 +142,30 @@ def test_the_velocity_tasks_guard_every_reward_and_reset_a_diverged_simulation()
         r"term\.func = finite\(term\.func\)",
         rough,
     )
+
+
+def test_the_action_bound_is_past_where_every_joint_is_saturated() -> None:
+    import ast
+    import xml.etree.ElementTree as ET
+
+    agents = (TASK / "nao_velocity" / "agents" / "rsl_rl_ppo_cfg.py").read_text(encoding="utf-8")
+    bound = float(re.search(r"^ACTION_BOUND = ([\d.]+)", agents, re.M).group(1))
+    assert "clip_actions = ACTION_BOUND" in agents
+    nao = (TASK.parent / "assets" / "nao.py").read_text(encoding="utf-8")
+    stiffness = re.search(r"NAO_STIFFNESS: dict\[str, float\] = (\{.*?\n\})", nao, re.S).group(1)
+    gains = ast.literal_eval(stiffness)
+    scale = float(re.search(r"JointPositionActionCfg\(.*?scale=([\d.]+),", SOURCE, re.S).group(1))
+    # Past this action the target is out of the joint's range, from any position in it, by
+    # more than its torque limit over its gain: the torque no longer changes.
+    saturated = {}
+    # The robot's own joints: a transmission also names its joint, without limits.
+    for joint in ET.parse(nk.NAO_URDF_PATH).getroot().findall("joint"):
+        name = joint.get("name")
+        if name in nk.ACTUATED_JOINTS:
+            limit = joint.find("limit")
+            span = float(limit.get("upper")) - float(limit.get("lower"))
+            saturated[name] = (span + float(limit.get("effort")) / gains[name]) / scale
+    assert set(saturated) == set(nk.ACTUATED_JOINTS)
+    assert max(saturated, key=saturated.get).endswith("ElbowYaw")
+    assert 47.0 < max(saturated.values()) < 49.0
+    assert bound >= 2 * max(saturated.values())

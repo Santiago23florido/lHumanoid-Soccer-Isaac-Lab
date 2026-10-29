@@ -53,6 +53,8 @@ FAMILY = [("walk plans only -> 70 % procedural family", "nao", "nao2", "r1_3498_
 """Competence-map ablations: (change, body, tag before, tag after)."""
 RETARGET = ("copy", "offset", "range")
 """The joint-target baseline's value maps (``transfer/retarget.py``)."""
+ORACLE_SEEDS = ("42", "43")
+"""The oracle's training seeds; 42's files carry no seed (``paper_baselines.sh``'s ``SEED``)."""
 GAIT = {
     "stride_length": "Stride length", "stride_period": "Stride period",
     "duty_factor_0": "Duty, left", "duty_factor_1": "Duty, right",
@@ -117,14 +119,21 @@ def l4_files(pattern: str, name: str) -> dict | None:
     return total
 
 
+def oracle(skill: str, seed: str) -> dict | None:
+    """B2's L4 on ``skill``, trained with ``seed``."""
+    tag = "" if seed == ORACLE_SEEDS[0] else f"_s{seed}"
+    return l4_files(f"oracle_nao_{skill}{tag}_l4_{{}}.json", "oracle")
+
+
 def nao_methods(skill: str) -> dict[str, dict | None]:
-    """The NAO's L4 on ``skill`` by each method: zero-shot, B1, B2 and B3's value maps."""
+    """The NAO's L4 on ``skill`` by each method: zero-shot, B1, B2's seeds and B3's maps."""
     generator = GENERATOR[skill]
     methods = {
         "zero-shot": l4("nao", MODEL["nao"], generator),
         "B1, task tracker": l4("nao", f"nao_task_{skill}_sym", generator),
-        "B2, oracle": l4_files(f"oracle_nao_{skill}_l4_{{}}.json", "oracle"),
     }
+    for seed in ORACLE_SEEDS:
+        methods[f"B2, oracle, seed {seed}"] = oracle(skill, seed)
     for m in RETARGET:
         methods[f"B3, {m}"] = l4_files(f"retarget_nao_{skill}_{m}_l4_{{}}.json", "imitate")
     return methods
@@ -230,12 +239,12 @@ def build() -> tuple[str, dict]:
 
     rows = []
     for skill, generator in GENERATOR.items():
-        oracle = l4_files(f"oracle_nao_{skill}_l4_{{}}.json", "oracle")
-        if oracle is None:
+        seeds = {s: oracle(skill, s) for s in ORACLE_SEEDS}
+        if all(r is None for r in seeds.values()):
             continue
         zero = l4("nao", MODEL["nao"], generator)
-        data["B2"][f"nao/{skill}"] = {"zero_shot": zero, "oracle": oracle}
-        rows.append(["NAO", skill, cell_l4(zero), cell_l4(oracle)])
+        data["B2"][f"nao/{skill}"] = {"zero_shot": zero} | {f"oracle_seed_{s}": r for s, r in seeds.items()}  # fmt: skip  # noqa: E501
+        rows.append(["NAO", skill, cell_l4(zero), *(cell_l4(r) for r in seeds.values())])
     if rows:
         sections.append(
             section(
@@ -243,8 +252,14 @@ def build() -> tuple[str, dict]:
                 "The oracle is Isaac Lab's G1 recipe in the NAO's units "
                 "(`nao/tasks/nao_velocity`), scored against the G1's teacher like the zero-shot "
                 "tracker. Its gait is its own: it was rewarded for the task, not the G1's gait. "
-                "Source: `paper_baselines.sh` stage `b2`.",
-                ["Body", "Skill", "Zero-shot (adopted)", "Oracle"],
+                "One column per training seed. Source: `paper_baselines.sh` stage `b2`, "
+                "`SEED=43 ORACLE_SKILLS=rough` for the second.",
+                [
+                    "Body",
+                    "Skill",
+                    "Zero-shot (adopted)",
+                    *(f"Oracle, seed {s}" for s in ORACLE_SEEDS),
+                ],
                 rows,
             )
         )

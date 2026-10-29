@@ -14,9 +14,13 @@
 #
 #   bash transfer/scripts/paper_baselines.sh [stages]     (default: "check b2 b3")
 #
-# SEED (default 42) repeats b2 with another seed: its runs, rollouts and results carry
-# "_s<seed>" after the skill (oracle_rough_s43, oracle_nao_rough_s43_l4_<command>.json).
-# ORACLE_SKILLS (default "flat rough") limits b2 to some skills.
+# SEED (default 42) repeats a stage with another seed: its runs, rollouts and results carry
+# "_s<seed>" (oracle_rough_s43, oracle_nao_rough_s43_l4_<command>.json;
+# retarget_nao_flat_copy_s43_l4_<command>.json). ORACLE_SKILLS (default "flat rough") limits
+# b2 to some skills, RETARGET_MAPS (default "copy offset range") b3 to some maps.
+# ORACLE_VARIANT=bounded trains b2 on NaoVelocity*Bounded* instead, the recipe with its
+# air-time term bounded; its names carry "_bounded" after the skill
+# (oracle_nao_rough_bounded_s43_l4_<command>.json).
 set -uo pipefail
 python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -29,7 +33,12 @@ results=transfer/results
 seed="${SEED:-42}"
 tag=""
 [ "$seed" = 42 ] || tag="_s$seed"
-if [ -n "$tag" ] && want b3; then note "SEED repeats b2 only; run b3 without it"; exit 1; fi
+variant="${ORACLE_VARIANT:-}"
+case "$variant" in
+  "") v="" V="" ;;
+  bounded) v="_bounded" V="Bounded" ;;
+  *) note "ORACLE_VARIANT $variant is not one of: bounded"; exit 1 ;;
+esac
 
 assets_online() {
   local server=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1 url
@@ -84,10 +93,10 @@ fi
 
 if want b2; then
   for skill in ${ORACLE_SKILLS:-flat rough}; do
-    [ -f "$results/oracle_nao_${skill}${tag}_l4_turning.json" ] && { note "oracle $skill$tag: already done"; continue; }
-    if [ "$skill" = flat ]; then task=NaoVelocityFlat-v0 play=NaoVelocityFlat-Play-v0; else
-      task=NaoVelocityRough-v0 play=NaoVelocityRoughOnFlat-Play-v0; fi
-    name="oracle_${skill}${tag}"
+    [ -f "$results/oracle_nao_${skill}${v}${tag}_l4_turning.json" ] && { note "oracle $skill$v$tag: already done"; continue; }
+    if [ "$skill" = flat ]; then task=NaoVelocityFlat${V}-v0 play=NaoVelocityFlat${V}-Play-v0; else
+      task=NaoVelocityRough${V}-v0 play=NaoVelocityRough${V}OnFlat-Play-v0; fi
+    name="oracle_${skill}${v}${tag}"
     if ! ls -d logs/rsl_rl/nao_velocity_${skill}/*_"$name" > /dev/null 2>&1; then
       "$python" -u scripts/train.py --task "$task" --headless --num_envs 4096 --seed "$seed" \
         --run_name "$name" > "logs/contract/train_${name}.log" 2>&1 \
@@ -107,7 +116,7 @@ if want b2; then
       "$python" transfer/scripts/evaluate_contract.py \
         --run "teacher=g1/rollouts/${skill}_play_${command}.npz" \
         --run "oracle=nao/rollouts/${name}_${command}.npz" \
-        --output "$results/oracle_nao_${skill}${tag}_l4_${command}.json" | grep -v "^  "
+        --output "$results/oracle_nao_${skill}${v}${tag}_l4_${command}.json" | grep -v "^  "
     done < <(commands "$skill")
     note "evaluated $name"
   done
@@ -115,12 +124,12 @@ fi
 
 if want b3; then
   for skill in flat rough; do
-    for map in copy offset range; do
-      [ -f "$results/retarget_nao_${skill}_${map}_l4_turning.json" ] && { note "retarget $skill $map: already done"; continue; }
+    for map in ${RETARGET_MAPS:-copy offset range}; do
+      [ -f "$results/retarget_nao_${skill}_${map}${tag}_l4_turning.json" ] && { note "retarget $skill $map$tag: already done"; continue; }
       reference="nao/rollouts/retarget_${skill}_dart_${map}.npz"
       [ -f "$reference" ] || "$python" transfer/scripts/retarget_reference.py \
         --source "g1/rollouts/${skill}_dart.npz" --mode "$map" --output "$reference"
-      name="imitate_${skill}_${map}"
+      name="imitate_${skill}_${map}${tag}"
       if ! ls -d logs/rsl_rl/nao_imitate/*_"$name" > /dev/null 2>&1; then
         HUMANOID_REFERENCE="$root/$reference" "$python" -u scripts/train.py --task NaoImitate-v0 \
           --headless --num_envs 4096 --seed "$seed" --run_name "$name" \
@@ -140,7 +149,7 @@ if want b3; then
         "$python" transfer/scripts/evaluate_contract.py \
           --run "teacher=g1/rollouts/${skill}_play_${command}.npz" \
           --run "imitate=nao/rollouts/${name}_${command}.npz" \
-          --output "$results/retarget_nao_${skill}_${map}_l4_${command}.json" | grep -v "^  "
+          --output "$results/retarget_nao_${skill}_${map}${tag}_l4_${command}.json" | grep -v "^  "
       done < <(commands "$skill")
       note "evaluated $name"
     done

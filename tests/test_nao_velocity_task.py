@@ -35,6 +35,10 @@ def test_the_oracle_tasks_are_registered() -> None:
         nao_velocity.FLAT_PLAY_TASK_ID,
         nao_velocity.ROUGH_TASK_ID,
         nao_velocity.ROUGH_PLAY_TASK_ID,
+        nao_velocity.BOUNDED_FLAT_TASK_ID,
+        nao_velocity.BOUNDED_FLAT_PLAY_TASK_ID,
+        nao_velocity.BOUNDED_ROUGH_TASK_ID,
+        nao_velocity.BOUNDED_ROUGH_PLAY_TASK_ID,
     ):
         assert task_id in gym.envs.registry
 
@@ -169,3 +173,75 @@ def test_the_action_bound_is_past_where_every_joint_is_saturated() -> None:
     assert max(saturated, key=saturated.get).endswith("ElbowYaw")
     assert 47.0 < max(saturated.values()) < 49.0
     assert bound >= 2 * max(saturated.values())
+
+
+def _air_time_scene(contact: list[list[float]], air: list[list[float]], speed: list[float]):
+    """A stand-in scene for the air-time term: each foot's time in contact and in the air."""
+    from types import SimpleNamespace
+
+    import torch
+
+    data = SimpleNamespace(current_contact_time=torch.tensor(contact), current_air_time=torch.tensor(air))  # fmt: skip  # noqa: E501
+    command = torch.tensor([[v, 0.0, 0.0] for v in speed])
+    return SimpleNamespace(
+        scene=SimpleNamespace(sensors={"feet": SimpleNamespace(data=data)}),
+        command_manager=SimpleNamespace(get_command=lambda name: command),
+    )
+
+
+def test_the_bounded_air_time_pays_no_phase_held_past_its_threshold() -> None:
+    from types import SimpleNamespace
+
+    from humanoid_transfer.nao.tasks.nao_velocity.rewards import feet_air_time_biped
+
+    feet = SimpleNamespace(name="feet", body_ids=[0, 1])
+    # A walking step, a leg held up, the free foot tapping while the other stands, both
+    # feet down, and a walking step at a standing command.
+    env = _air_time_scene(
+        contact=[[0.15, 0.0], [3.0, 0.0], [3.0, 0.0], [0.4, 0.4], [0.15, 0.0]],
+        air=[[0.0, 0.10], [0.0, 3.0], [0.0, 0.10], [0.0, 0.0], [0.0, 0.10]],
+        speed=[0.3, 0.3, 0.3, 0.3, 0.01],
+    )
+    args = {"command_name": "base_velocity", "threshold": 0.25, "moving": 0.06, "sensor_cfg": feet}
+    original = feet_air_time_biped(env, **args)
+    bounded = feet_air_time_biped(env, **args, bounded=True)
+    assert original.tolist() == __import__("pytest").approx([0.10, 0.25, 0.10, 0.0, 0.0])
+    assert bounded.tolist() == __import__("pytest").approx([0.10, 0.0, 0.0, 0.0, 0.0])
+
+
+def test_the_bounded_air_time_is_the_original_on_a_gait_of_shorter_phases() -> None:
+    from types import SimpleNamespace
+
+    import torch
+    from humanoid_transfer.nao.tasks.nao_velocity.rewards import feet_air_time_biped
+
+    generator = torch.Generator().manual_seed(0)
+    phase = torch.rand(1000, 2, generator=generator) * 0.25
+    down = torch.rand(1000, 2, generator=generator) < 0.5
+    env = _air_time_scene(
+        contact=torch.where(down, phase, 0.0).tolist(),
+        air=torch.where(down, 0.0, phase).tolist(),
+        speed=[0.3] * 1000,
+    )
+    feet = SimpleNamespace(name="feet", body_ids=[0, 1])
+    args = {"command_name": "base_velocity", "threshold": 0.25, "moving": 0.06, "sensor_cfg": feet}
+    original = feet_air_time_biped(env, **args)
+    assert (original > 0).sum() > 300
+    assert torch.equal(feet_air_time_biped(env, **args, bounded=True), original)
+
+
+def test_the_bounded_tasks_change_the_air_time_term_and_nothing_else() -> None:
+    body = re.search(r"def _bounded\(cfg\) -> None:\n(.*?)\n\n", SOURCE, re.S).group(1)
+    statements = [line.strip() for line in body.splitlines()[1:] if line.strip()]
+    assert statements == ['cfg.rewards.feet_air_time.params["bounded"] = True']
+    classes = re.findall(
+        r"class (NaoVelocity\w*Bounded\w*)\((\w+)\):\n    def __post_init__\(self\) -> None:\n"
+        r"        super\(\).__post_init__\(\)\n        _bounded\(self\)\n",
+        SOURCE,
+    )
+    assert {(c, p) for c, p in classes} == {
+        ("NaoVelocityRoughBoundedEnvCfg", "NaoVelocityRoughEnvCfg"),
+        ("NaoVelocityFlatBoundedEnvCfg", "NaoVelocityFlatEnvCfg"),
+        ("NaoVelocityFlatBoundedEnvCfg_PLAY", "NaoVelocityFlatEnvCfg_PLAY"),
+        ("NaoVelocityRoughBoundedOnFlatEnvCfg_PLAY", "NaoVelocityRoughOnFlatEnvCfg_PLAY"),
+    }

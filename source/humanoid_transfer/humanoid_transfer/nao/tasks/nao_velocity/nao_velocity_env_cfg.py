@@ -36,13 +36,16 @@ Tasks: ``NaoVelocityFlat-v0`` (Isaac-Velocity-Flat-G1-v0's recipe) and
 ``NaoVelocityRough-v0`` (Isaac-Velocity-Rough-G1-v0's, on its terrains, with the height
 scan). Their play variants are on the plane, as the published policies are evaluated:
 ``NaoVelocityRoughOnFlat-Play-v0`` keeps the scanner, which reads a constant there.
+
+``NaoVelocity{Flat,Rough}Bounded-v0`` (and their play variants) are the same recipe with
+one change, decided before its result: the air-time term bounded
+(:func:`.rewards.feet_air_time_biped`), which the recipe's oracle settled on exploiting.
 """
 
 from __future__ import annotations
 
 import copy
 
-import torch
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
@@ -67,6 +70,7 @@ from ....common.similarity import (
 from ....transfer.embodiment import G1, NAO
 from ...assets import nao_kinematics as nk
 from ...assets.nao import get_nao_stand_cfg
+from .rewards import feet_air_time_biped
 from .terminations import base_below, diverged, finite
 
 BASE_BODY = "base_link"
@@ -114,23 +118,6 @@ def scaled_terrains():
             elif isinstance(value, float):
                 setattr(sub, name, value * LENGTH_RATIO)
     return terrains
-
-
-def feet_air_time_biped(env, command_name: str, threshold: float, moving: float, sensor_cfg):
-    """Isaac Lab's ``feet_air_time_positive_biped`` with its standing threshold a parameter.
-
-    The original zeroes the reward below a command of 0.1 m/s, a constant of the G1's.
-    """
-    sensor = env.scene.sensors[sensor_cfg.name]
-    air = sensor.data.current_air_time[:, sensor_cfg.body_ids]
-    contact = sensor.data.current_contact_time[:, sensor_cfg.body_ids]
-    in_contact = contact > 0.0
-    in_mode = torch.where(in_contact, contact, air)
-    single = torch.sum(in_contact.int(), dim=1) == 1
-    reward = torch.min(torch.where(single.unsqueeze(-1), in_mode, 0.0), dim=1)[0]
-    reward = torch.clamp(reward, max=threshold)
-    command = env.command_manager.get_command(command_name)[:, :2]
-    return reward * (torch.norm(command, dim=1) > moving)
 
 
 @configclass
@@ -335,3 +322,36 @@ class NaoVelocityRoughOnFlatEnvCfg_PLAY(NaoVelocityRoughEnvCfg):
         self.scene.terrain.terrain_generator = None
         self.curriculum.terrain_levels = None
         _play(self)
+
+
+def _bounded(cfg) -> None:
+    """The recipe's one change: its air-time term pays no phase held past its threshold."""
+    cfg.rewards.feet_air_time.params["bounded"] = True
+
+
+@configclass
+class NaoVelocityRoughBoundedEnvCfg(NaoVelocityRoughEnvCfg):
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _bounded(self)
+
+
+@configclass
+class NaoVelocityFlatBoundedEnvCfg(NaoVelocityFlatEnvCfg):
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _bounded(self)
+
+
+@configclass
+class NaoVelocityFlatBoundedEnvCfg_PLAY(NaoVelocityFlatEnvCfg_PLAY):
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _bounded(self)
+
+
+@configclass
+class NaoVelocityRoughBoundedOnFlatEnvCfg_PLAY(NaoVelocityRoughOnFlatEnvCfg_PLAY):
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _bounded(self)

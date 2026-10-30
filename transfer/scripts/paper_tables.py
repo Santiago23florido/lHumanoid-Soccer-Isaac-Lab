@@ -139,8 +139,8 @@ def retarget_pattern(skill: str, value_map: str, seed: str = "42") -> str:
     return f"retarget_nao_{skill}_{value_map}{tag}_l4_{{}}.json"
 
 
-def oracle(skill: str, seed: str) -> dict | None:
-    return l4_files(oracle_pattern(skill, seed), "oracle")
+def oracle(skill: str, seed: str, variant: str = "") -> dict | None:
+    return l4_files(oracle_pattern(skill, seed, variant), "oracle")
 
 
 def nao_method_files(skill: str) -> dict[str, tuple[str, str]]:
@@ -270,12 +270,16 @@ def build() -> tuple[str, dict]:
 
     rows = []
     for skill, generator in GENERATOR.items():
-        seeds = {s: oracle(skill, s) for s in ORACLE_SEEDS}
-        if all(r is None for r in seeds.values()):
+        runs = {
+            f"{variant}_seed_{s}": oracle(skill, s, "" if variant == "oracle" else variant)
+            for variant in ("oracle", "bounded")
+            for s in ORACLE_SEEDS
+        }
+        if all(r is None for r in runs.values()):
             continue
         zero = l4("nao", MODEL["nao"], generator)
-        data["B2"][f"nao/{skill}"] = {"zero_shot": zero} | {f"oracle_seed_{s}": r for s, r in seeds.items()}  # fmt: skip  # noqa: E501
-        rows.append(["NAO", skill, cell_l4(zero), *(cell_l4(r) for r in seeds.values())])
+        data["B2"][f"nao/{skill}"] = {"zero_shot": zero} | runs
+        rows.append(["NAO", skill, cell_l4(zero), *(cell_l4(r) for r in runs.values())])
     if rows:
         sections.append(
             section(
@@ -283,13 +287,15 @@ def build() -> tuple[str, dict]:
                 "The oracle is Isaac Lab's G1 recipe in the NAO's units "
                 "(`nao/tasks/nao_velocity`), scored against the G1's teacher like the zero-shot "
                 "tracker. Its gait is its own: it was rewarded for the task, not the G1's gait. "
-                "One column per training seed. Source: `paper_baselines.sh` stage `b2`, "
-                "`SEED=43 ORACLE_SKILLS=rough` for the second.",
+                "B2b is the recipe with its air-time term bounded (`rewards.py`, `bounded`). "
+                "One column per training seed. Source: `paper_baselines.sh` stage `b2`, with "
+                "`SEED=<seed>` past the first and `ORACLE_VARIANT=bounded` for B2b.",
                 [
                     "Body",
                     "Skill",
                     "Zero-shot (adopted)",
                     *(f"Oracle, seed {s}" for s in ORACLE_SEEDS),
+                    *(f"B2b, seed {s}" for s in ORACLE_SEEDS),
                 ],
                 rows,
             )

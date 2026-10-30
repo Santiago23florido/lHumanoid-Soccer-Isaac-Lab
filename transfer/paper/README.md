@@ -33,7 +33,7 @@ on the G1, however many bodies run it: **N + M trainings, not N × M**.
 | B1 | A tracker trained on the skill's own plans (N × M), each body | What zero-shot costs, in the same architecture | done |
 | B2 | Oracle: the NAO trained on each skill's own task, Isaac Lab's G1 recipe in the NAO's units | What the NAO can do when it sees the task | done, rough with two seeds; rough under review: both seeds settle on standing on one leg, see B2's note |
 | B3 | Joint retargeting: the NAO imitating the G1's joint trajectories on its own clock, three value maps | The classic baseline (the joint-target signal) | done, three maps per skill; none passes gate C (B3's note) |
-| B2b | The oracle with one change: its air-time term pays no phase held past its threshold | Whether the oracle's failure is the recipe's air-time term on this body | pre-registered below; seed 42 done on both skills (B2b's note), seed 43 training |
+| B2b | The oracle with one change: its air-time term pays no phase held past its threshold | Whether the oracle's failure is the recipe's air-time term on this body | done, both skills, seeds 42 and 43 (B2b's note) |
 | B3s | B3's copy map with seeds 43 and 44, both skills | Whether copy's tie with the zero-shot model on rough holds across seeds | queued after B2b |
 | SE | Bootstrap standard errors over environments for every L4 comparison of the NAO's methods | Which differences between methods are larger than their sampling error | done for the runs so far (table SE): environments vary far less than seeds, so a comparison needs seeds; B3 copy's waits for B3s |
 | T | Decomposition of the transfer error into generator, tracker and estimator | The theory section's measured terms | done (`paper_decomposition.py`) |
@@ -56,6 +56,8 @@ Metrics are those of the ladder, `transfer/scripts/zero_shot_ladder.sh`:
   - *What the maps do.* Every map stands on both skills (0/192), and every one steps at the teacher's stride period, by construction: the reference is on the NAO's clock. None passes gate C. On flat, copy and offset reach 0.88–1.02 of the teacher's speed and miss on the split of stance and swing: their duty factors are 0.14–0.48 off, against the zero-shot model's 0.14 and 0.17 mean. On rough, copy is the zero-shot model's equal: speed 1.01–1.06, duty factors 0.12 and 0.14 off on the mean (zero-shot 0.15 and 0.03), and a mean largest deviation of 0.147 against 0.154, inside the spread of the zero-shot model's own seeds (table SE; copy's seeds are B3s); offset is slower (0.87–1.04) and further off (0.15, 0.24). Range walks at 0.38–0.42 of the teacher's speed on flat and 0.41–0.69 on rough. A fraction of range scales each joint's swing by the ratio of the two robots' spans, and for the hip pitch that ratio is 2.02/5.40 = 0.374 (the NAO's URDF; `g1/body/body_card.json`, `pos_limits`). The NAO executes the shorter stride it is given: 0.32–0.62 short, except at flat's turning command (0.08). That the pose term (0.65) outweighs the velocity terms (0.1 each) is the likely reason it follows the joints rather than the speed, not a measured one. Source: `retarget_nao_<skill>_<map>_l4_*.json`, run `imitate`, `verdict`; the largest deviation as `paper_figures.py` reads it.
 - **B2b, pre-registered on 2026-10-30, before any of its runs.** B2's oracle settled on long stances: on rough both seeds stand on one leg, and on flat its stride period is 5.6–11.2 `T` against the teacher's 1.0, its mean stance and flight both past the air-time threshold's 1.55 `T` (`oracle_nao_<skill>_l4_*.json`, run `oracle`, `signature`). Isaac Lab's `feet_air_time_positive_biped` pays a single stance held indefinitely its threshold at every step. `NaoVelocity{Flat,Rough}Bounded-v0` is the recipe with one change: the term pays a single stance only while neither foot has held its contact or flight longer than the threshold (`nao/tasks/nao_velocity/rewards.py`, `bounded`). On a gait whose every phase is shorter, as the teacher's are on average (its longest mean stance or flight is 0.62 `T`; duty factor times stride period in the same files, run `teacher`), it is the original term, step for step. The protocol is fixed now: both skills, seeds 42 and 43, the same iterations, scored as B2 is; the result is reported as it comes, with no further change to the recipe. It tests the hypothesis that the air-time term is why the oracle does not walk the teacher's way; it does not make the oracle walk the teacher's gait, which nothing in its reward asks for. Source: `ORACLE_VARIANT=bounded SEED=<seed> paper_baselines.sh b2`.
   - *What seed 42 did.* On flat the bounded oracle shortens its phases to the threshold, not to the teacher's: its stride period is 3.3–3.5 `T` (the original's 5.6–11.2, the teacher's 0.98–1.03) and its mean stance and flight 1.58–1.78 `T`, just past the 1.55 `T` where the term stops paying. It falls at no command, walks at 1.22–1.23 of the teacher's speed, and its duty factors are within 10 % at forward and turning (0.05–0.08 off; fast's left 0.12); its stride length and period are 2.2–3.1 off. On rough it steps on both feet at fast and turning, duty factors 0.51/0.56 and 0.59/0.48 against the teacher's 0.48/0.50 and 0.55/0.58 (the original's 0.72/0.34 and 0.89/0.20), at 0.88 and 0.54 of the teacher's speed, stride period 3.3 and 4.5 `T`. At forward it still stands mostly on its right foot: duty factors 0.13/0.90, stride period 12.1 `T`, speed 0.33, where the original took no stride at all. No falls on rough either. Its air-time reward ended training at 0.022, against the original seeds' 0.041 and 0.030 (`Episode_Reward/feet_air_time`, iteration 2999). Source: `oracle_nao_<skill>_bounded_l4_*.json`, run `oracle`, `signature` and `verdict`; phases are duty factor times stride period.
+  - *What seed 43 did.* On flat, the same: stride period 3.38–3.44 `T`, mean stance and flight 1.62–1.79 `T`, 1.15–1.18 of the teacher's speed, no falls, stride length and period 2.3–2.9 off, duty factors at most 0.11 off. On rough it walks on both feet at fast, duty factors 0.59/0.52, speed 0.86, stride period 3.4 `T`. At forward it stands still on both feet (duty factors 0.99/0.99, speed -0.03), where the original seed 43 stood on its right leg (0.03/1.00); at turning it shuffles in long double support (0.82/0.93, stride period 2.1 `T`, speed 0.23). No falls. Its air-time reward ended training at 0.014, the original seed 43's at 0.030. Source: `oracle_nao_<skill>_bounded_s43_l4_*.json`.
+  - *Both seeds, read against the hypothesis.* Bounding the term changes the oracle's rhythm on flat, the same way with both seeds, to the threshold's and not the teacher's. On rough, at fast, both seeds' duty factors are balanced (0.51/0.56, 0.59/0.52; the teacher's 0.48/0.50), where the original seeds' were lopsided (0.72/0.34, 0.38/0.69); at forward neither walks, one standing mostly on one foot and the other on both. On these two seeds the bound sets the length of the oracle's phases on flat and evens its stance at fast on rough; it does not make the rough oracle walk at forward.
 - **B3s.** B3's copy map, the one level with the zero-shot model on rough, trained again with seeds 43 and 44 on both skills, everything else as B3. Source: `SEED=<seed> RETARGET_MAPS=copy paper_baselines.sh b3`.
 - **T.** `paper_decomposition.py`: for each L4 command, the gait's signed deviation from the teacher split exactly into the generator's part (what the plans asked − teacher) and the tracker's (body − asked), and the estimate's effect (deployed path − true-state path).
   - *Reading the last term on flat.* It is large there (G1 0.19–0.36), and the deficit is the true-state path's, not the deployed one's. On the G1 the true-state path's stride period is 0.60–0.64 `T` against the teacher's 0.98–1.03, with 7–16 falls per command; the deployed path's is 0.95–1.01 `T`, with none. On the NAO the true-state path's is 0.77–0.81 `T`, with 1–6 falls. The plans are not what changes: on both paths they ask for 0.94–0.99 `T` on the G1 and 0.96–1.01 `T` on the NAO. It is the zero-shot tracker that, fed the true state, executes the shorter stride; B1's task-specific tracker, fed the same state, falls on neither body and executes 0.96–1.01 `T` on the G1 (`zero_shot_<body>_<tag>_flat_dagger2_auto_kin_l4_*.json`, runs `encoder` and `truth`, fields `asked` and `signature`).
@@ -108,8 +110,8 @@ The oracle is Isaac Lab's G1 recipe in the NAO's units (`nao/tasks/nao_velocity`
 
 | Body | Skill | Zero-shot (adopted) | Oracle, seed 42 | Oracle, seed 43 | B2b, seed 42 | B2b, seed 43 |
 | --- | --- | --- | --- | --- | --- | --- |
-| NAO | rough | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed -0.02–0.96 | 0/192, passes 0/3, speed -0.02–0.72 | 0/192, passes 0/3, speed 0.33–0.88 | — |
-| NAO | flat | 0/192, passes 0/3, speed 1.04–1.12 | 0/192, passes 0/3, speed 0.95–1.18 | — | 0/192, passes 0/3, speed 1.22–1.23 | — |
+| NAO | rough | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed -0.02–0.96 | 0/192, passes 0/3, speed -0.02–0.72 | 0/192, passes 0/3, speed 0.33–0.88 | 0/192, passes 0/3, speed -0.03–0.86 |
+| NAO | flat | 0/192, passes 0/3, speed 1.04–1.12 | 0/192, passes 0/3, speed 0.95–1.18 | — | 0/192, passes 0/3, speed 1.22–1.23 | 0/192, passes 0/3, speed 1.15–1.18 |
 
 ### B3 — zero-shot against joint retargeting: the NAO imitating the G1's joints
 
@@ -131,6 +133,7 @@ Mean over the three L4 commands of each gate C feature's |relative deviation| (t
 | NAO | rough | B2, oracle, seed 42 | no stride on forward | no stride on forward | 0.65 | 0.66 |
 | NAO | rough | B2, oracle, seed 43 | 1.12 | 2.84 | 0.60 | 0.50 |
 | NAO | rough | B2b, bounded, seed 42 | 1.88 | 5.34 | 0.30 | 0.26 |
+| NAO | rough | B2b, bounded, seed 43 | 0.82 | 2.25 | 0.51 | 0.42 |
 | NAO | rough | B3, copy | 0.02 | 0.02 | 0.12 | 0.14 |
 | NAO | rough | B3, offset | 0.10 | 0.00 | 0.15 | 0.24 |
 | NAO | rough | B3, range | 0.46 | 0.00 | 0.12 | 0.13 |
@@ -138,6 +141,7 @@ Mean over the three L4 commands of each gate C feature's |relative deviation| (t
 | NAO | flat | B1, task tracker | 0.19 | 0.13 | 0.67 | 0.47 |
 | NAO | flat | B2, oracle, seed 42 | 7.32 | 7.32 | 0.24 | 0.14 |
 | NAO | flat | B2b, bounded, seed 42 | 2.95 | 2.41 | 0.10 | 0.04 |
+| NAO | flat | B2b, bounded, seed 43 | 2.80 | 2.41 | 0.10 | 0.03 |
 | NAO | flat | B3, copy | 0.10 | 0.00 | 0.33 | 0.21 |
 | NAO | flat | B3, offset | 0.04 | 0.00 | 0.38 | 0.21 |
 | NAO | flat | B3, range | 0.43 | 0.00 | 0.21 | 0.07 |
@@ -150,17 +154,17 @@ Each command's largest gate C deviation, averaged over the three commands, as th
 | --- | --- | --- | --- | --- | --- |
 | NAO | rough | zero-shot, S's seeds | 3 | 0.149 ± 0.017 (seeds 0.115–0.169) | — |
 | NAO | rough | B2, oracle | 2 | 2.651 ± 0.319 (seeds 2.332–2.970) | +2.502 ± 0.319 |
-| NAO | rough | zero-shot, adopted | 1 | 0.154 ± 0.002 (environments) | one seed |
+| NAO | rough | B2b, bounded | 2 | 3.798 ± 1.545 (seeds 2.253–5.343) | +3.648 ± 1.545 |
+| NAO | rough | zero-shot, adopted | 1 | 0.154 ± 0.003 (environments) | one seed |
 | NAO | rough | B1, task tracker | 1 | 0.326 ± 0.002 (environments) | one seed |
-| NAO | rough | B2b, bounded, seed 42 | 1 | 5.343 ± 0.017 (environments) | one seed |
 | NAO | rough | B3, copy | 1 | 0.147 ± 0.002 (environments) | one seed |
 | NAO | rough | B3, offset | 1 | 0.238 ± 0.001 (environments) | one seed |
 | NAO | rough | B3, range | 1 | 0.464 ± 0.001 (environments) | one seed |
 | NAO | flat | zero-shot, S's seeds | 3 | 0.186 ± 0.014 (seeds 0.162–0.209) | — |
+| NAO | flat | B2b, bounded | 2 | 2.874 ± 0.078 (seeds 2.797–2.952) | +2.688 ± 0.079 |
 | NAO | flat | zero-shot, adopted | 1 | 0.174 ± 0.002 (environments) | one seed |
 | NAO | flat | B1, task tracker | 1 | 0.674 ± 0.003 (environments) | one seed |
 | NAO | flat | B2, oracle, seed 42 | 1 | 7.618 ± 0.003 (environments) | one seed |
-| NAO | flat | B2b, bounded, seed 42 | 1 | 2.952 ± 0.001 (environments) | one seed |
 | NAO | flat | B3, copy | 1 | 0.325 ± 0.001 (environments) | one seed |
 | NAO | flat | B3, offset | 1 | 0.376 ± 0.001 (environments) | one seed |
 | NAO | flat | B3, range | 1 | 0.436 ± 0.001 (environments) | one seed |

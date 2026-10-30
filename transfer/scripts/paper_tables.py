@@ -54,7 +54,10 @@ FAMILY = [("walk plans only -> 70 % procedural family", "nao", "nao2", "r1_3498_
 RETARGET = ("copy", "offset", "range")
 """The joint-target baseline's value maps (``transfer/retarget.py``)."""
 ORACLE_SEEDS = ("42", "43")
-"""The oracle's training seeds; 42's files carry no seed (``paper_baselines.sh``'s ``SEED``)."""
+"""The oracle's training seeds, also B2b's; 42's files carry no seed (``paper_baselines.sh``'s
+``SEED``)."""
+RETARGET_SEEDS = ("42", "43", "44")
+"""B3's copy map's training seeds (B3s); the other maps have 42's only."""
 GAIT = {
     "stride_length": "Stride length", "stride_period": "Stride period",
     "duty_factor_0": "Duty, left", "duty_factor_1": "Duty, right",
@@ -92,10 +95,15 @@ def finite(value):
     return value
 
 
+def zero_shot_pattern(body: str, tag: str, generator: str, kinematic: bool = True) -> str:
+    """The deployed path's L4 reports, ``{}`` standing for the command."""
+    est = "_kin" if kinematic else ""
+    return f"zero_shot_{body}_{tag}_{generator}_auto{est}_l4_{{}}.json"
+
+
 def l4(body: str, tag: str, generator: str, kinematic: bool = True) -> dict | None:
     """The deployed path's L4 over the three commands, or None until all three exist."""
-    est = "_kin" if kinematic else ""
-    return l4_files(f"zero_shot_{body}_{tag}_{generator}_auto{est}_l4_{{}}.json", "encoder")
+    return l4_files(zero_shot_pattern(body, tag, generator, kinematic), "encoder")
 
 
 def l4_files(pattern: str, name: str) -> dict | None:
@@ -119,24 +127,47 @@ def l4_files(pattern: str, name: str) -> dict | None:
     return total
 
 
-def oracle(skill: str, seed: str) -> dict | None:
-    """B2's L4 on ``skill``, trained with ``seed``."""
+def oracle_pattern(skill: str, seed: str, variant: str = "") -> str:
+    """B2's L4 reports on ``skill``, trained with ``seed``; ``variant`` "bounded" is B2b's."""
     tag = "" if seed == ORACLE_SEEDS[0] else f"_s{seed}"
-    return l4_files(f"oracle_nao_{skill}{tag}_l4_{{}}.json", "oracle")
+    v = f"_{variant}" if variant else ""
+    return f"oracle_nao_{skill}{v}{tag}_l4_{{}}.json"
+
+
+def retarget_pattern(skill: str, value_map: str, seed: str = "42") -> str:
+    tag = "" if seed == RETARGET_SEEDS[0] else f"_s{seed}"
+    return f"retarget_nao_{skill}_{value_map}{tag}_l4_{{}}.json"
+
+
+def oracle(skill: str, seed: str) -> dict | None:
+    return l4_files(oracle_pattern(skill, seed), "oracle")
+
+
+def nao_method_files(skill: str) -> dict[str, tuple[str, str]]:
+    """Each of the NAO's methods on ``skill``: its L4 reports' pattern and its run's name.
+
+    Zero-shot, B1, B2's and B2b's seeds, B3's maps and the copy map's other seeds.
+    """
+    generator = GENERATOR[skill]
+    task_tracker = zero_shot_pattern("nao", f"nao_task_{skill}_sym", generator)
+    files = {
+        "zero-shot": (zero_shot_pattern("nao", MODEL["nao"], generator), "encoder"),
+        "B1, task tracker": (task_tracker, "encoder"),
+    }
+    for seed in ORACLE_SEEDS:
+        files[f"B2, oracle, seed {seed}"] = (oracle_pattern(skill, seed), "oracle")
+    for seed in ORACLE_SEEDS:
+        files[f"B2b, bounded, seed {seed}"] = (oracle_pattern(skill, seed, "bounded"), "oracle")
+    for m in RETARGET:
+        files[f"B3, {m}"] = (retarget_pattern(skill, m), "imitate")
+    for seed in RETARGET_SEEDS[1:]:
+        files[f"B3, copy, seed {seed}"] = (retarget_pattern(skill, "copy", seed), "imitate")
+    return files
 
 
 def nao_methods(skill: str) -> dict[str, dict | None]:
-    """The NAO's L4 on ``skill`` by each method: zero-shot, B1, B2's seeds and B3's maps."""
-    generator = GENERATOR[skill]
-    methods = {
-        "zero-shot": l4("nao", MODEL["nao"], generator),
-        "B1, task tracker": l4("nao", f"nao_task_{skill}_sym", generator),
-    }
-    for seed in ORACLE_SEEDS:
-        methods[f"B2, oracle, seed {seed}"] = oracle(skill, seed)
-    for m in RETARGET:
-        methods[f"B3, {m}"] = l4_files(f"retarget_nao_{skill}_{m}_l4_{{}}.json", "imitate")
-    return methods
+    """The NAO's L4 on ``skill`` by each method (:func:`nao_method_files`)."""
+    return {name: l4_files(*files) for name, files in nao_method_files(skill).items()}
 
 
 def walk(body: str, tag: str) -> dict | None:
@@ -179,7 +210,7 @@ def section(title: str, note: str, header: list[str], rows: list[list[str]]) -> 
 
 def build() -> tuple[str, dict]:
     sections = []
-    data = {key: {} for key in ("M", "S", "B1", "B2", "B3", "gait", "T", "A", "D")}
+    data = {key: {} for key in ("M", "S", "B1", "B2", "B3", "gait", "SE", "T", "A", "D")}
 
     rows = []
     for body, tag in MODEL.items():
@@ -307,6 +338,48 @@ def build() -> tuple[str, dict]:
                 "falls, in the tables above. A command on which the NAO takes no stride has no "
                 "stride length or period; the cell names it.",
                 ["Body", "Skill", "Method", *GAIT.values()],
+                rows,
+            )
+        )
+
+    bootstrap = PAPER / "data" / "bootstrap.json"
+    if bootstrap.exists():
+        report = json.loads(bootstrap.read_text(encoding="utf-8"))
+        data["SE"] = report["skills"]
+        rows = []
+
+        def value(v: float | None, se: float | None, sign: str = "") -> str:
+            return "—" if v is None or se is None else f"{v:{sign}.3f} ± {se:.3f}"
+
+        for skill, by in report["skills"].items():
+            for group, e in by["seeds"].items():
+                d = e.get("minus_baseline", {}).get("largest")
+                minus = "—" if d is None else value(d["difference"], d["se"], "+")
+                seeds = [by["runs"][n]["point"]["largest"] for n in e["runs"]]
+                largest = value(e["mean"]["largest"], e["se"]["largest"])
+                largest += f" (seeds {min(seeds):.3f}–{max(seeds):.3f})"
+                label = "zero-shot, S's seeds" if group == "zero-shot" else group
+                rows.append(["NAO", skill, label, str(len(e["runs"])), largest, minus])
+            grouped = {n for e in by["seeds"].values() for n in e["runs"]}
+            for name, e in by["runs"].items():
+                if name not in grouped:
+                    largest = value(e["point"]["largest"], e["se"]["largest"])
+                    label = "zero-shot, adopted" if name == "zero-shot" else name
+                    rows.append(["NAO", skill, label, "1", f"{largest} (environments)", "one seed"])
+        sections.append(
+            section(
+                "SE — the NAO's methods against the zero-shot model, by seed",
+                "Each command's largest gate C deviation, averaged over the three commands, as "
+                "the figure reads it. A method trained with several seeds: the mean over its "
+                "seeds ± their standard deviation over the root of their number, and its "
+                "difference from the zero-shot model's seeds (S's; the adopted model is not "
+                "among them) ± both errors combined. A method trained with one seed has only "
+                "the bootstrap error of its 32 environments, far smaller than the spread "
+                "between seeds (compare the zero-shot model's rows): it can only be read "
+                "against the range of the zero-shot model's seeds. Source: "
+                f"`paper_bootstrap.py`, {report['draws']} draws, "
+                "`transfer/paper/data/bootstrap.json`.",
+                ["Body", "Skill", "Method", "Seeds", "Largest deviation", "Minus zero-shot"],
                 rows,
             )
         )

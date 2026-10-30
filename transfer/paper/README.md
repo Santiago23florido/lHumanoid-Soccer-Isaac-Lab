@@ -35,7 +35,7 @@ on the G1, however many bodies run it: **N + M trainings, not N × M**.
 | B3 | Joint retargeting: the NAO imitating the G1's joint trajectories on its own clock, three value maps | The classic baseline (the joint-target signal) | done, three maps per skill; none passes gate C (B3's note) |
 | B2b | The oracle with one change: its air-time term pays no phase held past its threshold | Whether the oracle's failure is the recipe's air-time term on this body | pre-registered below; queued, both skills, seeds 42 and 43 |
 | B3s | B3's copy map with seeds 43 and 44, both skills | Whether copy's tie with the zero-shot model on rough holds across seeds | queued after B2b |
-| SE | Bootstrap standard errors over environments for every L4 comparison of the NAO's methods | Which differences between methods are larger than their sampling error | in progress |
+| SE | Bootstrap standard errors over environments for every L4 comparison of the NAO's methods | Which differences between methods are larger than their sampling error | done for the runs so far (table SE): environments vary far less than seeds, so a comparison needs seeds; B3 copy's waits for B3s |
 | T | Decomposition of the transfer error into generator, tracker and estimator | The theory section's measured terms | done (`paper_decomposition.py`) |
 | A | Ablations: estimator, sole height, generator, log-space loads, symmetrization, procedural family | What each piece contributes | done from existing runs |
 | D | Decoder v2 (physics prior, deep-learning core) against the distilled v1 control | Whether a stronger decoder buys competence | done, not adopted |
@@ -138,6 +138,27 @@ Mean over the three L4 commands of each gate C feature's |relative deviation| (t
 | NAO | flat | B3, copy | 0.10 | 0.00 | 0.33 | 0.21 |
 | NAO | flat | B3, offset | 0.04 | 0.00 | 0.38 | 0.21 |
 | NAO | flat | B3, range | 0.43 | 0.00 | 0.21 | 0.07 |
+
+### SE — the NAO's methods against the zero-shot model, by seed
+
+Each command's largest gate C deviation, averaged over the three commands, as the figure reads it. A method trained with several seeds: the mean over its seeds ± their standard deviation over the root of their number, and its difference from the zero-shot model's seeds (S's; the adopted model is not among them) ± both errors combined. A method trained with one seed has only the bootstrap error of its 32 environments, far smaller than the spread between seeds (compare the zero-shot model's rows): it can only be read against the range of the zero-shot model's seeds. Source: `paper_bootstrap.py`, 1000 draws, `transfer/paper/data/bootstrap.json`.
+
+| Body | Skill | Method | Seeds | Largest deviation | Minus zero-shot |
+| --- | --- | --- | --- | --- | --- |
+| NAO | rough | zero-shot, S's seeds | 3 | 0.149 ± 0.017 (seeds 0.115–0.169) | — |
+| NAO | rough | B2, oracle | 2 | 2.651 ± 0.319 (seeds 2.332–2.970) | +2.502 ± 0.319 |
+| NAO | rough | zero-shot, adopted | 1 | 0.154 ± 0.002 (environments) | one seed |
+| NAO | rough | B1, task tracker | 1 | 0.326 ± 0.002 (environments) | one seed |
+| NAO | rough | B3, copy | 1 | 0.147 ± 0.002 (environments) | one seed |
+| NAO | rough | B3, offset | 1 | 0.238 ± 0.001 (environments) | one seed |
+| NAO | rough | B3, range | 1 | 0.464 ± 0.001 (environments) | one seed |
+| NAO | flat | zero-shot, S's seeds | 3 | 0.186 ± 0.014 (seeds 0.162–0.209) | — |
+| NAO | flat | zero-shot, adopted | 1 | 0.174 ± 0.002 (environments) | one seed |
+| NAO | flat | B1, task tracker | 1 | 0.674 ± 0.003 (environments) | one seed |
+| NAO | flat | B2, oracle, seed 42 | 1 | 7.618 ± 0.003 (environments) | one seed |
+| NAO | flat | B3, copy | 1 | 0.325 ± 0.001 (environments) | one seed |
+| NAO | flat | B3, offset | 1 | 0.376 ± 0.001 (environments) | one seed |
+| NAO | flat | B3, range | 1 | 0.436 ± 0.000 (environments) | one seed |
 
 ### T — the gait's deviation from the teacher, decomposed
 

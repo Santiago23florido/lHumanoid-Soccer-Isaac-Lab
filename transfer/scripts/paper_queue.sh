@@ -8,6 +8,10 @@
 #   B3   joint retargeting -- added once implemented.
 #
 #   bash transfer/scripts/paper_queue.sh [stages]     (default: "s_g1 b1_nao s_nao b1_g1")
+#
+# B1 trains with the incumbent's seed (31 on the NAO, 41 on the G1); B1_SEEDS_NAO and
+# B1_SEEDS_G1 list the seeds to run instead, e.g. "32 33". Another seed's runs and results
+# carry it: nao_task_rough_s32, zero_shot_nao_nao_task_rough_s32_sym_*.
 set -uo pipefail
 python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -74,6 +78,29 @@ done_already() {  # <body> <tag> <task>: its L4's last command exists
   [ "$3" = flat ] && generator=flat_dagger2
   [ -f "$results/zero_shot_${1}_${2}_${generator}_auto_kin_l4_turning.json" ]
 }
+b1() {  # <body> <incumbent run> <checkpoint> <encoder tag> <incumbent's seed> <seeds...>
+  # The body's incumbent continued on each skill's own plans, no procedural family.
+  local body="$1" incumbent="$2" checkpoint="$3" encoder="$4" first="$5"
+  shift 5
+  conditions "$body"
+  for seed in "$@"; do
+    for task in rough flat; do
+      local generator=rough_b4
+      [ "$task" = flat ] && generator=flat_dagger2
+      local name="${body}_task_${task}"
+      [ "$seed" = "$first" ] || name="${name}_s${seed}"
+      local tag="${name}_sym"
+      done_already "$body" "$tag" "$task" && { note "$tag: already done"; continue; }
+      if ! ls -d logs/rsl_rl/"${body}"_track/*_"$name" > /dev/null 2>&1; then
+        # The skill's generator with this body's encoder, as the ladder deploys it (L4).
+        ( export HUMANOID_CONTRACT="$root/logs/contract/${generator}_${encoder}/generator.pt"
+          export HUMANOID_PROCEDURAL=0
+          train "$body" "$name" "$seed" "$incumbent" "$checkpoint" ) || continue
+      fi
+      ladder "$body" "$(ls -d logs/rsl_rl/"${body}"_track/*_"$name" | tail -1)" "$tag" "$task" encoder l4
+    done
+  done
+}
 
 note "paper queue start: $stages"
 
@@ -88,22 +115,9 @@ if want s_g1; then
   done
 fi
 
-# B1, the NAO: its incumbent continued on each skill's own plans, no procedural family.
+# B1, the NAO.
 if want b1_nao; then
-  conditions nao
-  for task in rough flat; do
-    generator=rough_b4
-    [ "$task" = flat ] && generator=flat_dagger2
-    name="nao_task_${task}" tag="nao_task_${task}_sym"
-    done_already nao "$tag" "$task" && { note "$tag: already done"; continue; }
-    if ! ls -d logs/rsl_rl/nao_track/*_"$name" > /dev/null 2>&1; then
-      # The skill's generator with this body's encoder, as the ladder deploys it (L4).
-      ( export HUMANOID_CONTRACT="$root/logs/contract/${generator}_zs_nao_r1_3498_sym_v3/generator.pt"
-        export HUMANOID_PROCEDURAL=0
-        train nao "$name" 31 "$nao_incumbent" "$nao_checkpoint" ) || continue
-    fi
-    ladder nao "$(ls -d logs/rsl_rl/nao_track/*_"$name" | tail -1)" "$tag" "$task" encoder l4
-  done
+  b1 nao "$nao_incumbent" "$nao_checkpoint" zs_nao_r1_3498_sym_v3 31 ${B1_SEEDS_NAO:-31}
 fi
 
 # S, the NAO: its incumbent continued in its own conditions, seeds 31 (warm_nao_r1), 32 and 33.
@@ -120,21 +134,9 @@ if want s_nao; then
   done
 fi
 
-# B1, the G1: its incumbent continued on each skill's own plans, no procedural family.
+# B1, the G1.
 if want b1_g1; then
-  conditions g1
-  for task in rough flat; do
-    generator=rough_b4
-    [ "$task" = flat ] && generator=flat_dagger2
-    name="g1_task_${task}" tag="g1_task_${task}_sym"
-    done_already g1 "$tag" "$task" && { note "$tag: already done"; continue; }
-    if ! ls -d logs/rsl_rl/g1_track/*_"$name" > /dev/null 2>&1; then
-      ( export HUMANOID_CONTRACT="$root/logs/contract/${generator}_zs_g1_warm_r3_logload_sym/generator.pt"
-        export HUMANOID_PROCEDURAL=0
-        train g1 "$name" 41 "$g1_incumbent" "$g1_checkpoint" ) || continue
-    fi
-    ladder g1 "$(ls -d logs/rsl_rl/g1_track/*_"$name" | tail -1)" "$tag" "$task" encoder l4
-  done
+  b1 g1 "$g1_incumbent" "$g1_checkpoint" zs_g1_warm_r3_logload_sym 41 ${B1_SEEDS_G1:-41}
 fi
 
 note "paper queue done: $stages"

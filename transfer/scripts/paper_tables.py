@@ -58,6 +58,9 @@ ORACLE_SEEDS = ("42", "43")
 ``SEED``)."""
 RETARGET_SEEDS = ("42", "43", "44")
 """B3's copy map's training seeds (B3s); the other maps have 42's only."""
+TASK_SEEDS = {body: tuple(s for s, _ in entries) for body, entries in SEEDS.items()}
+"""B1's training seeds, S's; the first, the incumbent's, carries none in its files
+(``paper_queue.sh``'s ``B1_SEEDS_<BODY>``)."""
 GAIT = {
     "stride_length": "Stride length", "stride_period": "Stride period",
     "duty_factor_0": "Duty, left", "duty_factor_1": "Duty, right",
@@ -139,6 +142,22 @@ def retarget_pattern(skill: str, value_map: str, seed: str = "42") -> str:
     return f"retarget_nao_{skill}_{value_map}{tag}_l4_{{}}.json"
 
 
+def task_tag(body: str, skill: str, seed: str) -> str:
+    """B1's tag on ``skill``, trained with ``seed``."""
+    tag = "" if seed == TASK_SEEDS[body][0] else f"_s{seed}"
+    return f"{body}_task_{skill}{tag}_sym"
+
+
+def task_tracker_files(body: str, skill: str) -> dict[str, tuple[str, str]]:
+    """B1's seeds on ``body`` and ``skill``, as :func:`nao_method_files` names them."""
+    files = {}
+    for k, seed in enumerate(TASK_SEEDS[body]):
+        name = "B1, task tracker" + (f", seed {seed}" if k else "")
+        pattern = zero_shot_pattern(body, task_tag(body, skill, seed), GENERATOR[skill])
+        files[name] = (pattern, "encoder")
+    return files
+
+
 def oracle(skill: str, seed: str, variant: str = "") -> dict | None:
     return l4_files(oracle_pattern(skill, seed, variant), "oracle")
 
@@ -146,14 +165,10 @@ def oracle(skill: str, seed: str, variant: str = "") -> dict | None:
 def nao_method_files(skill: str) -> dict[str, tuple[str, str]]:
     """Each of the NAO's methods on ``skill``: its L4 reports' pattern and its run's name.
 
-    Zero-shot, B1, B2's and B2b's seeds, B3's maps and the copy map's other seeds.
+    Zero-shot, B1's, B2's and B2b's seeds, B3's maps and the copy map's other seeds.
     """
-    generator = GENERATOR[skill]
-    task_tracker = zero_shot_pattern("nao", f"nao_task_{skill}_sym", generator)
-    files = {
-        "zero-shot": (zero_shot_pattern("nao", MODEL["nao"], generator), "encoder"),
-        "B1, task tracker": (task_tracker, "encoder"),
-    }
+    files = {"zero-shot": (zero_shot_pattern("nao", MODEL["nao"], GENERATOR[skill]), "encoder")}
+    files |= task_tracker_files("nao", skill)
     for seed in ORACLE_SEEDS:
         files[f"B2, oracle, seed {seed}"] = (oracle_pattern(skill, seed), "oracle")
     for seed in ORACLE_SEEDS:
@@ -252,18 +267,29 @@ def build() -> tuple[str, dict]:
     rows = []
     for body, tag in MODEL.items():
         for skill, generator in GENERATOR.items():
-            task = l4(body, f"{body}_task_{skill}_sym", generator)
-            if task is None:
+            tasks = [l4(body, task_tag(body, skill, s), generator) for s in TASK_SEEDS[body]]
+            if tasks[0] is None:
                 continue
             zero = l4(body, tag, generator)
-            data["B1"][f"{body}/{skill}"] = {"zero_shot": zero, "task_specific": task}
-            rows.append([body.upper(), skill, cell_l4(zero), cell_l4(task)])
+            data["B1"][f"{body}/{skill}"] = {"zero_shot": zero, "task_specific": tasks[0]} | {
+                f"task_specific_seed_{s}": r
+                for s, r in zip(TASK_SEEDS[body][1:], tasks[1:], strict=True)
+            }
+            rows.append([body.upper(), skill, cell_l4(zero), *(cell_l4(r) for r in tasks)])
     if rows:
+        seeds = [f"{g}/{n}" for g, n in zip(TASK_SEEDS["g1"], TASK_SEEDS["nao"], strict=True)]
         sections.append(
             section(
                 "B1 — zero-shot against a tracker trained on the skill's own plans (N × M)",
-                "Source: `paper_queue.sh` stages `b1_nao`, `b1_g1`.",
-                ["Body", "Skill", "Zero-shot (adopted)", "Task-specific tracker"],
+                "One column per training seed, S's (G1/NAO); the first is the incumbent's. "
+                "Source: `paper_queue.sh` stages `b1_nao`, `b1_g1`, with `B1_SEEDS_<BODY>` "
+                "past the first.",
+                [
+                    "Body",
+                    "Skill",
+                    "Zero-shot (adopted)",
+                    *(f"Task-specific, seed {s}" for s in seeds),
+                ],
                 rows,
             )
         )
@@ -351,35 +377,39 @@ def build() -> tuple[str, dict]:
     bootstrap = PAPER / "data" / "bootstrap.json"
     if bootstrap.exists():
         report = json.loads(bootstrap.read_text(encoding="utf-8"))
-        data["SE"] = report["skills"]
+        data["SE"] = report["bodies"]
         rows = []
 
         def value(v: float | None, se: float | None, sign: str = "") -> str:
             return "—" if v is None or se is None else f"{v:{sign}.3f} ± {se:.3f}"
 
-        for skill, by in report["skills"].items():
-            for group, e in by["seeds"].items():
-                d = e.get("minus_baseline", {}).get("largest")
-                minus = "—" if d is None else value(d["difference"], d["se"], "+")
-                seeds = [by["runs"][n]["point"]["largest"] for n in e["runs"]]
-                largest = value(e["mean"]["largest"], e["se"]["largest"])
-                largest += f" (seeds {min(seeds):.3f}–{max(seeds):.3f})"
-                label = "zero-shot, S's seeds" if group == "zero-shot" else group
-                rows.append(["NAO", skill, label, str(len(e["runs"])), largest, minus])
-            grouped = {n for e in by["seeds"].values() for n in e["runs"]}
-            for name, e in by["runs"].items():
-                if name not in grouped:
-                    largest = value(e["point"]["largest"], e["se"]["largest"])
-                    label = "zero-shot, adopted" if name == "zero-shot" else name
-                    rows.append(["NAO", skill, label, "1", f"{largest} (environments)", "one seed"])
+        for body, by_skill in report["bodies"].items():
+            for skill, by in by_skill.items():
+                for group, e in by["seeds"].items():
+                    d = e.get("minus_baseline", {}).get("largest")
+                    minus = "—" if d is None else value(d["difference"], d["se"], "+")
+                    seeds = [by["runs"][n]["point"]["largest"] for n in e["runs"]]
+                    largest = value(e["mean"]["largest"], e["se"]["largest"])
+                    largest += f" (seeds {min(seeds):.3f}–{max(seeds):.3f})"
+                    label = "zero-shot, S's seeds" if group == "zero-shot" else group
+                    rows.append([body.upper(), skill, label, str(len(e["runs"])), largest, minus])
+                grouped = {n for e in by["seeds"].values() for n in e["runs"]}
+                for name, e in by["runs"].items():
+                    if name not in grouped:
+                        largest = value(e["point"]["largest"], e["se"]["largest"])
+                        label = "zero-shot, adopted" if name == "zero-shot" else name
+                        cells = [f"{largest} (environments)", "one seed"]
+                        rows.append([body.upper(), skill, label, "1", *cells])
         sections.append(
             section(
-                "SE — the NAO's methods against the zero-shot model, by seed",
+                "SE — each body's methods against the zero-shot model, by seed",
                 "Each command's largest gate C deviation, averaged over the three commands, as "
-                "the figure reads it. A method trained with several seeds: the mean over its "
-                "seeds ± their standard deviation over the root of their number, and its "
-                "difference from the zero-shot model's seeds (S's; the adopted model is not "
-                "among them) ± both errors combined. A method trained with one seed has only "
+                "the figure reads it. On the G1 the zero-shot model against B1, the baseline "
+                "that does not need the NAO's own task. A method trained with several seeds: "
+                "the mean over its seeds ± their standard deviation over the root of their "
+                "number, and its difference from the zero-shot model's seeds (S's; on the NAO "
+                "the adopted model is not among them, on the G1 it is seed 41) ± both errors "
+                "combined. A method trained with one seed has only "
                 "the bootstrap error of its 32 environments, far smaller than the spread "
                 "between seeds (compare the zero-shot model's rows): it can only be read "
                 "against the range of the zero-shot model's seeds. Source: "

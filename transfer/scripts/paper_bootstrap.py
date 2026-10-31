@@ -1,9 +1,10 @@
-"""Bootstrap standard errors for the NAO's methods in the paper's tables (``SE``).
+"""Bootstrap standard errors for the methods in the paper's tables (``SE``).
 
-Every cell of tables B2, B3 and B is one capture per L4 command, 32 environments each,
-held to the teacher's capture at the command. The standard errors here resample the
-environments of both, with replacement, and recompute what the tables read: the speed
-ratio and each gate C feature's |relative deviation|, by command and averaged over the
+On the NAO every method, on the G1 the zero-shot model and B1 (the other baselines need the
+NAO's own task). Every cell of tables B1, B2, B3 and B is one capture per L4 command, 32
+environments each, held to the teacher's capture at the command. The standard errors here
+resample the environments of both, with replacement, and recompute what the tables read: the
+speed ratio and each gate C feature's |relative deviation|, by command and averaged over the
 commands, and each command's largest deviation averaged over the commands, as
 ``paper_figures.py`` reads it. A draw resamples the teacher's capture once and holds every
 method to it, so a difference between two methods is paired on the teacher.
@@ -47,27 +48,53 @@ from paper_tables import (  # noqa: E402
     COMMANDS,
     GAIT,
     GENERATOR,
+    MODEL,
     ORACLE_SEEDS,
     PAPER,
     RETARGET_SEEDS,
     ROOT,
     SEEDS,
+    TASK_SEEDS,
     finite,
     nao_method_files,
     read,
+    task_tracker_files,
     zero_shot_pattern,
 )
 
 BASELINE = "zero-shot"
 """The method every other is differenced against."""
-GROUPS = {
-    "zero-shot": [f"zero-shot, seed {s}" for s, _ in SEEDS["nao"]],
-    "B2, oracle": [f"B2, oracle, seed {s}" for s in ORACLE_SEEDS],
-    "B2b, bounded": [f"B2b, bounded, seed {s}" for s in ORACLE_SEEDS],
-    "B3, copy": ["B3, copy", *(f"B3, copy, seed {s}" for s in RETARGET_SEEDS[1:])],
-}
-"""Each method's runs by training seed. The zero-shot model's are ``S``'s, its last stage
-repeated from the same start; the adopted model is not among them."""
+
+
+def groups(body: str) -> dict[str, list[str]]:
+    """Each method's runs on ``body`` by training seed. The zero-shot model's are ``S``'s, its
+    last stage repeated from the same start: on the NAO the adopted model is not among them,
+    on the G1 it is the first."""
+    return {
+        "zero-shot": [f"zero-shot, seed {s}" for s, _ in SEEDS[body]],
+        "B1, task tracker": [
+            "B1, task tracker",
+            *(f"B1, task tracker, seed {s}" for s in TASK_SEEDS[body][1:]),
+        ],
+        "B2, oracle": [f"B2, oracle, seed {s}" for s in ORACLE_SEEDS],
+        "B2b, bounded": [f"B2b, bounded, seed {s}" for s in ORACLE_SEEDS],
+        "B3, copy": ["B3, copy", *(f"B3, copy, seed {s}" for s in RETARGET_SEEDS[1:])],
+    }
+
+
+def method_files(body: str, skill: str) -> dict[str, tuple[str, str]]:
+    """The methods compared on ``body`` and ``skill``, and the zero-shot model's seeds."""
+    generator = GENERATOR[skill]
+    if body == "nao":
+        files = nao_method_files(skill)
+    else:
+        files = {"zero-shot": (zero_shot_pattern(body, MODEL[body], generator), "encoder")}
+        files |= task_tracker_files(body, skill)
+    seeds = {
+        f"zero-shot, seed {s}": (zero_shot_pattern(body, tag, generator), "encoder")
+        for s, tag in SEEDS[body]
+    }
+    return files | seeds
 
 
 class Capture:
@@ -155,16 +182,12 @@ def main() -> int:
     args = parser.parse_args()
     rng = np.random.default_rng(args.seed)
 
-    report = {"draws": args.draws, "seed": args.seed, "baseline": BASELINE, "skills": {}}
-    for skill in GENERATOR:
+    report = {"draws": args.draws, "seed": args.seed, "baseline": BASELINE, "bodies": {}}
+    for body, skill in [(body, skill) for body in ("nao", "g1") for skill in GENERATOR]:
         # Each method's capture per command, and the teacher's, which every report shares.
         methods: dict[str, list[Capture]] = {}
         teachers: list[Capture] = []
-        files = nao_method_files(skill) | {
-            f"zero-shot, seed {s}": (zero_shot_pattern("nao", tag, GENERATOR[skill]), "encoder")
-            for s, tag in SEEDS["nao"]
-        }
-        for name, (pattern, run) in files.items():
+        for name, (pattern, run) in method_files(body, skill).items():
             reports = [read(pattern.format(c)) for c in COMMANDS]
             if any(r is None for r in reports):
                 continue
@@ -172,7 +195,7 @@ def main() -> int:
             if not teachers:
                 teachers = [Capture(f) for f in held_to]
                 teacher_files = held_to
-            assert held_to == teacher_files, f"{name} on {skill} is held to another teacher"
+            assert held_to == teacher_files, f"{name} on {body}/{skill} is held to another teacher"
             methods[name] = [Capture(r["runs"][run]["file"]) for r in reports]
             # The full sample is what was scored.
             for capture, teacher, r in zip(methods[name], teachers, reports, strict=True):
@@ -181,8 +204,8 @@ def main() -> int:
                 verdict = r["runs"][run]["verdict"]
                 expected = {"speed_ratio": verdict["speed_ratio"], **verdict["signature_deviation"]}
                 for key, value in expected.items():
-                    assert close(d[key], value), (skill, name, key, d[key], value)
-            print(f"{skill}: {name} reproduces its reports")
+                    assert close(d[key], value), (body, skill, name, key, d[key], value)
+            print(f"{body}/{skill}: {name} reproduces its reports")
 
         full = score(
             methods,
@@ -199,7 +222,7 @@ def main() -> int:
                 for key, value in values.items():
                     draws[name][key].append(value)
             if (k + 1) % 100 == 0:
-                print(f"{skill}: {k + 1}/{args.draws} draws")
+                print(f"{body}/{skill}: {k + 1}/{args.draws} draws")
 
         entries = {}
         for name in methods:
@@ -219,7 +242,7 @@ def main() -> int:
             entries[name] = entry
 
         seeds = {}
-        for group, names in GROUPS.items():
+        for group, names in groups(body).items():
             present = [n for n in names if n in methods]
             if len(present) < 2:
                 continue
@@ -239,20 +262,21 @@ def main() -> int:
                 }
                 for key in entry["mean"]
             }
-        report["skills"][skill] = {"runs": entries, "seeds": seeds}
+        report["bodies"].setdefault(body, {})[skill] = {"runs": entries, "seeds": seeds}
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(finite(report), indent=2) + "\n", encoding="utf-8")
-    for skill, by in report["skills"].items():
+    cases = [(f"{b}/{s}", by) for b, by_skill in report["bodies"].items() for s, by in by_skill.items()]  # fmt: skip  # noqa: E501
+    for case, by in cases:
         for name, e in by["runs"].items():
-            line = f"{skill:<6} {name:<22} largest {e['point']['largest']:.3f} ± {e['se']['largest']:.3f}"  # noqa: E501
+            line = f"{case:<10} {name:<26} largest {e['point']['largest']:.3f} ± {e['se']['largest']:.3f}"  # noqa: E501
             if "minus_baseline" in e:
                 d = e["minus_baseline"]["largest"]
                 line += f"   minus zero-shot {d['difference']:+.3f} ± {d['se']:.3f}"
             print(line)
         for group, e in by["seeds"].items():
             line = (
-                f"{skill:<6} {group + ' (' + str(len(e['runs'])) + ' seeds)':<22} largest "
+                f"{case:<10} {group + ' (' + str(len(e['runs'])) + ' seeds)':<26} largest "
                 f"{e['mean']['largest']:.3f} ± {e['se']['largest']:.3f}"
             )
             if "minus_baseline" in e:

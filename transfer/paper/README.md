@@ -30,12 +30,12 @@ on the G1, however many bodies run it: **N + M trainings, not N × M**.
 | --- | --- | --- | --- |
 | M | The adopted model (`transfer/results/incumbents.json`) on both bodies, both skills | The headline | done |
 | S | Seeds of each body's final training stage, with L4 | How much the headline varies with training | done |
-| B1 | A tracker trained on the skill's own plans (N × M), each body | What zero-shot costs, in the same architecture | done |
+| B1 | A tracker trained on the skill's own plans (N × M), each body | What zero-shot costs, in the same architecture | done with the incumbent's seed; S's other two seeds on each body queued (B1's note) |
 | B2 | Oracle: the NAO trained on each skill's own task, Isaac Lab's G1 recipe in the NAO's units | What the NAO can do when it sees the task | done, rough with two seeds; rough under review: both seeds settle on standing on one leg, see B2's note |
 | B3 | Joint retargeting: the NAO imitating the G1's joint trajectories on its own clock, three value maps | The classic baseline (the joint-target signal) | done, three maps per skill; none passes gate C (B3's note) |
 | B2b | The oracle with one change: its air-time term pays no phase held past its threshold | Whether the oracle's failure is the recipe's air-time term on this body | done, both skills, seeds 42 and 43 (B2b's note) |
 | B3s | B3's copy map with seeds 43 and 44, both skills | Whether copy's tie with the zero-shot model on rough holds across seeds | done (B3s's note): behind the zero-shot model on flat by 7 standard errors; on rough by 1.5, which three seeds do not resolve |
-| SE | Bootstrap standard errors over environments for every L4 comparison of the NAO's methods | Which differences between methods are larger than their sampling error | done (table SE): environments vary far less than seeds, so methods are compared by their seeds |
+| SE | Bootstrap standard errors over environments for every L4 comparison of the NAO's methods, and of the G1's zero-shot model against B1 | Which differences between methods are larger than their sampling error | done (table SE): environments vary far less than seeds, so methods are compared by their seeds |
 | T | Decomposition of the transfer error into generator, tracker and estimator | The theory section's measured terms | done (`paper_decomposition.py`) |
 | A | Ablations: estimator, sole height, generator, log-space loads, symmetrization, procedural family | What each piece contributes | done from existing runs |
 | D | Decoder v2 (physics prior, deep-learning core) against the distilled v1 control | Whether a stronger decoder buys competence | done, not adopted |
@@ -49,7 +49,7 @@ Metrics are those of the ladder, `transfer/scripts/zero_shot_ladder.sh`:
 ## How each experiment is built
 
 - **S.** Each body's last training stage repeated with other seeds from the same start: on the G1 the log-load continuation of `r3_6194` (seeds 41, 42, 43; 41 is the incumbent), on the NAO the round-1 continuation (31, 32, 33). Every seed is laddered as the incumbents are, symmetrized.
-- **B1.** The N × M alternative in the same architecture: each body's incumbent tracker continued for 1000 iterations on one skill's own plans (the skill's generator with that body's encoder; no procedural family), then laddered on that skill. It sees the task; the zero-shot tracker does not.
+- **B1.** The N × M alternative in the same architecture: each body's incumbent tracker continued for 1000 iterations on one skill's own plans (the skill's generator with that body's encoder; no procedural family), then laddered on that skill. It sees the task; the zero-shot tracker does not. It is trained with S's three seeds on each body (41–43 on the G1, 31–33 on the NAO; the first is the incumbent's), so that it is compared with the zero-shot model seed for seed. Source: `B1_SEEDS_<BODY>=<seeds> paper_queue.sh b1_<body>`.
 - **B2, the oracle.** `nao/tasks/nao_velocity`: Isaac Lab's recipe for `Isaac-Velocity-{Flat,Rough}-G1-v0` (rewards, commands, terrain, PPO and iterations) on the NAO. Every dimensioned constant is converted with `UnitSystem.convert_to`, each reward weight by its term's dimension times a time, so a dynamically similar motion earns the same return. The control rate, actions, exploration noise, ground and fall definition are the zero-shot trackers'. The policy observes its base velocity, as the published G1 policies do. It is scored against the G1's teacher like the trackers, through `capture_velocity.py`, which `paper_baselines.sh` first holds to `capture_rollouts.py` on the published rough policy.
   - *The rough oracle stands on one leg.* Seed 42 stepped on both feet at iteration 2000 and then, by iteration 3000, settled on its left leg, the right one raised and the right arm held out, while its air-time reward doubled. Isaac Lab's `feet_air_time_positive_biped` pays single stance every step up to its threshold, so the posture earns that term in full; at a slow command, standing still costs little of the tracking kernel. That is the likely reason, not a measured one. It does the same on its training terrain, so it is the policy, not the plane: on the plane it takes no stride at the forward command (table B). Reproduced by `capture_velocity.py --body nao --task-id NaoVelocityRough-v0` with the run's `model_2999` and, on `NaoVelocityRoughOnFlat-Play-v0`, `model_2000`. Seed 43 does the same on the other leg: at the forward command its right foot is in contact 99.8 % of the time and its left 3.3 %, at a speed of -0.02 of the teacher's, and it reaches 0.72 at the fast command and 0.30 turning (`oracle_nao_rough_s43_l4_*.json`, run `oracle`, `signature.duty_factor`). Its air-time term rose the same way, from 0.012 at iteration 2000 to 0.030 at 2999, against seed 42's 0.020 to 0.041 (`logs/contract/train_oracle_rough{,_s43}.log`, `Episode_Reward/feet_air_time`). Two seeds make it the recipe on this body, not the seed; the cause is still the hypothesis above. Seed 43 first crashed on runaway actions; it is the run retrained under ddfbb72's action bound, whose Isaac check reproduced seed 42's forward result.
 - **B3, joint retargeting.** `transfer/retarget.py` maps the teacher's joint angles through `correspondence.py`'s names and signs, by each of three value maps (copy; offset about each robot's nominal posture; fraction of range), clamped to the NAO's limits, on the NAO's clock (one NAO step reads the teacher 1.625 steps on). `nao/tasks/nao_imitate` imitates them DeepMimic-style (reference state initialisation; pose 0.65, joint rates 0.1, base velocity 0.1, yaw rate 0.1) on the trackers' body. Its actions are the trackers' offsets of 0.25 rad, about the reference's next row instead of the crouch: the zero action plays the reference back and the policy learns the feedback around it (residual policy learning, Silver et al. 2018; on a biped's reference motion, Xie et al. 2018), so the baseline gets the joint signal in its most favourable form. About the crouch, the first design, the pose reward had no gradient: the retargeted references sit so far from the zero action that its kernel is ~0 there. It trains on the teacher's DART capture and is tested on the teacher's own play capture at each L4 command.
@@ -96,14 +96,14 @@ Walk: S0's check, autonomous reference, falls and speed over the teacher's. Sour
 
 ### B1 — zero-shot against a tracker trained on the skill's own plans (N × M)
 
-Source: `paper_queue.sh` stages `b1_nao`, `b1_g1`.
+One column per training seed, S's (G1/NAO); the first is the incumbent's. Source: `paper_queue.sh` stages `b1_nao`, `b1_g1`, with `B1_SEEDS_<BODY>` past the first.
 
-| Body | Skill | Zero-shot (adopted) | Task-specific tracker |
-| --- | --- | --- | --- |
-| G1 | rough | 0/192, passes 0/3, speed 1.00–1.05 | 0/192, passes 3/3, speed 1.01–1.05 |
-| G1 | flat | 0/192, passes 3/3, speed 1.06–1.14 | 0/192, passes 3/3, speed 1.06–1.13 |
-| NAO | rough | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.00–1.04 |
-| NAO | flat | 0/192, passes 0/3, speed 1.04–1.12 | 0/192, passes 0/3, speed 1.04–1.13 |
+| Body | Skill | Zero-shot (adopted) | Task-specific, seed 41/31 | Task-specific, seed 42/32 | Task-specific, seed 43/33 |
+| --- | --- | --- | --- | --- | --- |
+| G1 | rough | 0/192, passes 0/3, speed 1.00–1.05 | 0/192, passes 3/3, speed 1.01–1.05 | — | — |
+| G1 | flat | 0/192, passes 3/3, speed 1.06–1.14 | 0/192, passes 3/3, speed 1.06–1.13 | — | — |
+| NAO | rough | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.00–1.04 | — | — |
+| NAO | flat | 0/192, passes 0/3, speed 1.04–1.12 | 0/192, passes 0/3, speed 1.04–1.13 | — | — |
 
 ### B2 — zero-shot against the oracle: the NAO trained on the skill's own task
 
@@ -151,9 +151,9 @@ Mean over the three L4 commands of each gate C feature's |relative deviation| (t
 | NAO | flat | B3, copy, seed 43 | 0.05 | 0.00 | 0.29 | 0.17 |
 | NAO | flat | B3, copy, seed 44 | 0.03 | 0.00 | 0.30 | 0.23 |
 
-### SE — the NAO's methods against the zero-shot model, by seed
+### SE — each body's methods against the zero-shot model, by seed
 
-Each command's largest gate C deviation, averaged over the three commands, as the figure reads it. A method trained with several seeds: the mean over its seeds ± their standard deviation over the root of their number, and its difference from the zero-shot model's seeds (S's; the adopted model is not among them) ± both errors combined. A method trained with one seed has only the bootstrap error of its 32 environments, far smaller than the spread between seeds (compare the zero-shot model's rows): it can only be read against the range of the zero-shot model's seeds. Source: `paper_bootstrap.py`, 1000 draws, `transfer/paper/data/bootstrap.json`.
+Each command's largest gate C deviation, averaged over the three commands, as the figure reads it. On the G1 the zero-shot model against B1, the baseline that does not need the NAO's own task. A method trained with several seeds: the mean over its seeds ± their standard deviation over the root of their number, and its difference from the zero-shot model's seeds (S's; on the NAO the adopted model is not among them, on the G1 it is seed 41) ± both errors combined. A method trained with one seed has only the bootstrap error of its 32 environments, far smaller than the spread between seeds (compare the zero-shot model's rows): it can only be read against the range of the zero-shot model's seeds. Source: `paper_bootstrap.py`, 1000 draws, `transfer/paper/data/bootstrap.json`.
 
 | Body | Skill | Method | Seeds | Largest deviation | Minus zero-shot |
 | --- | --- | --- | --- | --- | --- |
@@ -173,6 +173,12 @@ Each command's largest gate C deviation, averaged over the three commands, as th
 | NAO | flat | B2, oracle, seed 42 | 1 | 7.618 ± 0.003 (environments) | one seed |
 | NAO | flat | B3, offset | 1 | 0.376 ± 0.001 (environments) | one seed |
 | NAO | flat | B3, range | 1 | 0.436 ± 0.001 (environments) | one seed |
+| G1 | rough | zero-shot, S's seeds | 3 | 0.153 ± 0.004 (seeds 0.148–0.161) | — |
+| G1 | rough | zero-shot, adopted | 1 | 0.148 ± 0.002 (environments) | one seed |
+| G1 | rough | B1, task tracker | 1 | 0.072 ± 0.003 (environments) | one seed |
+| G1 | flat | zero-shot, S's seeds | 3 | 0.087 ± 0.003 (seeds 0.082–0.090) | — |
+| G1 | flat | zero-shot, adopted | 1 | 0.089 ± 0.002 (environments) | one seed |
+| G1 | flat | B1, task tracker | 1 | 0.058 ± 0.003 (environments) | one seed |
 
 ### T — the gait's deviation from the teacher, decomposed
 

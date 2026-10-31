@@ -193,7 +193,13 @@ def baselines() -> None:
     names = [n for n in by_skill["flat"] if any(by_skill[s][n] is not None for s in GENERATOR)]
     if len(names) < 2:
         return
-    figure, (falls, speed, gait) = plt.subplots(1, 3, figsize=(7.2, 2.4))
+    # A method's other seeds beside its first.
+    methods = list(dict.fromkeys(n.split(", seed")[0] for n in names))
+    names.sort(key=lambda n: methods.index(n.split(", seed")[0]))
+    # One row per method, read top to bottom, so long names stay legible as methods grow.
+    figure, (falls, speed, gait) = plt.subplots(
+        1, 3, figsize=(7.2, 0.6 + 0.24 * len(names)), sharey=True
+    )
     handles = []
     for k, skill in enumerate(GENERATOR):
         results = [by_skill[skill][n] for n in names]
@@ -209,36 +215,39 @@ def baselines() -> None:
         strideless = [
             r is not None and not np.isfinite(list(r["deviation"].values())).all() for r in results
         ]
-        x = np.arange(len(names)) + (k - 0.5) * 0.38
+        y = np.arange(len(names)) + (k - 0.5) * 0.38
         for ax, values in ((falls, rate), (speed, ratio)):
-            bar = ax.bar(x, values, 0.35, color=SERIES[k], hatch=HATCH[k], edgecolor="white",
-                         linewidth=0.6)  # fmt: skip
+            bar = ax.barh(y, values, 0.35, color=SERIES[k], hatch=HATCH[k], edgecolor="white",
+                          linewidth=0.6)  # fmt: skip
         # A log axis has no baseline for a bar to start from: markers, shaped per skill.
-        (dot,) = gait.plot(x, worst, MARKERS[k], color=SERIES[k], markersize=6,
+        (dot,) = gait.plot(worst, y, MARKERS[k], color=SERIES[k], markersize=6,
                            markeredgecolor="white", linestyle="none")  # fmt: skip
-        for xi, yi, open_ in zip(x, worst, strideless, strict=True):
+        for xi, yi, open_ in zip(worst, y, strideless, strict=True):
             if open_:
                 gait.plot(xi, yi, MARKERS[k], markerfacecolor="white", markeredgecolor=SERIES[k],
                           markersize=6, markeredgewidth=1.2)  # fmt: skip
-                gait.annotate("no stride on\na command", (xi, yi), textcoords="offset points",
-                              xytext=(5, 0), va="center", color=INK_2, fontsize=6)  # fmt: skip
+                gait.annotate("no stride on a command", (xi, yi), textcoords="offset points",
+                              xytext=(-6, 0), ha="right", va="center", color=INK_2,
+                              fontsize=6)  # fmt: skip
         handles.append((bar, dot))
-    falls.set_ylabel("falls / episode (NAO, L4)")
-    falls.set_ylim(bottom=0, top=max(0.05, falls.get_ylim()[1]))
-    speed.set_ylabel("speed / teacher's")
-    speed.axhline(0.9, color=INK_2, linewidth=0.8, linestyle="--")
-    gait.set_ylabel("largest gait |deviation| / teacher")
-    gait.set_yscale("log")
-    gait.axhline(TOLERANCE, color=INK_2, linewidth=0.8, linestyle="--")
-    gait.set_xlim(-0.6, len(names) - 0.4)
+    falls.set_xlabel("falls / episode (NAO, L4)")
+    falls.set_xlim(left=0, right=max(0.05, falls.get_xlim()[1]))
+    speed.set_xlabel("speed / teacher's")
+    speed.axvline(0.9, color=INK_2, linewidth=0.8, linestyle="--")
+    gait.set_xlabel("largest gait |deviation|\n/ teacher")
+    gait.set_xscale("log")
+    gait.axvline(TOLERANCE, color=INK_2, linewidth=0.8, linestyle="--")
     for ax in (falls, speed, gait):
-        ax.set_xticks(np.arange(len(names)), names, rotation=35, ha="right")
+        ax.grid(axis="x", color=GRID, linewidth=0.6)
+        ax.grid(axis="y", visible=False)
+    falls.set_yticks(np.arange(len(names)), names)
+    falls.set_ylim(len(names) - 0.5, -0.5)
     figure.legend(
         handles, list(GENERATOR), title="skill", loc="lower center", ncol=len(handles),
         fontsize=7, title_fontsize=7, bbox_to_anchor=(0.5, 1.0),
         handler_map={tuple: HandlerTuple(ndivide=None)},
     )  # fmt: skip
-    figure.subplots_adjust(wspace=0.45)
+    figure.subplots_adjust(wspace=0.12)
     save(figure, "baselines")
 
 

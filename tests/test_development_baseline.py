@@ -206,8 +206,14 @@ def test_the_transfer_package_touches_neither_robots_task_package() -> None:
 def test_the_standing_task_is_still_registered() -> None:
     """ "Clean" means unused, not deleted. The standing policy is a result this
     project keeps, and losing its environment would make it unreproducible."""
-    registry = (PKG / "nao" / "tasks" / "__init__.py").read_text(encoding="utf-8")
-    assert "from . import nao_stand" in registry
+    registry = ast.parse((PKG / "nao" / "tasks" / "__init__.py").read_text(encoding="utf-8"))
+    imported = {
+        alias.name
+        for node in ast.walk(registry)
+        if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module is None
+        for alias in node.names
+    }
+    assert "nao_stand" in imported
 
     task_init = (PKG / "nao" / "tasks" / "nao_stand" / "__init__.py").read_text(encoding="utf-8")
     assert 'TASK_ID = "NaoStand-Direct-v0"' in task_init

@@ -30,7 +30,7 @@ on the G1, however many bodies run it: **N + M trainings, not N × M**.
 | --- | --- | --- | --- |
 | M | The adopted model (`transfer/results/incumbents.json`) on both bodies, both skills | The headline | done |
 | S | Seeds of each body's final training stage, with L4 | How much the headline varies with training | done |
-| B1 | A tracker trained on the skill's own plans (N × M), each body | What zero-shot costs, in the same architecture | done with the incumbent's seed; S's other two seeds on each body queued (B1's note) |
+| B1 | A tracker trained on the skill's own plans (N × M), each body | What zero-shot costs, in the same architecture | done, S's three seeds on each body (B1's note): behind the zero-shot model on the NAO by 10 and 22 standard errors; ahead of it on the G1 by 20 and 6 |
 | B2 | Oracle: the NAO trained on each skill's own task, Isaac Lab's G1 recipe in the NAO's units | What the NAO can do when it sees the task | done, rough with two seeds; rough under review: both seeds settle on standing on one leg, see B2's note |
 | B3 | Joint retargeting: the NAO imitating the G1's joint trajectories on its own clock, three value maps | The classic baseline (the joint-target signal) | done, three maps per skill; none passes gate C (B3's note) |
 | B2b | The oracle with one change: its air-time term pays no phase held past its threshold | Whether the oracle's failure is the recipe's air-time term on this body | done, both skills, seeds 42 and 43 (B2b's note) |
@@ -50,6 +50,7 @@ Metrics are those of the ladder, `transfer/scripts/zero_shot_ladder.sh`:
 
 - **S.** Each body's last training stage repeated with other seeds from the same start: on the G1 the log-load continuation of `r3_6194` (seeds 41, 42, 43; 41 is the incumbent), on the NAO the round-1 continuation (31, 32, 33). Every seed is laddered as the incumbents are, symmetrized.
 - **B1.** The N × M alternative in the same architecture: each body's incumbent tracker continued for 1000 iterations on one skill's own plans (the skill's generator with that body's encoder; no procedural family), then laddered on that skill. It sees the task; the zero-shot tracker does not. It is trained with S's three seeds on each body (41–43 on the G1, 31–33 on the NAO; the first is the incumbent's), so that it is compared with the zero-shot model seed for seed. Source: `B1_SEEDS_<BODY>=<seeds> paper_queue.sh b1_<body>`.
+  - *What the seeds gave.* No seed falls, on either body or skill (0/192), and every one walks at the zero-shot model's speed. On the NAO no seed passes gate C, and all three are further from the teacher's gait than the zero-shot model's seeds: the largest deviation is 0.346 ± 0.010 against 0.149 ± 0.017 on rough (+0.197 ± 0.020) and 0.674 ± 0.017 against 0.186 ± 0.014 on flat (+0.488 ± 0.022). They miss on the split of stance and swing: the left duty factor is further off by +0.197 ± 0.020 on rough and +0.511 ± 0.021 on flat, where the right one is +0.303 ± 0.023 further off, and the stride length and period +0.170 ± 0.009 and +0.121 ± 0.008. On the G1, the teacher's own body, the order reverses: every seed passes gate C at all three commands of both skills, where the zero-shot model's seeds pass none on rough (3, 2 and 3 on flat), and the largest deviation is 0.072 ± 0.001 against 0.153 ± 0.004 on rough (−0.081 ± 0.004) and 0.063 ± 0.002 against 0.087 ± 0.003 on flat (−0.025 ± 0.004). There too the difference is in the duty factors (rough: left −0.104 ± 0.005, right −0.071 ± 0.009; flat: left −0.052 ± 0.004), while B1's stride period is slightly further off on rough (+0.022 ± 0.001). Training on the skill's own plans brings the G1 closer to its teacher's gait and takes the NAO further from it. Source: `paper_bootstrap.py`, `transfer/paper/data/bootstrap.json`, `bodies.<body>.<skill>.seeds`, `B1, task tracker`, `minus_baseline` (each feature is the mean over the three commands of its |relative deviation|); per seed, `zero_shot_<body>_<body>_task_<skill>{,_s<seed>}_sym_<generator>_auto_kin_l4_*.json`.
 - **B2, the oracle.** `nao/tasks/nao_velocity`: Isaac Lab's recipe for `Isaac-Velocity-{Flat,Rough}-G1-v0` (rewards, commands, terrain, PPO and iterations) on the NAO. Every dimensioned constant is converted with `UnitSystem.convert_to`, each reward weight by its term's dimension times a time, so a dynamically similar motion earns the same return. The control rate, actions, exploration noise, ground and fall definition are the zero-shot trackers'. The policy observes its base velocity, as the published G1 policies do. It is scored against the G1's teacher like the trackers, through `capture_velocity.py`, which `paper_baselines.sh` first holds to `capture_rollouts.py` on the published rough policy.
   - *The rough oracle stands on one leg.* Seed 42 stepped on both feet at iteration 2000 and then, by iteration 3000, settled on its left leg, the right one raised and the right arm held out, while its air-time reward doubled. Isaac Lab's `feet_air_time_positive_biped` pays single stance every step up to its threshold, so the posture earns that term in full; at a slow command, standing still costs little of the tracking kernel. That is the likely reason, not a measured one. It does the same on its training terrain, so it is the policy, not the plane: on the plane it takes no stride at the forward command (table B). Reproduced by `capture_velocity.py --body nao --task-id NaoVelocityRough-v0` with the run's `model_2999` and, on `NaoVelocityRoughOnFlat-Play-v0`, `model_2000`. Seed 43 does the same on the other leg: at the forward command its right foot is in contact 99.8 % of the time and its left 3.3 %, at a speed of -0.02 of the teacher's, and it reaches 0.72 at the fast command and 0.30 turning (`oracle_nao_rough_s43_l4_*.json`, run `oracle`, `signature.duty_factor`). Its air-time term rose the same way, from 0.012 at iteration 2000 to 0.030 at 2999, against seed 42's 0.020 to 0.041 (`logs/contract/train_oracle_rough{,_s43}.log`, `Episode_Reward/feet_air_time`). Two seeds make it the recipe on this body, not the seed; the cause is still the hypothesis above. Seed 43 first crashed on runaway actions; it is the run retrained under ddfbb72's action bound, whose Isaac check reproduced seed 42's forward result.
 - **B3, joint retargeting.** `transfer/retarget.py` maps the teacher's joint angles through `correspondence.py`'s names and signs, by each of three value maps (copy; offset about each robot's nominal posture; fraction of range), clamped to the NAO's limits, on the NAO's clock (one NAO step reads the teacher 1.625 steps on). `nao/tasks/nao_imitate` imitates them DeepMimic-style (reference state initialisation; pose 0.65, joint rates 0.1, base velocity 0.1, yaw rate 0.1) on the trackers' body. Its actions are the trackers' offsets of 0.25 rad, about the reference's next row instead of the crouch: the zero action plays the reference back and the policy learns the feedback around it (residual policy learning, Silver et al. 2018; on a biped's reference motion, Xie et al. 2018), so the baseline gets the joint signal in its most favourable form. About the crouch, the first design, the pose reward had no gradient: the retargeted references sit so far from the zero action that its kernel is ~0 there. It trains on the teacher's DART capture and is tested on the teacher's own play capture at each L4 command.
@@ -100,10 +101,10 @@ One column per training seed, S's (G1/NAO); the first is the incumbent's. Source
 
 | Body | Skill | Zero-shot (adopted) | Task-specific, seed 41/31 | Task-specific, seed 42/32 | Task-specific, seed 43/33 |
 | --- | --- | --- | --- | --- | --- |
-| G1 | rough | 0/192, passes 0/3, speed 1.00–1.05 | 0/192, passes 3/3, speed 1.01–1.05 | — | — |
-| G1 | flat | 0/192, passes 3/3, speed 1.06–1.14 | 0/192, passes 3/3, speed 1.06–1.13 | — | — |
-| NAO | rough | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.00–1.04 | — | — |
-| NAO | flat | 0/192, passes 0/3, speed 1.04–1.12 | 0/192, passes 0/3, speed 1.04–1.13 | — | — |
+| G1 | rough | 0/192, passes 0/3, speed 1.00–1.05 | 0/192, passes 3/3, speed 1.01–1.05 | 0/192, passes 3/3, speed 1.01–1.05 | 0/192, passes 3/3, speed 1.00–1.04 |
+| G1 | flat | 0/192, passes 3/3, speed 1.06–1.14 | 0/192, passes 3/3, speed 1.06–1.13 | 0/192, passes 3/3, speed 1.06–1.14 | 0/192, passes 3/3, speed 1.06–1.12 |
+| NAO | rough | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.00–1.04 | 0/192, passes 0/3, speed 1.00–1.04 |
+| NAO | flat | 0/192, passes 0/3, speed 1.04–1.12 | 0/192, passes 0/3, speed 1.04–1.13 | 0/192, passes 0/3, speed 1.04–1.10 | 0/192, passes 0/3, speed 1.04–1.14 |
 
 ### B2 — zero-shot against the oracle: the NAO trained on the skill's own task
 
@@ -131,6 +132,8 @@ Mean over the three L4 commands of each gate C feature's |relative deviation| (t
 | --- | --- | --- | --- | --- | --- | --- |
 | NAO | rough | zero-shot | 0.04 | 0.03 | 0.15 | 0.03 |
 | NAO | rough | B1, task tracker | 0.07 | 0.07 | 0.33 | 0.06 |
+| NAO | rough | B1, task tracker, seed 32 | 0.08 | 0.09 | 0.36 | 0.08 |
+| NAO | rough | B1, task tracker, seed 33 | 0.08 | 0.08 | 0.35 | 0.06 |
 | NAO | rough | B2, oracle, seed 42 | no stride on forward | no stride on forward | 0.65 | 0.66 |
 | NAO | rough | B2, oracle, seed 43 | 1.12 | 2.84 | 0.60 | 0.50 |
 | NAO | rough | B2b, bounded, seed 42 | 1.88 | 5.34 | 0.30 | 0.26 |
@@ -142,6 +145,8 @@ Mean over the three L4 commands of each gate C feature's |relative deviation| (t
 | NAO | rough | B3, copy, seed 44 | 0.10 | 0.11 | 0.04 | 0.19 |
 | NAO | flat | zero-shot | 0.04 | 0.03 | 0.14 | 0.17 |
 | NAO | flat | B1, task tracker | 0.19 | 0.13 | 0.67 | 0.47 |
+| NAO | flat | B1, task tracker, seed 32 | 0.21 | 0.15 | 0.64 | 0.49 |
+| NAO | flat | B1, task tracker, seed 33 | 0.22 | 0.16 | 0.70 | 0.45 |
 | NAO | flat | B2, oracle, seed 42 | 7.32 | 7.32 | 0.24 | 0.14 |
 | NAO | flat | B2b, bounded, seed 42 | 2.95 | 2.41 | 0.10 | 0.04 |
 | NAO | flat | B2b, bounded, seed 43 | 2.80 | 2.41 | 0.10 | 0.03 |
@@ -158,27 +163,27 @@ Each command's largest gate C deviation, averaged over the three commands, as th
 | Body | Skill | Method | Seeds | Largest deviation | Minus zero-shot |
 | --- | --- | --- | --- | --- | --- |
 | NAO | rough | zero-shot, S's seeds | 3 | 0.149 ± 0.017 (seeds 0.115–0.169) | — |
+| NAO | rough | B1, task tracker | 3 | 0.346 ± 0.010 (seeds 0.326–0.360) | +0.197 ± 0.020 |
 | NAO | rough | B2, oracle | 2 | 2.651 ± 0.319 (seeds 2.332–2.970) | +2.502 ± 0.319 |
 | NAO | rough | B2b, bounded | 2 | 3.798 ± 1.545 (seeds 2.253–5.343) | +3.648 ± 1.545 |
 | NAO | rough | B3, copy | 3 | 0.195 ± 0.026 (seeds 0.147–0.235) | +0.045 ± 0.031 |
 | NAO | rough | zero-shot, adopted | 1 | 0.154 ± 0.002 (environments) | one seed |
-| NAO | rough | B1, task tracker | 1 | 0.326 ± 0.002 (environments) | one seed |
 | NAO | rough | B3, offset | 1 | 0.238 ± 0.001 (environments) | one seed |
 | NAO | rough | B3, range | 1 | 0.464 ± 0.001 (environments) | one seed |
 | NAO | flat | zero-shot, S's seeds | 3 | 0.186 ± 0.014 (seeds 0.162–0.209) | — |
+| NAO | flat | B1, task tracker | 3 | 0.674 ± 0.017 (seeds 0.644–0.703) | +0.488 ± 0.022 |
 | NAO | flat | B2b, bounded | 2 | 2.874 ± 0.078 (seeds 2.797–2.952) | +2.688 ± 0.079 |
 | NAO | flat | B3, copy | 3 | 0.307 ± 0.009 (seeds 0.295–0.325) | +0.122 ± 0.016 |
 | NAO | flat | zero-shot, adopted | 1 | 0.174 ± 0.002 (environments) | one seed |
-| NAO | flat | B1, task tracker | 1 | 0.674 ± 0.003 (environments) | one seed |
 | NAO | flat | B2, oracle, seed 42 | 1 | 7.618 ± 0.003 (environments) | one seed |
 | NAO | flat | B3, offset | 1 | 0.376 ± 0.001 (environments) | one seed |
 | NAO | flat | B3, range | 1 | 0.436 ± 0.001 (environments) | one seed |
 | G1 | rough | zero-shot, S's seeds | 3 | 0.153 ± 0.004 (seeds 0.148–0.161) | — |
+| G1 | rough | B1, task tracker | 3 | 0.072 ± 0.001 (seeds 0.071–0.072) | -0.081 ± 0.004 |
 | G1 | rough | zero-shot, adopted | 1 | 0.148 ± 0.002 (environments) | one seed |
-| G1 | rough | B1, task tracker | 1 | 0.072 ± 0.003 (environments) | one seed |
 | G1 | flat | zero-shot, S's seeds | 3 | 0.087 ± 0.003 (seeds 0.082–0.090) | — |
+| G1 | flat | B1, task tracker | 3 | 0.063 ± 0.002 (seeds 0.058–0.065) | -0.025 ± 0.004 |
 | G1 | flat | zero-shot, adopted | 1 | 0.089 ± 0.002 (environments) | one seed |
-| G1 | flat | B1, task tracker | 1 | 0.058 ± 0.003 (environments) | one seed |
 
 ### T — the gait's deviation from the teacher, decomposed
 

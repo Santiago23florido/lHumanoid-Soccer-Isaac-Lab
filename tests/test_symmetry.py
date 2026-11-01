@@ -162,3 +162,13 @@ def test_an_asymmetric_default_pose_still_reflects_exactly() -> None:
     x = rng.normal(size=(3, 8))
     once = x @ m.linear.T + m.offset
     np.testing.assert_allclose(once @ m.linear.T + m.offset, x, atol=1e-12)
+
+
+def test_the_priors_feedforward_reflects_as_a_joint_velocity(g1: dict) -> None:
+    names = [row["name"] for row in g1["joints"]]
+    p = joint_mirror(names, g1)
+    mean, std = np.zeros(SKILL_LAYOUT.size), np.ones(SKILL_LAYOUT.size)
+    torque = observation_mirror([("feedforward", len(names))], p, mean, std)
+    velocity = observation_mirror([("joint_vel", len(names))], p, mean, std)
+    np.testing.assert_allclose(torque.linear, velocity.linear)
+    np.testing.assert_allclose(torque.offset, 0.0)

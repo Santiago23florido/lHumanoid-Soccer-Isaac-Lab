@@ -71,6 +71,9 @@ PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
 """Share of training episodes following the point-mass biped's plans (§8 of skill_space.md)."""
 
 CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
+LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
+"""How the reward scores the feet's loads (``ReferenceCommandCfg.load_space``)."""
+LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_nao.json"
 
 COMMAND = "base_velocity"
 BASE_BODY = "base_link"
@@ -132,6 +135,21 @@ def sole_points() -> list[list[float]]:
         list(map(float, (np.linalg.inv(poses[foot]) @ poses[sole])[:3, 3]))
         for foot, sole in zip(nk.FOOT_BODIES, nk.SOLE_FRAMES, strict=True)
     ]
+
+
+def sole_corners() -> list[list[list[float]]]:
+    """Each foot's sole corners in its link frame: the support polygon about its sole point.
+
+    The polygon is stated for the right foot, wider on its outer edge; the left mirrors it.
+    """
+    corners = []
+    for side, sole in zip(("left", "right"), sole_points(), strict=True):
+        low, high = nk.SUPPORT_POLYGON_Y_SINGLE
+        lateral = (-high, -low) if side == "left" else (low, high)
+        corners.append(
+            [[sole[0] + x, sole[1] + y, sole[2]] for x in nk.SUPPORT_POLYGON_X for y in lateral]
+        )
+    return corners
 
 
 @configclass
@@ -248,6 +266,7 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             base_body=BASE_BODY,
             foot_bodies=FOOT_BODIES,
             sole_points=sole_points(),
+            sole_corners=sole_corners(),
             leg_length=NAO.leg_length,
             flow_solver="midpoint",
             flow_steps=8,
@@ -263,6 +282,8 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             resync_error=float("inf"),
             procedural_fraction=PROCEDURAL,
             procedural_calibration=str(CALIBRATION),
+            load_space=LOAD_SPACE,
+            load_precision=str(LOAD_PRECISION),
         )
 
         self.observations = NaoTrackObservationsCfg()

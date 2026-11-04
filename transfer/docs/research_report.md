@@ -133,6 +133,12 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 1. **The generator blurs contact transitions.** Its plans spend 0.10–0.11 of the time
    in light contact (5–25 % of the weight) where the flat teacher spends 0.03–0.04; on
    rough 0.13–0.18 against 0.08–0.15.
+   - *Not the sampler (W2, validated offline).* Midpoint 8 up to Euler 64 give the same
+     light share within 0.003 (`sampler_sharpness.json`).
+   - *Not the training noise.* `flat_b3`, trained at the body's own noise, blurs more
+     (0.136).
+   - *Not the data.* The training captures hold 0.04–0.05 on flat. Every flow variant
+     produces 2–3× the light contact it was trained on: a learned property.
 2. **The interface lengthens the NAO's asked stances.** The same linear blend as 2.1, in
    `plan_interpolation` and `TimeGrid.interpolation`: the NAO is asked 0.022–0.030 more
    duty than the generator plans (predicted by `chain_at_rate.py`, whose linear chain
@@ -145,17 +151,27 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
    - *The family.* It asks for light contact 5.5 % of the time.
    - *Real and procedural plans are treated differently.* On procedural plans the
      zero-shot stance runs 0.02 *longer* than asked; on rough's plans 0.09 shorter.
-4. **The NAO lifts its feet half as high as asked.**
-   - *Clearance.* Plans ask 0.07–0.09 `L`; the body gives 0.03–0.05; B1-NAO gives 0.01,
-     with grazes in half of every planned swing.
-   - *Hypotheses.* Joint-speed feasibility in body time: the NAO's hip pitch is
-     1.02 rad/`T` against the G1's 8.27. Or a reward local optimum. Not yet tested.
+4. **The NAO lifts its feet half as high as asked, at every cadence.**
+   - *On the skills.* Plans ask 0.07–0.09 `L`; the body gives 0.03–0.05; B1-NAO gives
+     0.01, with grazes in half of every planned swing.
+   - *On the family's probes* (`clearance_probes.json`, from `clearance_probes.py`): 0.53–
+     0.64 of the asked clearance on the grid, the slowest strides (2.6 `T`) included, and
+     0.37–0.47 on the corners (asked 0.055–0.129 `L`, reached 0.026–0.048). The G1 reaches
+     0.93–1.06 everywhere.
+   - *Not a body limit.* The NAO lifts higher when asked higher, and B2 (the NAO trained on
+     the task's own reward) lifts 0.08–0.31 `L`.
+   - *Not a loose reward.* Foot height is scored at 0.0016–0.0020 `L` on the NAO, as on the
+     G1, so the shortfall costs 15–20 tolerances.
+   - *What remains.* A learned shortfall of the NAO's tracker; the mechanism is open.
+     Hypotheses: a trade against balance at the NAO's sixth of the G1's knee torque; the
+     4-sample view, against the G1's 8.
 
 ### 2.3 Unresolved
 
-- Why the trackers lift early at light loads: family coverage (hypothesis H3) or reward
-  resolution.
-- Whether the NAO's clearance is physically feasible at the teacher's cadence.
+- Why the trackers lift early at light loads: family coverage (hypothesis H3, W3) or
+  reward resolution.
+- Why the NAO's tracker under-lifts, when its body can lift and its reward charges the
+  shortfall.
 - Whether B1-NAO's shuffle is the interpolated plans' doing (W4).
 - The true-state path's short strides on flat (instrumentation).
 
@@ -177,6 +193,18 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   - *Reward re-weighting of the load field.* The log-load study already covers the
     resolution argument, and weighting is a tuning knob, not a mechanism.
   - *Changing the contact threshold.* It moves the metric, not the gait.
+- **The family's load shape, a design corrected before training.**
+  - *First design.* An impulse-normalised `sin(πs)^p` was built first. Printed at substep
+    resolution, a peakier stance only deepened both ends into sub-threshold tails: the
+    light share moved 0.064 → 0.066.
+  - *What real stances do.* The teachers' stances are front-loaded (near peak in the
+    first tenth, slow drain before lift-off).
+  - *What replaced it.* The time warp `κ s^(κ−1) sin(π s^κ)`, which has that shape for
+    κ < 1 and keeps the impulse by a change of variables.
+  - *The data-hygiene cost.* The direction of the change was chosen after looking at the
+    teachers' profiles; this is declared in §10.5.
+- **Robustness (W5) is instrumentation.** Pushes and a degraded estimate decide nothing;
+  they are added because no evaluation so far perturbed a body.
 
 ## 4. Experiment log
 
@@ -186,7 +214,11 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-04 | a463723 | The at-rate verdict recomputed without bias | Section 2.1 | `body_rate_verdicts.json` |
 | 2026-11-04 | 03cdd5b | W1 offline: the generator chained at each body's rate, both spaces | Prediction: NAO asked duty −0.022 to −0.030; G1 identical | `chain_at_rate.json` |
 | 2026-11-04 | b6c0930 | W1 queued on the NAO's frozen trackers (control re-run, then 3 trackers × 2 skills + S0 walk) | waiting for the machine | `logs/contract/w1_resample.status` |
-| 2026-11-04 | (this commit) | W2 offline: integrators and generator variants against the teacher's futures | Hypothesis fails: the blur is learned (light 0.105 at every integrator vs the teacher's 0.032) | `sampler_sharpness.json` |
+| 2026-11-04 | b0787fd | W2 offline: integrators and generator variants against the teacher's futures | Hypothesis fails: the blur is learned (light 0.105 at every integrator vs the teacher's 0.032) | `sampler_sharpness.json` |
+| 2026-11-04 | b9e7c4f | The family's load-transfer warp (code, tests; unshaped bit-identical to HEAD) | κ = 0.5 raises light contact 0.065 → 0.097 at duty 0.6, impulse kept | `tests/test_procedural_shape.py` |
+| 2026-11-04 | 3572bb7 | W3 and W4 pre-registered and queued behind W1 | waiting for W1 | `logs/contract/w3_w4.status` |
+| 2026-11-04 | 8dd2368 | W5 robustness probes, queued behind W3/W4 | waiting | `logs/contract/w5_robust.status` |
+| 2026-11-04 | (this commit) | Clearance asked vs reached on the family's probes | NAO 0.37–0.64 of asked at every cadence; G1 0.93–1.06 | `clearance_probes.json` |
 
 ## 5. Comparative evaluation
 

@@ -207,14 +207,18 @@ class ReferenceCommand(UniformVelocityCommand):
         """Envs whose episode follows the point-mass biped instead of the task's generator."""
         self.biped = None
         if cfg.procedural_fraction > 0.0 or cfg.procedural_probes:
+            ranges = GaitRanges(load_shape=tuple(float(v) for v in cfg.procedural_load_shape))
+            # Probes that name a load profile need the shaped biped, whatever the ranges.
+            named = any("load_shape" in p for p in (cfg.procedural_probes or []))
             self.biped = PointMassBiped(
                 n,
-                GaitRanges(),
+                ranges,
                 body_step=self.dt_star,
                 substep=grid_step / 4,
                 horizon=length * self.dt_star,
                 device=self.device,
                 seed=cfg.procedural_seed,
+                shaped=ranges.shaped or named,
             )
             offsets = torch.arange(1, length + 1, dtype=torch.float64) * self.dt_star
             self.biped.set_offsets(offsets)
@@ -274,6 +278,10 @@ class ReferenceCommand(UniformVelocityCommand):
         params["offset"] = torch.tensor(
             [float(probes[w].get("offset", 0.5)) for w in which], device=self.device
         )
+        if any("load_shape" in p for p in probes):
+            params["load_shape"] = torch.tensor(
+                [float(probes[w].get("load_shape", 1.0)) for w in which], device=self.device
+            )
         self.biped.set_probes(torch.arange(n, device=self.device), params)
         self.probe_index = torch.tensor(which, device=self.device)
 
@@ -947,6 +955,12 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     """``procedural_calibration.json``: the biped's model error per component."""
 
     procedural_seed: int = 0
+
+    procedural_load_shape: tuple[float, float] = (1.0, 1.0)
+    """Range of the time warp of a walking stance's half-sine of load (``GaitRanges.load_shape``,
+    ``latent/procedural.py``): ``(1, 1)``, the half-sine, as every tracker before 2026-11-04
+    practised; ``(0.5, 2)`` adds the slow load transfers of real stances (``skill_space.md``
+    §10.5)."""
 
     plan_trust: bool = False
     """Measure each plan source's sampling noise online (``latent/plan_trust.py``): two plans a

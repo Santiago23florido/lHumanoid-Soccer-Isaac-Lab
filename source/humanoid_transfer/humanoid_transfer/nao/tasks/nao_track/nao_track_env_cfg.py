@@ -76,6 +76,9 @@ LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
 RESAMPLE_SPACE = os.environ.get("HUMANOID_RESAMPLE", "linear")
 """How plans and histories are read between the generator's grid and this body's steps
 (``ReferenceCommandCfg.resample_space``)."""
+LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
+"""Range of the procedural stances' load-profile warp
+(``ReferenceCommandCfg.procedural_load_shape``)."""
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_nao.json"
 
 COMMAND = "base_velocity"
@@ -287,6 +290,7 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             procedural_calibration=str(CALIBRATION),
             load_space=LOAD_SPACE,
             resample_space=RESAMPLE_SPACE,
+            procedural_load_shape=LOAD_SHAPE,
             load_precision=str(LOAD_PRECISION),
         )
 

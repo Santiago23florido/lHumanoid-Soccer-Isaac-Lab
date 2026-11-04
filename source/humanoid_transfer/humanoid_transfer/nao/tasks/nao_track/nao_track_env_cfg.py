@@ -81,7 +81,7 @@ LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1"
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_nao.json"
 SOLE = os.environ.get("HUMANOID_SOLE", "urdf")
 """Where ``z*`` puts each foot (:func:`sole_points`): ``urdf``, the URDF's sole frame, as
-every NAO tracker before 2026-11-05 had it, or ``contact``, where a flat, loaded foot
+every NAO tracker before W6 had it, or ``contact``, where a flat, loaded foot
 rests in the simulator, :data:`~humanoid_transfer.nao.assets.nao_kinematics.SOLE_REST`
 lower -- the G1's definition, so a stance sole reads height 0 as every plan asks."""
 if SOLE not in ("urdf", "contact"):

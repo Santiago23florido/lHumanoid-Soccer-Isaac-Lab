@@ -52,6 +52,7 @@ from ...latent.contract import load_contract, plan_integrals
 from ...latent.memory import TimeGrid
 from ...latent.plan_trust import PlanTrust, smooth_noise, sway
 from ...latent.procedural import GaitRanges, PointMassBiped
+from ...latent.resampling import RESAMPLE_SPACES, plan_interpolation, resample_rows
 from ...latent.skill_torch import BodyConstants, proprioceptive_skill_state, skill_state
 
 if TYPE_CHECKING:
@@ -66,27 +67,6 @@ _YAW_RATE = SKILL_LAYOUT.slice_of("base_angular_velocity").start + 2
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
 _TILT = SKILL_LAYOUT.slice_of("gravity")
 """Normalised units: fifty standard deviations of the teacher's ``z*``."""
-
-
-def plan_interpolation(grid_step: float, horizon: int, dt_star: float) -> torch.Tensor:
-    """``(L, horizon + 1)``: a plan (now, then ``horizon`` grid samples) at the body's steps.
-
-    Row ``j`` is the instant ``(j + 1) * dt_star`` after the plan was drawn, as
-    long as it lies within the plan. When the body's step equals the grid's,
-    this selects the plan's samples one by one.
-    """
-    length = math.floor(horizon * grid_step / dt_star + _TOLERANCE)
-    matrix = torch.zeros(length, horizon + 1)
-    for j in range(length):
-        position = (j + 1) * dt_star / grid_step
-        low = min(math.floor(position + _TOLERANCE), horizon)
-        weight = position - low
-        if weight < _TOLERANCE or low == horizon:
-            matrix[j, low] = 1.0
-        else:
-            matrix[j, low] = 1.0 - weight
-            matrix[j, low + 1] = weight
-    return matrix
 
 
 class ReferenceCommand(UniformVelocityCommand):
@@ -141,6 +121,9 @@ class ReferenceCommand(UniformVelocityCommand):
             [1.0 / units.velocity, 1.0 / units.velocity, units.time], device=self.device
         )
         generator = self.generator
+        if cfg.resample_space not in RESAMPLE_SPACES:
+            raise ValueError(f"unknown resample_space {cfg.resample_space!r}")
+        self.resample_space = cfg.resample_space
         grid_step = float(generator.grid_step)
         grid = TimeGrid(step=grid_step, samples=generator.history)
         self.interpolation = torch.tensor(
@@ -604,7 +587,8 @@ class ReferenceCommand(UniformVelocityCommand):
             [c * moved[:, 0] - s * moved[:, 1], s * moved[:, 0] + c * moved[:, 1]], dim=-1
         )
         reference_yaw = self.start_yaw[ids] + moved[:, 2]
-        window = torch.einsum("hs,nsd->nhd", self.interpolation, self.history[ids])
+        space = self.resample_space
+        window = resample_rows(self.generator, self.interpolation, self.history[ids], space)
         command = self.vel_command_b[ids] * self.command_scale
         noise = torch.randn(len(ids), self.generator.noise_size, device=self.device)
         with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
@@ -613,7 +597,7 @@ class ReferenceCommand(UniformVelocityCommand):
         # generator's answer to them is meaningless but must stay finite.
         plan = torch.nan_to_num(plan, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
         full = torch.cat([window[:, -1:], plan], dim=1)
-        rows = torch.einsum("lk,nkd->nld", self.plan_matrix, full)
+        rows = resample_rows(self.generator, self.plan_matrix, full, space)
         step = float(self.generator.grid_step)
         integrals = plan_integrals(self.generator.skill_norm.inverse(plan), step)
         integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
@@ -624,8 +608,8 @@ class ReferenceCommand(UniformVelocityCommand):
             with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
                 second = self.generator.sample(window, command, torch.randn_like(noise)).float()
             second = torch.nan_to_num(second, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
-            second = torch.einsum(
-                "lk,nkd->nld", self.plan_matrix, torch.cat([window[:, -1:], second], dim=1)
+            second = resample_rows(
+                self.generator, self.plan_matrix, torch.cat([window[:, -1:], second], dim=1), space
             )
             task_disagreement = (rows - second).pow(2)
         applied = torch.zeros(rows.shape[1:], device=self.device)
@@ -909,6 +893,14 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     load_precision: str = ""
     """With ``load_space="log"``: a ``load_precision.py`` report; its ``log_rms`` is the scale."""
+
+    resample_space: str = "linear"
+    """How the contract is read between the generator's grid and the body's instants (the
+    history onto the grid, each plan back onto the body's steps): ``linear``, as every run
+    before 2026-11-04, or ``generator`` -- in the generator's own space, the loads as
+    ``log(load + 0.01)``. Linear blends of loads lengthen every stance a body is asked for,
+    by 0.02-0.03 of the duty on the NAO (``latent/resampling.py``, ``skill_space.md`` §10). A
+    body whose step equals the grid's (the G1) is bit-identical in either space."""
 
     tolerance: str = "precision"
     """``precision``: the encoder's error (a plan is a commitment); ``spread``: the

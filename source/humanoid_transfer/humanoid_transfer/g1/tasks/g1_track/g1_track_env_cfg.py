@@ -66,6 +66,9 @@ PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
 CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
 LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
 """How the reward scores the feet's loads (``ReferenceCommandCfg.load_space``)."""
+RESAMPLE_SPACE = os.environ.get("HUMANOID_RESAMPLE", "linear")
+"""How plans and histories are read between the generator's grid and this body's steps
+(``ReferenceCommandCfg.resample_space``)."""
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_g1.json"
 
 BASE_BODY = "pelvis"
@@ -201,6 +204,7 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             procedural_fraction=PROCEDURAL,
             procedural_calibration=str(CALIBRATION),
             load_space=LOAD_SPACE,
+            resample_space=RESAMPLE_SPACE,
             load_precision=str(LOAD_PRECISION),
         )
 

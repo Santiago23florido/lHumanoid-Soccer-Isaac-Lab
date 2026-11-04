@@ -2247,6 +2247,27 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
   confirm or rule out a large effect, not resolve a small one; if B1-NAO comes within the
   zero-shot model's seed range, two more seeds are queued before anything is written.
 
+### 10.7 Robustness, reported beside the criteria (W5)
+
+None of the pre-registered evaluations pushes a body or degrades its estimate. W5 adds both,
+as instrumentation: it decides nothing, and it is reported apart.
+- **Setup** (`transfer/scripts/w5_robust.sh`). L4's forward command of both skills,
+  deployed as L4 deploys, 32 environments × 900 steps.
+- **Pushes.** The base is pushed by up to 0.1 or 0.2 `V` in each horizontal direction,
+  every 20 `T` on average (`capture_contract.py --push`, Isaac Lab's
+  `push_by_setting_velocity`). In body units both bodies get the same disturbance,
+  dynamically; on the G1, 0.2 `V` is about the 0.5 m/s Isaac Lab trains its published
+  policies against.
+- **A worse estimate.** Gaussian noise of 2 or 4 times the estimator's measured precision
+  on the deployed `ẑ*` (`--estimate-noise`, `ReferenceCommandCfg.estimate_noise`, 0
+  everywhere else).
+- **Trackers.**
+  - Both incumbents.
+  - The NAO's under the generator-space interface (W1).
+  - W3's first seeds and their controls, where they exist.
+- **Read.** Falls, speed ratio, the gait's deviation from the teacher, and the contact
+  metrics.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

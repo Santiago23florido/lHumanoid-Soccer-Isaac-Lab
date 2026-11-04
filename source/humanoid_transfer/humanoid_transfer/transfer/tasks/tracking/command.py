@@ -86,6 +86,9 @@ class ReferenceCommand(UniformVelocityCommand):
         if cfg.use_encoder and self.encoder is None:
             raise ValueError(f"{cfg.contract} carries no encoder")
         self.sigma = contract.sigma.to(self.device) * cfg.noise_scale
+        self.precision = contract.sigma.to(self.device)
+        """The body estimator's measured error per dimension (normalised): the unit of
+        ``estimate_noise``."""
 
         self.sensor = env.scene[cfg.sensor_name]
         foot_ids, foot_names = self.robot.find_bodies(cfg.foot_bodies, preserve_order=True)
@@ -448,6 +451,14 @@ class ReferenceCommand(UniformVelocityCommand):
     def _estimate(self) -> torch.Tensor:
         if self.encoder is None:
             return self._true_now + self.sigma * torch.randn_like(self._true_now)
+        estimate = self._deployed_estimate()
+        if self.cfg.estimate_noise > 0.0:
+            # Robustness probe: the deployed estimate read worse, by multiples of its precision.
+            precision = self.precision * self.cfg.estimate_noise
+            estimate = estimate + precision * torch.randn_like(estimate)
+        return estimate
+
+    def _deployed_estimate(self) -> torch.Tensor:
         with torch.no_grad():
             learned = self.encoder(self.encoder_input())
         if self.cfg.estimator == "encoder":
@@ -884,6 +895,11 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     noise_scale: float = 1.0
     """Multiplies the encoder error used as noise on the true state while training."""
+
+    estimate_noise: float = 0.0
+    """On the deployed path only, a robustness probe: Gaussian noise added to the deployed
+    estimate, in multiples of the estimator's measured precision (the contract's ``sigma``).
+    0 in training and in every pre-registered evaluation."""
 
     flow_solver: str | None = None
     """Overrides the generator's integrator (``euler`` or ``midpoint``); None keeps it."""

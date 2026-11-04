@@ -246,6 +246,7 @@ def main() -> int:
             args_cli.reference or ("autonomous" if term.cfg.autonomous else "physical")
         ),
         encoder=np.bool_(term.encoder is not None),
+        resample_space=np.array(getattr(term, "resample_space", "linear")),
         seed=np.int64(args_cli.seed),
         settle_steps=np.int64(args_cli.settle_steps),
         **arrays,

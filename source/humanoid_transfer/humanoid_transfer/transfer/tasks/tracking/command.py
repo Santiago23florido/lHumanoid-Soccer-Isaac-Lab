@@ -238,8 +238,8 @@ class ReferenceCommand(UniformVelocityCommand):
     def __str__(self) -> str:
         return (
             f"ReferenceCommand: contract {self.cfg.contract}, dt* {self.dt_star:.4f}, "
-            f"commit {self.commit}, view {self.view}, encoder {self.encoder is not None}\n"
-            + super().__str__()
+            f"commit {self.commit}, view {self.view}, encoder {self.encoder is not None}, "
+            f"resample {self.resample_space}\n" + super().__str__()
         )
 
     def _procedural_tolerance(self, sigma: torch.Tensor, length: int) -> torch.Tensor:

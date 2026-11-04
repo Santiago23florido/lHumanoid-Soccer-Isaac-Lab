@@ -1292,6 +1292,10 @@ Limits and stopping rules:
     duty 0.6–7.6 %, period 1.6–2.5 %, stride 1.8–8.5 %.
   - This comparison is post hoc. It is reported beside the pre-registered verdict and does
     not replace it.
+  - > **Correction (2026-11-04, §10.1).** The resampling behind this comparison interpolated
+    > the loads linearly, which lengthens the teacher's stances by 0.03–0.06; resampled
+    > without that bias, the NAO is not within 10 % at any command. The same holds for the
+    > "control rate" readings below.
 - **Pre-registered for the blind test**, before any of the rough policy's data is
   captured: across bodies, gate C compares a body with the teacher's gait measured at
   that body's control rate (resampled in body time). Both verdicts are reported — this
@@ -1299,12 +1303,13 @@ Limits and stopping rules:
   one body.
 - **The NAO's tracker is frozen** at round 1, deployed symmetrized: the duty gap is the
   control rate, which no tracker round can change. The second NAO round allowed by the
-  protocol is not used.
+  protocol is not used. *(The premise is withdrawn in §10.1.)*
 - **The cross-body verdict, implemented.** `evaluate_contract.py` adds
   `verdict_at_body_rate` whenever a run's control rate differs from the teacher's.
   Recomputed with it, the NAO's flat L4 passes at every command: duty 0.7–8.2 %, stride
   1.7–8.4 %, period 1.4–2.6 %, against the policy's gait at the NAO's rate. This is the
-  same post hoc reading as above, now the tool's.
+  same post hoc reading as above, now the tool's. *(Corrected in §10.1: with the loads
+  resampled without bias it passes no command; `verdict_at_body_rate_unbiased`.)*
 - **The blind test, pre-registered whole before any of its data exists**
   (`transfer/scripts/blind_test.sh`). No rollout, generator or result of
   `Isaac-Velocity-Rough-G1-v0` exists at this commit. The recipe is the published flat
@@ -1762,7 +1767,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
       384 episodes);
     - the published flat policy, the same and passing every command on both;
     - the NAO still misses the duty on rough's fast and turning commands at its own rate.
-- **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
+- **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case. *(Corrected in §10.1: "at the body's rate" carried a resampling bias. Against the teacher's own grid, or at the rate resampled without it, the NAO misses the duty at every command of both skills; part of the excess is in the plans it is asked for, §10.3.)*
 - **F4 at equal competence: the warm study** (`transfer/scripts/warm_study.sh`). Both arms
   start from the incumbent (r3, iteration 6194) and get 1000 PPO iterations under the
   study's conditions:
@@ -1967,7 +1972,9 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     deviation from the teacher's signature stays 0.10–0.18 (control 0.07–0.19), and S0's
     walk is 1.00. The NAO's duty gap is mostly its control rate: its step is 1.62 × the G1's
     in body time, and the G1's own plans sampled at the NAO's rate show the same stance.
-    A reward cannot charge that as a graze. On the NAO only the physics prior moved the duty
+    A reward cannot charge that as a graze. *(Corrected in §10.1: the "same stance" came from
+    sampling the plans by linear interpolation of the loads, which lengthens every stance; a
+    duty factor does not depend on the rate. The NAO's gap is not its control rate.)* On the NAO only the physics prior moved the duty
     (flat, passes 3 of 3).
   - *Step 4, the physics decoder on the NAO*, at equal competence with the NAO's own control.
     The control is the incumbent r1_3498's PPO continued in its task; the physics arm is
@@ -2010,6 +2017,130 @@ There is no new blind test: Isaac Lab publishes no other G1 skill. The report sa
 - flat is semi-blind;
 - rough was diagnosed;
 - the strong evidence is the competence map, its corners and the ablations.
+
+## 10. Contact transitions across the chain (2026-11-04)
+
+Every published-policy transfer now runs without falls on both bodies; what fails gate C is
+the gait, and on both bodies it is the duty factor (G1 rough 0 of 3 commands; the NAO 0 of
+6 on its own grid). This section follows the stride's contact transitions through the
+chain -- teacher, generator, the contract's resampling, tracker, physics, and the
+evaluation itself -- one link at a time. The record of the study, with its reasons and
+everything rejected, is [`research_report.md`](research_report.md).
+
+### 10.1 A correction: "at the body's rate" was a resampling artifact
+
+`evaluate_contract.signature_at_rate` resampled the teacher's `z*` to a body's control
+instants by interpolating every field linearly, the feet's loads included, and then read
+contact as a load above 5 % of the weight. Between a stance sample (about half the
+weight) and a swing sample (zero) the blend stays above 5 % for nine tenths of the
+interval, so every swing boundary reads as contact. A duty factor is a fraction of time:
+sampled at any rate it is estimated without bias, and the rate cannot lengthen it.
+
+Measured on the teacher's own captures, resampled from the G1's step (0.0774 `T`) to the
+NAO's (0.1258 `T`) (`transfer/scripts/contact_fidelity.py`, field `teacher.duty_at_rate`
+of `transfer/results/contact_fidelity_l4.json`; flat forward shown, every capture alike):
+
+| resampling of the loads | duty, left / right |
+| --- | --- |
+| none (the teacher's own grid) | 0.470 / 0.528 |
+| linear, as `verdict_at_body_rate` did | **0.530 / 0.582** |
+| in log units, `log(load + 0.01)` | 0.477 / 0.534 |
+| nearest sample | 0.470 / 0.529 |
+
+Over the six teacher captures linear interpolation adds 0.03 to 0.06; nearest sampling and
+log units stay within 0.01. `verdict_at_body_rate` is kept unchanged, for comparison with
+every earlier result; `verdict_at_body_rate_unbiased` (log units, the nearest-sample
+signature beside it) is added. Recomputed for every NAO result already on disk, without
+changing any of them (`transfer/scripts/body_rate_verdicts.py`,
+`transfer/results/body_rate_verdicts.json`):
+
+| deployed path, commands passing | own grid | at the rate, linear (as recorded) | at the rate, unbiased |
+| --- | --- | --- | --- |
+| NAO incumbent, `flat_dagger2` | 0 / 3 | 3 / 3 | 0 / 3 |
+| NAO incumbent, `rough_b4` | 0 / 3 | 2 / 3 | 0 / 3 |
+| NAO incumbent, `rough_b3` | 0 / 3 | 1 / 3 | 0 / 3 |
+| B3 copy, rough, seed 42 | 0 / 3 | 2 / 3 | 0 / 3 |
+| NAO physics decoder (`warm_nao_v2t`), flat | 3 / 3 | 2 / 3 | 3 / 3 |
+
+With the loads resampled without bias the verdict at the body's rate agrees with the
+teacher's own grid wherever it was computed, as a rate-invariant quantity should.
+
+**What the wrong reading affected:**
+
+- §8.4: "against what the NAO can represent ... the NAO is within 10 % on every criterion"
+  and "the NAO's flat L4 passes at every command"; the blind test's "at the NAO's control
+  rate only the left foot's duty misses". Under the unbiased reading the NAO passes no
+  command of either skill.
+- §8.4 and §9.1: "the duty gap is the control rate, which no tracker round can change" and
+  "the NAO's duty gap is mostly its control rate". The teacher's duty does not change with
+  the rate. What does change is what the NAO is *asked* for: its plans pass through the
+  same linear interpolation (10.3). The conclusion that no tracker round could help is
+  withdrawn; whether one can is open.
+- The adoption of `rough_b4` (`incumbents.json`): its NAO clause "passes 2 of 3 commands at
+  its rate against 1" becomes 0 against 0. The adoption stands: the deciding term was the
+  G1's falls (2.02 SE), and the NAO's clause asked only that it be no worse.
+- S0's third part counted the NAO's flat L4 as passing at its rate. It does not pass; S0 on
+  the NAO is read from here on as no regression against the incumbent's own numbers.
+- The README's results table (NAO flat "passes 3", rough "2 of 3 at its own rate").
+- Not affected: the paper's tables (`transfer/paper/README.md`), which hold gate C against
+  the teacher's own grid; the G1, whose rate is the teacher's.
+
+### 10.2 Where the transitions are lost, measured (W0)
+
+`common/contact.py` scores each plan against the state that follows it. For every L4
+result of every method (`transfer/results/contact_fidelity_table.json`, from
+`contact_table.py`; deployed path; mean over the three commands, then over seeds):
+
+| | light contact, teacher / plans / body | airborne where light contact is asked | lift-off, touchdown lag (left) | clearance, teacher / body |
+| --- | --- | --- | --- | --- |
+| G1 rough, zero-shot (3 seeds) | 0.14 / 0.18 / 0.05 | 0.53 / 0.47 | −0.067, +0.058 `T` | 0.08 / 0.09 `L` |
+| G1 rough, B1 (3 seeds) | 0.14 / 0.18 / 0.06 | 0.35 / 0.30 | −0.042, +0.037 `T` | 0.08 / 0.08 `L` |
+| NAO flat, zero-shot (3 seeds) | 0.04 / 0.11 / 0.03 | 0.28 / 0.25 | +0.005, −0.010 `T` | 0.10 / 0.05 `L` |
+| NAO flat, B1 (3 seeds) | 0.04 / 0.11 / 0.19 | 0.05 / 0.10 | +0.049, −0.160 `T` | 0.10 / 0.01 `L` |
+
+(light contact: above the threshold, at most a quarter of the weight; per foot, left shown.)
+
+- **The generator blurs.** Its plans ask for light contact three times as often as the
+  flat teacher shows it (0.11 against 0.04), a third more on rough.
+- **The trackers make contact binary.** Asked for a light contact, the G1's zero-shot
+  tracker has its foot in the air half the time; its left foot lifts one step early and
+  lands one late, and the stance falls short of the plan by 0.06–0.09 of the stride. B1,
+  trained on rough's own plans, is airborne a third of the time and keeps the duty. The
+  procedural family asks for light contact 5.5 % of the time
+  (`zs_warm_r3_logload_sym_procedural_starts.npz`), its half-sine stances leaving the load
+  transfers of real gaits mostly unpractised; on procedural plans the same tracker's
+  stance runs *longer* than asked (0.655 against 0.631).
+- **The NAO lifts its feet half as high as asked.** The plans ask the clearance they ask
+  of the G1 (0.07–0.09 `L`); the NAO's body reaches 0.03–0.05, and B1 on the NAO 0.01 --
+  a shuffle, its feet grazing in half of every planned swing.
+
+### 10.3 Pre-registered: the contract read in the generator's space (W1)
+
+- **Hypothesis.** The NAO is asked for longer stances than the generator plans, because
+  plans and histories are interpolated between the grids in linear load units. Read in
+  the generator's own space, the asked duty comes down to the generator's, and the body
+  follows.
+- **The change.** `ReferenceCommandCfg.resample_space = "generator"` (`HUMANOID_RESAMPLE`):
+  history and plan are blended with the loads as `log(load + 0.01)`
+  (`latent/resampling.py`). Nothing is trained; the G1, whose step is the grid's, is
+  bit-identical in either space (`tests/test_resampling.py`).
+- **Prediction, offline** (`transfer/scripts/chain_at_rate.py`, the generator chained as
+  the autonomous reference runs it; `transfer/results/chain_at_rate.json`). The linear
+  chain reproduces every recorded L4 capture's asked duty within 0.007. In the generator's
+  space the asked duty falls by 0.022–0.030 at every command of both skills, period,
+  stride and speed unchanged.
+- **Test.** The frozen NAO trackers -- the incumbent `r1_3498` and S's seeds 32 and 33,
+  symmetrized -- through L4 of `flat_dagger2` and `rough_b4`, and S0's walk, with
+  `HUMANOID_RESAMPLE=generator`; paired with their existing linear captures, of which one
+  is re-run first to confirm it reproduces.
+- **Criterion.** Target: the mean over the three commands and both skills of the two duty
+  factors' relative deviation from the teacher's own grid, lower than linear's by more
+  than twice the standard error of the three paired seed differences. No regression:
+  falls, speed ratio at least 0.9, stride length and period no worse by twice their
+  standard error, and S0's walk passing. Gate C is reported on all three references.
+- **What it does not test.** Whether a tracker *trained* under the generator space does
+  better still (30 % of its training plans pass through this interpolation); that is a
+  later step, only if this one passes.
 
 ## What this stage hands to the next
 

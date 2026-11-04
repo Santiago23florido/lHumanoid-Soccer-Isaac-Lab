@@ -2169,6 +2169,84 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
   re-running S0, so it waits for review. The tracker side (W3) does not depend on it: B1,
   trained on these same blurred plans, keeps the G1's duty.
 
+### 10.5 Pre-registered: load transfers in the family (W3)
+
+- **Hypothesis.** The family's stances are half-sines, which leave the load transfers of
+  real walks mostly unpractised (light contact 5.5 % of the time, against 10–18 % in the
+  tasks' plans; §10.2). The trackers learned that a light load means a swing is imminent,
+  and lift early on real plans. Practising load transfers, without seeing any task, should
+  give back the stance.
+- **What real stances look like** (`g1/rollouts/*.npz`, mean load per tenth of the
+  stance). Every teacher's stance is front-loaded: near its peak in the first tenth (the
+  walk teacher, the trackers' own training skill, 0.97; rough 0.84–0.94), draining slowly
+  before lift-off (rough's last three tenths 0.07–0.20). The half-sine is symmetric and
+  steep at both ends.
+- **The change** (`latent/procedural.py`, `GaitRanges.load_shape`, `HUMANOID_LOAD_SHAPE`).
+  - *The profile.* A walking stance carries the half-sine on a warped clock,
+    `κ s^(κ−1) sin(π s^κ)`, with `κ` drawn log-uniform in [0.5, 2] per segment. This is a
+    change of variables, so every warp keeps the half-sine's impulse: the biped's
+    vertical balance and every gait parameter it writes are untouched (tested; mean load
+    0.500 at every warp).
+  - *The bounds are physical.* Below 0.5 the load at touchdown is infinite; 2 is 0.5's
+    mirror in log.
+  - *Runs keep the half-sine,* because their amplitude is set by its partial impulse.
+  - *Probes* that name no warp stay half-sines, so the pre-registered maps are unchanged.
+  - *Unshaped is bit-identical.* With the range at (1, 1) the biped's plans equal the
+    committed biped's at both bodies' rates; S's seeds are therefore this arm's control.
+  - *Measured, duty 0.6.* Light contact 0.097 at `κ` 0.5, 0.065 for the half-sine, 0.080
+    at 2.
+- **Data hygiene, declared.** The direction of the warp was chosen after looking at the
+  teachers' stance profiles: the walk's (the training skill), flat's and rough's. Its
+  range is symmetric in log about the half-sine and bounded by physics, not fitted to
+  any of them. Rough has been diagnosed; flat is semi-blind; the walk is the training
+  skill.
+- **Step 1, deploy-time** (`transfer/probes/transfer_probes.json`: 12 walking schedules ×
+  warps 0.5, 1 and 2; `transfer_probe_effect.py`).
+  - *Run.* The frozen incumbents, symmetrized.
+  - *Prediction, G1.* At warp 0.5, against the same schedule as a half-sine, the stance
+    falls short of the plan (`duty_body − duty_asked`) by more, and the foot is airborne
+    where light contact is asked more often. Each holds by more than twice the standard
+    error of the twelve paired differences, on at least one foot.
+  - *If it holds,* the failure seen on rough is reproduced inside the family, with no
+    task, and step 3 is its correction. *If not,* steps 3 and 4 are not run, and the
+    finding goes to the user for a new framing.
+  - *The NAO.* Its own step-1 result decides step 4 the same way.
+- **Step 3, the G1.**
+  - *Training.* `r3_6194` continued for 1000 iterations exactly as S's seeds were
+    (`logload_seeds.sh`: log loads, 70 % procedural, mirror loss, the checkpoint's
+    adapted rate), plus `HUMANOID_LOAD_SHAPE=0.5,2`. Seeds 41, 42 and 43, paired with
+    S's `warm_r3_logload`, `warm_r3_s42_log` and `warm_r3_s43_log`.
+  - *Evaluation.* Laddered as S was: map and corners unsymmetrized; rough and flat L4,
+    and S0's walk, symmetrized. The transfer probes run on both arms.
+  - *Target.* The seed mean of L4's largest gate C deviation (the paper's reading, mean
+    over the three commands), on rough and on flat, deployed path. It must be lower than
+    S's by more than twice the combined standard error on at least one skill, and not
+    higher by as much on the other.
+  - *No regression.* Grid and corners pooled, by `compare_seeds.py` (hierarchical
+    bootstrap): not fewer probes mastered by more than twice its standard error. S0's
+    walk passes; the tests pass; the generators are untouched.
+  - *Reported apart.* The contact-fidelity metrics and the transfer probes.
+- **Step 4, the NAO.** `r1_3498` continued as S's NAO seeds were (31, 32, 33; linear
+  loads) plus the shape. The same target and no-regression rule against S's NAO seeds,
+  on the teacher's own grid, under the linear interface (S's), and also under the
+  generator-space interface if W1 confirmed it (reported apart).
+
+### 10.6 Pre-registered: is B1's loss on the NAO the interface's? (W4)
+
+- **Question.** On the NAO, B1 -- the incumbent trained on a skill's own plans -- ends
+  further from the teacher than the zero-shot model (+0.197 and +0.488 in the largest
+  deviation; it shuffles: clearance 0.01 `L`, grazes in half of every planned swing). Its
+  plans were the generator's resampled to the NAO by linear blends of the loads, whose
+  every swing boundary is a light-load ramp; the procedural plans the zero-shot model
+  mostly practised are written at the NAO's own instants and have none.
+- **Run only if W1 passes.** B1-NAO's seed 31 retrained, both skills, exactly as before
+  (`paper_queue.sh b1_nao`) but with `HUMANOID_RESAMPLE=generator` in training and
+  evaluation; laddered as B1 was.
+- **Reading.** Against B1-NAO seed 31 linear and the zero-shot incumbent under the generator
+  space (W1), by the largest deviation and the contact-fidelity metrics. One seed: it can
+  confirm or rule out a large effect, not resolve a small one; if B1-NAO comes within the
+  zero-shot model's seed range, two more seeds are queued before anything is written.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

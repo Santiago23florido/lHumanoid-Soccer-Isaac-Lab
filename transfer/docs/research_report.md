@@ -183,8 +183,10 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | When | Commit | What | Result | File |
 | --- | --- | --- | --- | --- |
 | 2026-11-04 | 3ad68ab | Contact-transition metrics on every L4 result | Section 2.2 | `contact_fidelity_l4.json`, `contact_fidelity_table.json` |
-| 2026-11-04 | (this commit) | The at-rate verdict recomputed without bias | Section 2.1 | `body_rate_verdicts.json` |
-| 2026-11-04 | (this commit) | W1 offline: the generator chained at each body's rate, both spaces | Prediction: NAO asked duty −0.022 to −0.030; G1 identical | `chain_at_rate.json` |
+| 2026-11-04 | a463723 | The at-rate verdict recomputed without bias | Section 2.1 | `body_rate_verdicts.json` |
+| 2026-11-04 | 03cdd5b | W1 offline: the generator chained at each body's rate, both spaces | Prediction: NAO asked duty −0.022 to −0.030; G1 identical | `chain_at_rate.json` |
+| 2026-11-04 | b6c0930 | W1 queued on the NAO's frozen trackers (control re-run, then 3 trackers × 2 skills + S0 walk) | waiting for the machine | `logs/contract/w1_resample.status` |
+| 2026-11-04 | (this commit) | W2 offline: integrators and generator variants against the teacher's futures | Hypothesis fails: the blur is learned (light 0.105 at every integrator vs the teacher's 0.032) | `sampler_sharpness.json` |
 
 ## 5. Comparative evaluation
 

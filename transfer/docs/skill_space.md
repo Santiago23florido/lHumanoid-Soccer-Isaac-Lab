@@ -2142,6 +2142,33 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
   better still (30 % of its training plans pass through this interpolation); that is a
   later step, only if this one passes.
 
+### 10.4 The generator's blur is learned, not the sampler's (W2, offline)
+
+- **Hypothesis.** The plans' excess light contact comes from integrating the flow with too
+  few steps (midpoint, 8), which leaves samples between the stance and swing modes.
+- **Test** (`transfer/scripts/sampler_sharpness.py`, `transfer/results/sampler_sharpness.json`).
+  One plan from each window of the teacher's forward play capture (every 21st step, the
+  deployed estimator's noise on the history), against the future the teacher walked, and
+  the generator's own chain at the G1's rate:
+
+  | generator | light contact, teacher's future | plans | contact changes per plan, teacher / plans |
+  | --- | --- | --- | --- |
+  | `flat_dagger2`, midpoint 8 → 16 → 32, Euler 16 → 64 | 0.032 | 0.105–0.106 at every integrator | 3.00 / 3.11–3.15 |
+  | `flat_h20`, `flat_b3`, `flat_b4` (midpoint 8) | 0.032 | 0.146, 0.136, 0.110 | 3.00 / 3.17–3.78 |
+  | `rough_h20`, `rough_dagger2`, `rough_b3`, `rough_b4` (midpoint 8 and Euler 64 alike) | 0.145 | 0.207, 0.205, 0.174, 0.185 | 2.92 / 3.21–3.73 |
+
+- **Result: the hypothesis fails.** The integrator changes the light share by at most 0.003:
+  the sampler has converged. Training under the body's own noise does not remove it either
+  (`flat_b3` blurs more than `flat_dagger2`). The training data carry 0.04–0.05 on flat
+  (`flat_dart`, `flat_dagger_{1,2}`), so the generator produces 2–3 times the light contact
+  it was trained on, with slightly too many contact changes per plan: a learned property
+  of every flow variant tried.
+- **Not pursued here, for the user.** A generator that represents contact explicitly -- a
+  discrete contact channel next to the continuous loads, as the event model of §7 did for
+  timing alone -- is the structural option; it means retraining every task generator and
+  re-running S0, so it waits for review. The tracker side (W3) does not depend on it: B1,
+  trained on these same blurred plans, keeps the G1's duty.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

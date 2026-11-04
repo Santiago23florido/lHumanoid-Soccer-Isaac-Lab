@@ -282,6 +282,7 @@ def main() -> int:
         resample_space=np.array(getattr(term, "resample_space", "linear")),
         push=np.array(args_cli.push if args_cli.push is not None else [0.0, 0.0]),
         estimate_noise=np.float64(args_cli.estimate_noise or 0.0),
+        sole_points=np.array(term.cfg.sole_points, dtype=np.float64),
         seed=np.int64(args_cli.seed),
         settle_steps=np.int64(args_cli.settle_steps),
         **arrays,

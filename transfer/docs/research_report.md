@@ -160,18 +160,40 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
      0.93–1.06 everywhere.
    - *Not a body limit.* The NAO lifts higher when asked higher, and B2 (the NAO trained on
      the task's own reward) lifts 0.08–0.31 `L`.
-   - *Not a loose reward.* Foot height is scored at 0.0016–0.0020 `L` on the NAO, as on the
-     G1, so the shortfall costs 15–20 tolerances.
-   - *What remains.* A learned shortfall of the NAO's tracker; the mechanism is open.
-     Hypotheses: a trade against balance at the NAO's sixth of the G1's knee torque; the
-     4-sample view, against the G1's 8.
+   - *Not a short swing* (`clearance_mechanism.json`, from `clearance_mechanism.py`). The
+     NAO's feet stay in the air as long as asked (median ratio 1.00). Swings that last the
+     full asked time still reach only 0.43 (corners) to 0.58 (grid) of the asked height.
+   - *Part of it is where the NAO's sole point sits* (`sole_offset.json`, from
+     `sole_offset.py`; skill_space.md §10.8).
+     - The G1's sole point is its collision box's underside, measured in the simulator;
+       the NAO's is the URDF's sole frame. A flat, loaded NAO foot reads +0.01006 `L`
+       (2.494 mm, 44 captures), the G1's −0.00003 `L`. Every plan puts a stance sole at 0.
+     - In the reward, that is about 6 tolerances in every stance sample (foot height is
+       scored at 0.0016–0.0020 `L`), which no motion can remove. The NAO's foot-height
+       error is a median 5.4–8.1 tolerances, 81–83 % of its foot-position term; the G1's
+       is 0.9–1.9 (`clearance_mechanism.json`).
+     - In the clearance, the shortfall splits into a low absolute peak plus this offset:
+       grid 0.011 + 0.010 `L`, corners 0.037 + 0.010, both skills on S's seeds (forward
+       command) 0.020–0.029 + 0.007–0.009. A tracker that met the absolute arc exactly
+       would still lift 0.007–0.010 `L` short.
+     - In the deployed estimator, the ground is the lowest sole corner, at the sole
+       point's height, so the trunk reads 0.007–0.009 `L` low on flat (G1: 0.0001).
+     - *A correction to this section's first version.* It said the shortfall "costs 15–20
+       tolerances". That is the clearance gap. The reward sees the absolute peak's gap,
+       6–18 tolerances, plus a constant 6 tolerances in stance. The conclusion "not a loose
+       reward" stands; the reward's view of the gap was overstated.
+   - *What remains.* The low absolute peak (0.011–0.037 `L`): a learned shortfall, the
+     mechanism open. Hypotheses: a trade against balance at the NAO's sixth of the G1's
+     knee torque; the 4-sample view, against the G1's 8. Within each probe, swings that
+     lift higher carry more trunk-height error (Spearman +0.36 to +0.40; G1 −0.11 to
+     −0.37). That is consistent with the balance trade but does not establish it.
 
 ### 2.3 Unresolved
 
 - Why the trackers lift early at light loads: family coverage (hypothesis H3, W3) or
   reward resolution.
-- Why the NAO's tracker under-lifts, when its body can lift and its reward charges the
-  shortfall.
+- Why the NAO's absolute swing peak is low (0.011–0.037 `L` under the plan's), once the
+  sole-point offset is set aside. W6 tests the offset's part (skill_space.md §10.8).
 - Whether B1-NAO's shuffle is the interpolated plans' doing (W4).
 - The true-state path's short strides on flat (instrumentation).
 
@@ -205,6 +227,16 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     teachers' profiles; this is declared in §10.5.
 - **Robustness (W5) is instrumentation.** Pushes and a degraded estimate decide nothing;
   they are added because no evaluation so far perturbed a body.
+- **The NAO's sole point (W6), added after the plan was approved.** It came out of the
+  clearance analysis while the queues waited for memory.
+  - *Why it is a definition fix, not a strategy.* It changes where `z*` measures the foot,
+    to the G1's definition (the resting contact). It does not prescribe how the body moves.
+  - *How it is measured.* The offset comes from the simulator's own resting height,
+    because the mesh accounts for only 0.84 of the 2.494 mm.
+  - *Why it trains.* It cannot be a deploy-time swap: a frozen tracker would read its foot
+    6 tolerances away from where it learned it.
+  - *How it is budgeted.* One screened seed first, run after W5, so it never delays the
+    approved queues. Seeds 32 and 33 run only on a passing screen.
 
 ## 4. Experiment log
 
@@ -218,7 +250,8 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-04 | b9e7c4f | The family's load-transfer warp (code, tests; unshaped bit-identical to HEAD) | κ = 0.5 raises light contact 0.065 → 0.097 at duty 0.6, impulse kept | `tests/test_procedural_shape.py` |
 | 2026-11-04 | 3572bb7 | W3 and W4 pre-registered and queued behind W1 | waiting for W1 | `logs/contract/w3_w4.status` |
 | 2026-11-04 | 8dd2368 | W5 robustness probes, queued behind W3/W4 | waiting | `logs/contract/w5_robust.status` |
-| 2026-11-04 | (this commit) | Clearance asked vs reached on the family's probes | NAO 0.37–0.64 of asked at every cadence; G1 0.93–1.06 | `clearance_probes.json` |
+| 2026-11-04 | d466b6b | Clearance asked vs reached on the family's probes | NAO 0.37–0.64 of asked at every cadence; G1 0.93–1.06 | `clearance_probes.json` |
+| 2026-11-05 | (this commit) | Where the NAO's sole point rests; why its swings are low | Flat foot +0.01006 `L` (G1 −0.00003); a quarter to a half of the clearance gap; swings not short; W6 pre-registered and queued after W5 | `sole_offset.json`, `clearance_mechanism.json`, `logs/contract/w6_sole.status` |
 
 ## 5. Comparative evaluation
 

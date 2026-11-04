@@ -29,7 +29,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import numpy as np
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
@@ -80,6 +79,13 @@ LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1"
 """Range of the procedural stances' load-profile warp
 (``ReferenceCommandCfg.procedural_load_shape``)."""
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_nao.json"
+SOLE = os.environ.get("HUMANOID_SOLE", "urdf")
+"""Where ``z*`` puts each foot (:func:`sole_points`): ``urdf``, the URDF's sole frame, as
+every NAO tracker before 2026-11-05 had it, or ``contact``, where a flat, loaded foot
+rests in the simulator, :data:`~humanoid_transfer.nao.assets.nao_kinematics.SOLE_REST`
+lower -- the G1's definition, so a stance sole reads height 0 as every plan asks."""
+if SOLE not in ("urdf", "contact"):
+    raise ValueError(f"HUMANOID_SOLE must be 'urdf' or 'contact', not {SOLE!r}")
 
 COMMAND = "base_velocity"
 BASE_BODY = "base_link"
@@ -135,12 +141,9 @@ def contract_posture(contract: str) -> dict[str, float]:
 
 
 def sole_points() -> list[list[float]]:
-    """Each sole point in its foot link's frame, from the URDF (the sole frames merge away)."""
-    poses = nk.forward_kinematics(nk.NOMINAL_STAND_JOINT_POS)
-    return [
-        list(map(float, (np.linalg.inv(poses[foot]) @ poses[sole])[:3, 3]))
-        for foot, sole in zip(nk.FOOT_BODIES, nk.SOLE_FRAMES, strict=True)
-    ]
+    """Each sole point in its foot link's frame, from the URDF (the sole frames merge away),
+    lowered to the foot's resting contact when :data:`SOLE` is ``contact``."""
+    return nk.sole_points_in_foot(nk.SOLE_REST if SOLE == "contact" else 0.0)
 
 
 def sole_corners() -> list[list[list[float]]]:

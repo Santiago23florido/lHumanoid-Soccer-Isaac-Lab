@@ -2268,6 +2268,68 @@ as instrumentation: it decides nothing, and it is reported apart.
 - **Read.** Falls, speed ratio, the gait's deviation from the teacher, and the contact
   metrics.
 
+### 10.8 The NAO's sole point is not where its foot rests; pre-registered (W6)
+
+**Measured** (`transfer/scripts/sole_offset.py`, `transfer/results/sole_offset.json`;
+command in the script's docstring).
+- *Where the sole point sits.* `z*` puts each foot at its sole point, and every plan puts a
+  stance sole at height 0.
+  - The G1's sole point is the underside of its collision box, measured in the simulator.
+    A flat, loaded foot reads −0.00003 `L` (20 captures).
+  - The NAO's is the URDF's `l_sole`/`r_sole` frame. A flat, loaded foot reads +0.01006 `L`,
+    2.494 mm (44 captures: oracle, imitation, B1, zero-shot; range 0.01002–0.01051). The
+    ankle's collision mesh reaches 0.84 mm below the frame; the rest is the simulator's
+    contact.
+- *What it costs.* The foot-height tolerance is 0.0016–0.0020 `L`, so the offset is about 6
+  tolerances in every stance sample, and no motion can remove it. On the probes the NAO's
+  foot-height error is a median 5.4–8.1 tolerances, 81–83 % of its foot-position term; the
+  G1's is 0.9–1.9 (`transfer/scripts/clearance_mechanism.py`,
+  `transfer/results/clearance_mechanism.json`).
+- *What it does to the clearance.* The clearance shortfall (asked − reached, each above its
+  own stance level) is the absolute peak's shortfall plus this offset:
+  - map: 0.022 `L` = 0.011 + 0.010;
+  - corners: 0.048 = 0.037 + 0.010;
+  - both skills on S's seeds, forward command: 0.028–0.038 = 0.020–0.029 + 0.007–0.009.
+
+  A tracker that met the absolute arc exactly would still lift 0.007–0.010 `L` short. The
+  offset is a quarter to a half of the shortfall; the larger part is a low peak.
+- *What it does to the deployed estimate.* The kinematic estimator puts the ground under
+  the lowest sole corner, which lies at the sole point's height. On the NAO it reads the
+  trunk 0.007–0.009 `L` low on flat (0.002–0.007 on rough); on the G1, 0.0001.
+- *Ruled out alongside it.* The NAO's swings are as long as asked (body/asked air time,
+  median 1.00). Swings that stay in the air the full asked time reach 0.43 (corners) to
+  0.58 (grid) of the asked clearance, as the others do.
+
+**Pre-registered** before any run.
+- **H6.** With the sole point at the resting contact, the NAO's reward charges the whole
+  clearance and none of the stance. A NAO tracker trained that way lifts its feet closer to
+  the asked clearance.
+- **Switch.** `HUMANOID_SOLE=contact` (`nao_track_env_cfg.SOLE`; default `urdf`, every
+  existing tracker unchanged). It lowers both sole points and their corners by
+  `nao_kinematics.SOLE_REST` = 2.494 mm. The posture, the plans and the learned encoder
+  are untouched; the deployed estimator takes only the loads from the encoder.
+- **Arm.** r1_3498 continued 1000 iterations exactly as S's NAO seeds, with the switch, in
+  training and evaluation. Laddered as S's were (map and corners; L4 on both skills;
+  encoder and walk on rough).
+- **Control.** S's NAO seeds 31–33 (`warm_nao_r1`, `warm_nao_r1_s32`, `warm_nao_r1_s33`),
+  as they stand.
+- **Target.** The clearance ratio (reached/asked) of the L4 captures: mean over both skills
+  × three commands, deployed path.
+  - Three seeds: the arm's seed mean above the control's by more than 2 SE of the
+    difference of seed means, `sqrt(s_a²/3 + s_c²/3)` (`transfer/scripts/w6_compare.py`).
+    The controls read 0.551, 0.495 and 0.462. Were the absolute peak kept, removing the
+    offset would add up to 0.14.
+  - No regression: falls, speed ≥ 0.9; the largest deviation and the duty deviation not
+    worse by 2 SE; S0's walk passes.
+  - Every metric used here is defined against each foot's own stance level, so it reads
+    the same under either definition.
+- **Screen.** Seed 31 runs first.
+  - If its clearance ratio is above every control seed's, seeds 32 and 33 follow, and the
+    comparison is written with three seeds.
+  - Otherwise the one seed is reported as such, as a fact with a reframing, not as a
+    conclusion about H6.
+- **Order.** After W5, so it never delays the approved queues (`transfer/scripts/w6_sole.sh`).
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

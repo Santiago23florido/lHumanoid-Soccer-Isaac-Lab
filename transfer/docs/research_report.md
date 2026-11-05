@@ -644,8 +644,86 @@ heights in `L`.
 
 ## 6. Conclusions
 
-*(pending)*
+What each finding rests on is marked as in the header. Rough is a diagnosed task (its plans
+were read while choosing every intervention); flat is semi-blind; the walk is S0.
+
+### 6.1 What changed in the record
+
+- **The NAO's "pass at its rate" was a measurement bias** (measured, corrected; §2.1).
+  Without it the NAO passes gate C at no command of either skill, and "the NAO's duty gap
+  is its control rate" is withdrawn. The `rough_b4` adoption stands: its deciding term was
+  the G1's falls.
+- **Two earlier claims about the NAO's swing were wrong and are corrected** (§2.2, item
+  4): "not a body limit" (from B2's lifts) and then "a body limit" (from an at-rest
+  ceiling). The leg can about make the asked lift; the margin is thin.
+
+### 6.2 What the interventions showed
+
+| Question | Test | Outcome | Status |
+| --- | --- | --- | --- |
+| Does the interface's linear blend make the NAO's stances long? | W1, deploy-time, 3 trackers | The asked duty falls as predicted; the body's does not | validated: no |
+| Is the generator's contact blur the sampler's? | W2, offline | Same light share from midpoint 8 to Euler 64 | validated offline: no; the blur is learned |
+| Does the family's load-transfer shape reproduce rough's early lift-off? | W3 step 1, frozen trackers | Stances run longer, by earlier touchdown | validated: no |
+| Do the NAO's leg drives cause its low swings and long stances? | W7 / W7b, frozen trackers | At `g` = 2: lift +0.128 ± 0.002, duty deviation −0.045 ± 0.003, gate C 0 → 7 of 18, no falls | validated: yes, in the simulated body |
+| Do the plans' floating loaded feet cause the G1's rough deficit? | W8, frozen trackers | Rough −0.027 ± 0.004, flat −0.019 ± 0.001, no falls | validated: about a third of the gap to B1 |
+| Does the same hold on the NAO? | W8, then W8n on W6's tracker | Rough duty worse (+0.018 ± 0.001); on W6's one tracker by a third as much | validated: no; the sole offset is part of why |
+| Does the NAO's sole offset hold its swing low? | W6, one seed | The stance moved; the swing came down with it | one seed, screen not passed |
+| Does a degraded estimate break the skills? | W5 / W5b | Flat (`flat_dagger2`) falls 9 in 10 at noise ×2 on both bodies; `flat_b4` and `rough_b4`, trained across noise levels, do not fall at ×4 | validated (instrumentation) |
+| Does training on the faster drives add to deploying on them? | W7c, three seeds | *(running; its result is added here when read)* | |
+
+- **The NAO's gait gap is mostly its simulated leg drives** (validated by intervention, in
+  the simulator). Its drives respond in 0.83–0.92 `T` against a 0.50 `T` swing. Speeding
+  them up raises the lift and, through later touchdowns, shortens the stance: the duty and
+  clearance gaps are one failure, and the lift sets the stance. The gains are a modelling
+  choice (`nao.py`, derived for stance), not an identification of the real robot, so this
+  is a statement about the body model, not about the NAO.
+- **About a third of the G1's rough deficit is the plans' inconsistency** (validated). The
+  generator loads feet it holds above the ground; putting them on the ground at
+  deployment closes 0.027 of the 0.081 between the zero-shot model and B1, and helps flat
+  and the walk too. The remaining two thirds are not explained (§2.3).
+- **The robustness of a skill to a worse estimate is the generator's, not the
+  tracker's** (validated, instrumentation). The same trackers survive ×4 noise with a
+  generator trained across noise levels and fall with one trained at a single level.
+- **What did not carry between bodies.** Grounding the plans helps the G1 and hurts the
+  NAO on rough. Part of that is the NAO's sole point resting 0.010 `L` above its contact;
+  the rest sits where a loaded NAO foot on rough still stands 0.007 `L` above the
+  grounded plan (W8n, one tracker).
+
+### 6.3 What stays open
+
+- The G1's rough early lift-off beyond the plans' inconsistency (two thirds of the gap).
+- Why a loaded NAO foot reads higher on rough than on flat.
+- Whether the real NAO's drives are as slow as the simulated ones.
+- Whether B1-NAO's shuffle is the interpolated plans' doing (W4 was gated on W1 and not
+  run).
+- The true-state path's short strides on flat.
 
 ## 7. Recommendation
 
-*(pending)*
+*(Drafted while W7c runs; its branch is completed when W7c is read.)*
+
+1. **G1: adopt `HUMANOID_PLAN_CONTACT=ground` at deployment** — the user's decision. It
+   meets `incumbents.json`'s rule (§5.5; `candidates.json`). It is a deployment switch: no
+   tracker, generator or encoder changes, and the default stays `as_drawn`, so every
+   earlier command reproduces. Not for the NAO.
+2. **NAO: identify the real robot's leg drives before changing the body model.** Every NAO
+   gait-fidelity gain found here comes from faster simulated drives. Whether they are
+   faithful depends on the real NAO's joint response (a step response per leg joint,
+   or the actuator's documented bandwidth), which no file in this repository holds. If the
+   identified response is at least as fast as gain 2's (`D / K` 0.59–0.65 `T`), adopt it
+   in `nao.py`; then the W7c result decides whether NAO trackers are retrained on it.
+3. **Put a degraded estimate in S0** — a question for the user. Robustness is in neither
+   the adoption rule's target nor its suite, so the rule keeps `flat_dagger2`, which falls
+   nine times in ten at twice the estimator's noise where `flat_b4` does not fall. If the
+   suite gains that test, `flat_b4` is the flat candidate on both bodies. Its costs, from
+   W5b (§5.3): the G1's turning gate C (duty 0.106) and a larger deviation under 0.2 `V`
+   pushes (0.096 → 0.121).
+4. **Not recommended**, each with its result:
+   - the generator-space interface (W1): the body does not follow the asked duty;
+   - more integrator steps (W2): the blur is learned;
+   - the family's load-transfer shape (W3): the trackers' failure is not reproduced;
+   - the NAO's sole point at contact (W6): on one seed the swing moved with the reference.
+5. **Next, if budget is spent on the G1's rough deficit.** The remaining two thirds have
+   two measured candidates: the generator's extra contact changes per plan (3.21–3.73
+   against the teacher's 2.92) and the reward's resolution of light loads. Both are
+   hypotheses; neither has been tested.

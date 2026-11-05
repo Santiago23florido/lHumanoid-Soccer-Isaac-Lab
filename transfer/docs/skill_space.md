@@ -1767,7 +1767,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
       384 episodes);
     - the published flat policy, the same and passing every command on both;
     - the NAO still misses the duty on rough's fast and turning commands at its own rate.
-- **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case. *(Corrected in §10.1: "at the body's rate" carried a resampling bias. Against the teacher's own grid, or at the rate resampled without it, the NAO misses the duty at every command of both skills; part of the excess is in the plans it is asked for, §10.3.)*
+- **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case. *(Corrected in §10.1: "at the body's rate" carried a resampling bias. Against the teacher's own grid, or at the rate resampled without it, the NAO misses the duty at every command of both skills. Part of the excess is in the plans it is asked for, §10.3, but W1 found the body does not follow that part: the stance stays as long when the plans' excess is removed.)*
 - **F4 at equal competence: the warm study** (`transfer/scripts/warm_study.sh`). Both arms
   start from the incumbent (r3, iteration 6194) and get 1000 PPO iterations under the
   study's conditions:
@@ -2075,7 +2075,9 @@ teacher's own grid wherever it was computed, as a rate-invariant quantity should
   "the NAO's duty gap is mostly its control rate". The teacher's duty does not change with
   the rate. What does change is what the NAO is *asked* for: its plans pass through the
   same linear interpolation (10.3). The conclusion that no tracker round could help is
-  withdrawn; whether one can is open.
+  withdrawn; whether one can is open. *(10.3's result: the asked duty's inflation is real,
+  but the body's stances do not follow it. Correcting the interface lowers the asked duty
+  by 0.024–0.029, and the body's duty does not move.)*
 - The adoption of `rough_b4` (`incumbents.json`): its NAO clause "passes 2 of 3 commands at
   its rate against 1" becomes 0 against 0. The adoption stands: the deciding term was the
   G1's falls (2.02 SE), and the NAO's clause asked only that it be no worse.
@@ -2141,6 +2143,54 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
 - **What it does not test.** Whether a tracker *trained* under the generator space does
   better still (30 % of its training plans pass through this interpolation); that is a
   later step, only if this one passes.
+- **Result (2026-11-05): the hypothesis fails at its second step.** The asked duty came
+  down as predicted, and the body did not follow it.
+  - *The control reproduces.* The incumbent re-run under this code, linear, differs from its
+    recorded captures by at most 0.00097 in any duty, stride or period, over its six
+    commands (`transfer/results/w1_resample.json`, from `w1_compare.py`).
+  - *The criterion.* The duty deviation rises, by 0.0088 ± 0.0010 (standard error of the
+    three paired trackers), where it had to fall by more than twice that. Per tracker:
+    0.124 → 0.132, 0.134 → 0.142 and 0.138 → 0.149. Falls (0 → 0), speed, period and S0's
+    walk hold. The stride length's deviation rises by 0.0015 ± 0.0006, beyond twice its
+    standard error. **Not passed.**
+  - *Gate C on all three references* (`body_rate_verdicts_w1.json`, from
+    `body_rate_verdicts.py`; commands passed out of 18, linear → generator):
+    - the teacher's own grid: 0 → 0;
+    - at the body's rate without the resampling bias: 0 → 0;
+    - at the body's rate with it, the reading §10.1 withdrew: 12 → 11.
+  - *Where the asked duty went* (`w1_contact.json`, from `contact_fidelity.py` then
+    `w1_contact.py`; deployed path; 9 pairs per skill; the incumbent's linear side is its
+    control re-run):
+
+    | | asked duty | body duty | lift-off lag | touchdown lag |
+    | --- | --- | --- | --- | --- |
+    | flat, generator − linear | −0.0286 (sd 0.0002) | +0.0064 (0.0013) | +0.0165 `T` (0.0010) | −0.0179 `T` (0.0012) |
+    | rough, generator − linear | −0.0242 (0.0005) | +0.0033 (0.0017) | +0.0147 `T` (0.0011) | −0.0155 `T` (0.0014) |
+
+    The prediction was −0.022 to −0.030 for the asked duty. Over the teacher's own grid the
+    asked duty goes from +0.054 to +0.025 on flat and from +0.027 to +0.003 on rough. The
+    body's duty goes from +0.084 to +0.090 and from +0.047 to +0.050.
+  - *What the lags say.* Each planned boundary moved by about 0.016 `T`, an eighth of the
+    NAO's control step, and the body's contact events did not move. The lags against the
+    plan grew by exactly the plan's shift. The plans' interpolation inflates what the NAO
+    is asked for, but it is not what makes the NAO's stances long.
+  - *What does go with the long stances* (`touchdown_lift.json`, from
+    `touchdown_lift.py`; measured, a correlation). On the NAO, the swings that lift least
+    land earliest:
+    - Spearman +0.52 (flat) and +0.38 (rough) between a swing's peak and its touchdown lag,
+      under either interface;
+    - the lowest quarter of swings lands 0.10–0.13 `T` early, about one control step;
+    - the height at the swing's second airborne sample, which the touchdown cannot have cut
+      short, correlates +0.32 and +0.24;
+    - the G1's two are unrelated (−0.03 to +0.08).
+
+    The NAO's duty gap and its clearance gap (10.2) look like one failure, in the swing.
+  - *What follows.*
+    - `resample_space` stays `linear` by default; the option remains for a later study.
+    - W4 is not run: its condition was this result.
+    - The later step this section deferred, a tracker *trained* under the generator space,
+      is not run either. A tracker whose contact events do not move with the plan's
+      sub-step boundaries is unlikely to gain from sharper ones.
 
 ### 10.4 The generator's blur is learned, not the sampler's (W2, offline)
 

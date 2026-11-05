@@ -143,6 +143,12 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
    `plan_interpolation` and `TimeGrid.interpolation`: the NAO is asked 0.022–0.030 more
    duty than the generator plans (predicted by `chain_at_rate.py`, whose linear chain
    reproduces every recorded capture's asked duty within 0.007).
+   - *Not transmitted to the body (W1, validated; `skill_space.md` §10.3).* Read in the
+     generator's space, the asked duty falls by 0.029 (flat) and 0.024 (rough), as
+     predicted. The body's duty does not fall: +0.006 and +0.003. The body's lift-offs and
+     touchdowns stay where they were while the plan's move by an eighth of a control step
+     (`w1_contact.json`). The plan's excess is real, but it is not what makes the NAO's
+     stances long.
 3. **The trackers make contact binary.**
    - *G1, zero-shot.* Where light contact is asked, the foot is in the air 0.47–0.53 of
      the time. The left foot lifts 0.067 `T` early and lands 0.058 `T` late, so the
@@ -245,6 +251,17 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
      - *For W6.* Its arm must lift 0.007–0.010 `L` more. On the skills the trackers reach a
        median 0.51 of the asked lift where the leg allows 1.01, so W6's target is
        physically reachable. It is not a free gain either.
+   - *The low swings are the early landings* (`touchdown_lift.json`, from
+     `touchdown_lift.py`; measured, a correlation).
+     - On the NAO, a swing's peak correlates with its touchdown lag: Spearman +0.52 on flat
+       and +0.38 on rough, under either interface. The lowest quarter of swings lands
+       0.10–0.13 `T` early, about one control step.
+     - The height at the second airborne sample, which a touchdown cannot have cut short,
+       correlates +0.32 and +0.24.
+     - On the G1 the two are unrelated (−0.03 to +0.08).
+     - So the NAO's duty gap and its clearance gap look like one failure: a foot that does
+       not rise comes down early, and its stance is long. Which causes which is not shown;
+       a tracker that lifts more would show it.
 
 ### 2.3 Unresolved
 
@@ -255,9 +272,13 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   rest, the NAO's leg can about make the asked lift once it may flex a step before
   lift-off, as it does (`swing_bandwidth.json`). Why the tracker reaches half of that is
   not explained.
-- Whether the NAO's thin swing margin feeds its gate-C duty gap: a foot that does not
-  clear grazes, and a graze reads as contact. Not measured.
-- Whether B1-NAO's shuffle is the interpolated plans' doing (W4).
+- Whether the NAO's low swings cause its long stances. They come together, swing by swing
+  (§2.2, item 4), and the interface is ruled out (item 2), but no run has changed one
+  without the other.
+- Whether B1-NAO's shuffle is the interpolated plans' doing. W4 was to test it under the
+  generator-space interface, and its condition (W1 passing) failed. The zero-shot trackers'
+  contact events do not follow the interface, which makes that cause less likely; it was
+  not run.
 - The true-state path's short strides on flat (instrumentation).
 
 ## 3. Research decisions
@@ -330,10 +351,31 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-04 | 0a8c1a0 | Where the NAO's sole point rests; why its swings are low | Flat foot +0.01006 `L` (G1 −0.00003); a quarter to a half of the clearance gap; swings not short; W6 pre-registered and queued after W5 | `sole_offset.json`, `clearance_mechanism.json`, `logs/contract/w6_sole.status` |
 | 2026-11-05 | 2bd4f12 | What each body's swing leg can do in the plans' time | NAO bound 0.72 of the asked lift on the skills (asked above it in 81 % of swings; the knee's 6.40 rad/s binds, and is enforced); tracker 0.51; G1 bound 3.2; "not a body limit" corrected. *Corrected in the next row:* the bound assumes a leg at rest at lift-off and does not bind | `swing_bandwidth.json` |
 | 2026-11-05 | 3fe7631 | The swing ceiling's assumptions checked against the captures | At-rest ceiling beaten in 18 % (skills) / 26 % (probes) of NAO swings, the knee at 0.45 / 0.38 of its limit at lift-off; one-step ceiling 1.01 / 1.15 holds (beaten in 1.6 % / 1.7 %); G1 3.2 / 4.1. A thin margin, not a body limit; the shortfall is mostly the controller's. Square grid fixed (range-only 0.314 → 0.318 `L`) | `swing_bandwidth.json` |
+| 2026-11-05 | (W1 run) | W1 in the simulator: control re-run, then 3 frozen NAO trackers × 2 skills × 3 commands, and S0's walk, under `HUMANOID_RESAMPLE=generator` (10:01–11:43) | Control reproduces (≤ 0.00097). Asked duty −0.029 / −0.024, as predicted; body duty +0.006 / +0.003. Criterion fails (+0.0088 ± 0.0010). W4 not run | `w1_resample.json`, `w1_contact.json`, `body_rate_verdicts_w1.json` |
+| 2026-11-05 | cce652f | Swing by swing: lift against touchdown lag | NAO: low swings land early (Spearman +0.38 to +0.52; lowest quarter 0.10–0.13 `T` early); G1 unrelated | `touchdown_lift.json` |
 
 ## 5. Comparative evaluation
 
-*(to be filled as the pre-registered runs complete)*
+### 5.1 W1: the NAO's frozen trackers under the generator-space interface (validated)
+
+`transfer/results/w1_resample.json` (from `w1_compare.py`). The figures are the duty
+deviation from the teacher's own grid: the mean over three commands, two skills and both
+feet. Deployed path.
+
+| tracker | linear | generator | gate C passed, own grid | falls |
+| --- | --- | --- | --- | --- |
+| `r1_3498` (incumbent) | 0.124 | 0.132 | 0 → 0 of 6 | 0 → 0 |
+| S seed 32 | 0.134 | 0.142 | 0 → 0 | 0 → 0 |
+| S seed 33 | 0.138 | 0.149 | 0 → 0 | 0 → 0 |
+| paired difference | | +0.0088 ± 0.0010 | | |
+
+- **The pre-registered criterion fails.** The deviation had to fall by more than 2 SE; it
+  rose.
+- **What did not regress:** speed, falls, period and S0's walk.
+- **What did:** stride length, by 0.0015 ± 0.0006.
+- **Gate C under the other two references:** at the body's rate, unbiased, 0 → 0; at the
+  body's rate as first computed, 12 → 11 of 18 (`body_rate_verdicts_w1.json`).
+- **Not adopted.**
 
 ## 6. Conclusions
 

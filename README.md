@@ -168,7 +168,8 @@ interpolating the foot loads linearly, which lengthens every stance by 0.03–0.
 factor does not depend on the rate it is sampled at; resampled without that bias, the NAO
 passes no command. See [`skill_space.md`](transfer/docs/skill_space.md) §10.1 for what else
 the wrong reading affected, and §10.3 for the same interpolation in the plans the NAO is
-asked to follow.
+asked to follow. Removing that interpolation from the plans lowers the duty the NAO is
+asked for by 0.024–0.029, but the NAO's own stances do not shorten (§10.3).
 
 **What did not win: decoder v2.** It adds physics in the decoder: an IK and
 feed-forward prior with an RL residual, physics heads and a physics critic. It also

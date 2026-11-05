@@ -280,6 +280,8 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
      - *For W6.* Its arm must lift 0.007–0.010 `L` more. On the skills the trackers reach a
        median 0.51 of the asked lift where the leg allows 1.01, so W6's target is
        physically reachable. It is not a free gain either.
+     - *Shown since* (W6, §5.6, one seed). The arm did not lift more: its clearance ratio
+       is 0.454, against S's 0.462–0.551.
    - *The low swings are the early landings* (`touchdown_lift.json`, from
      `touchdown_lift.py`; measured, a correlation).
      - On the NAO, a swing's peak correlates with its touchdown lag: Spearman +0.52 on flat
@@ -311,10 +313,15 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   - *Hypothesis:* grounded plans ask for a stance height the NAO's sole point cannot
     reach. W8's switch on W6's tracker (sole point at the resting contact) tests it.
 - Why the NAO's absolute swing peak is low (0.011–0.037 `L` under the plan's), once the
-  sole-point offset is set aside. W6 tests the offset's part (skill_space.md §10.8). For the
-  rest, the NAO's leg can about make the asked lift once it may flex a step before
-  lift-off, as it does (`swing_bandwidth.json`). Why the tracker reaches half of that is
-  not explained.
+  sole-point offset is set aside. For the rest, the NAO's leg can about make the asked lift
+  once it may flex a step before lift-off, as it does (`swing_bandwidth.json`). Why the
+  tracker reaches half of that is not explained.
+  - *The offset's part, tested by W6* (§5.6; one seed). With the sole point at the
+    resting contact, the stance error is gone, but the swing came down with the reference
+    point, and above its own stance it rises as S's lowest seed does. The reward's stance
+    term was not what kept the swing low.
+  - *The drives' part.* At `g` = 2 frozen trackers lift more (W7b). W7c tests whether
+    training on those drives adds to that.
 - ~~Whether the NAO's low swings cause its long stances.~~ Answered by W7 (§5.4): raising
   the lift alone, through the drives, shortened the stances.
 - Whether the NAO's real drives are as slow as the simulated ones. The simulated gains are
@@ -436,6 +443,16 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     grounded plan asks for what its sole point cannot do. Rather than a new NAO run now,
     W8's switch is added to W6's ladder, pre-registered before W6 runs. W6's tracker is
     the one whose sole point rests at 0.
+- **After W6's screen: seeds 32 and 33 are not run; W8n and W7c go ahead.**
+  - *What the screen gave.* Seed 31's clearance ratio (0.454) is under every control
+    seed's, so the pre-registration stops the arm at one seed.
+  - *Rejected:* running seeds 32 and 33 anyway because the arm sits inside the controls'
+    spread. That would change the screen after seeing its result.
+  - *Kept:* W8n on seed 31's tracker. It asks a different question, whether grounded
+    plans help the NAO once its sole point can reach the ground, and one tracker is what
+    its pre-registration screens.
+  - *What the miss points to.* The stance error was removed and the swing did not rise
+    (§5.6). That leaves the drives, which W7c, already queued, tests.
 
 ## 4. Experiment log
 
@@ -586,6 +603,28 @@ As drawn → grounded, frozen trackers, mean over three commands, deployed path.
   not move.
 - **G1 candidate.** It meets `incumbents.json`'s rule (S0's chains byte-identical, pytest
   and ruff pass). It is recorded in `candidates.json`, and `incumbents.json` is not changed.
+
+### 5.6 W6: the NAO's sole point at its resting contact (one seed; screen not passed)
+
+`transfer/results/w6_sole.json` (from `w6_compare.py`) and `w6_mechanism.json` (from
+`w6_mechanism.py`); `skill_space.md` §10.8. r1_3498 continued 1000 iterations as S's NAO
+seeds, with `HUMANOID_SOLE=contact`. Mean over two skills × three commands, deployed path;
+heights in `L`.
+
+| tracker | clearance ratio | stance level (plan 0.0049) | swing peak (plan 0.089) | clearance above stance | duty deviation | falls |
+| --- | --- | --- | --- | --- | --- | --- |
+| S seeds 31 / 32 / 33 | 0.551 / 0.495 / 0.462 | 0.014 / 0.013 / 0.013 | 0.060 / 0.054 / 0.051 | 0.045 / 0.041 / 0.038 | 0.110 / 0.134 / 0.138 | 0 |
+| W6 seed 31 | 0.454 | 0.005 | 0.043 | 0.037 | 0.139 | 0 |
+
+- **The screen does not pass.** The arm's clearance ratio is below every control seed's.
+  Seeds 32 and 33 are not run, as pre-registered.
+- **The switch worked; the swing did not rise.** The stance now sits on the plan's level.
+  The swing peak came down with it, and above its own stance the foot rises as S's lowest
+  seed does.
+- **Reframing** (hypothesis). The reward's stance error was not what held the swing low.
+  The drives remain the candidate (W7b; W7c tests it with training).
+- **No regression.** No falls, speed ratio at least 0.9996, and S0's walk passes (speed
+  0.995, no fall excess). Nothing is adopted.
 
 ## 6. Conclusions
 

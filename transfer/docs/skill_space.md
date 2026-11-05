@@ -2469,6 +2469,53 @@ command in the script's docstring).
   *(2026-11-05: moved behind W7 and W8, 10.9–10.10, which are deploy-time and decide what a
   later arm trains with. W6 had not started; its script is unchanged.)*
 
+**Result (2026-11-05: the screen does not pass; seeds 32 and 33 are not run).**
+`python transfer/scripts/w6_compare.py --output transfer/results/w6_sole.json`. Seed 31
+trained 18:40–21:00 and was laddered until 21:36. Mean over both skills × three commands,
+deployed path:
+
+| Tracker | Clearance ratio | Duty deviation | Largest deviation | Falls | Walk |
+| --- | --- | --- | --- | --- | --- |
+| S seeds 31 / 32 / 33 (control) | 0.551 / 0.495 / 0.462 | 0.110 / 0.134 / 0.138 | 0.139 / 0.175 / 0.189 | 0 | passes |
+| W6 seed 31 (arm) | 0.454 | 0.139 | 0.171 | 0 | passes |
+
+- *The screen.* The arm's 0.454 is below every control seed's (the highest is 0.551). As
+  pre-registered, seeds 32 and 33 are not run, and this one seed is reported as a fact, not
+  as a conclusion about H6.
+- *Within the controls' spread.* On every metric the arm sits at an edge of S's three seeds
+  or inside them. Its clearance is just under the lowest (0.462), its duty deviation just
+  over the highest (0.138), and its largest deviation inside. One seed cannot separate
+  this from seed variance.
+
+**Where the swing went** (`python transfer/scripts/w6_mechanism.py --output
+transfer/results/w6_mechanism.json`; the same captures). Mean over both skills × three
+commands, `L`:
+
+| Tracker | Stance level, body (plan 0.0049) | Swing peak, absolute (plan 0.089) | Clearance above own stance | Body duty |
+| --- | --- | --- | --- | --- |
+| S seeds 31 / 32 / 33 | 0.0143 / 0.0128 / 0.0133 | 0.0599 / 0.0537 / 0.0514 | 0.0453 / 0.0409 / 0.0383 | 0.573 / 0.585 / 0.590 |
+| W6 seed 31 | 0.0052 | 0.0426 | 0.0373 | 0.590 |
+
+- *The switch did what it was built to do.* The arm's stance level sits on the plan's
+  (0.0052 against 0.0049). S's seeds stand 0.008–0.009 above it.
+- *The swing peak came down with it.* The absolute peak fell to 0.0426, from 0.051–0.060.
+  Above its own stance, the arm's foot rises 0.037 `L`, close to S's lowest seed (0.038).
+  The swing the body makes did not grow.
+- *What the reward charged.* With the offset, a swinging sole point read 0.010 `L` above
+  the foot's underside. So removing the offset made the reward charge a larger swing
+  shortfall, as well as removing the stance error. The tracker did not raise its swing to
+  meet that charge.
+- **Reframing** (a hypothesis, with W7's evidence). The stance error the switch removed was
+  not what kept the NAO's swing low. What the tracker can command through the drives is
+  the remaining candidate. On the same kind of frozen trackers, faster drives raised the
+  lift by 0.128 at `g` = 2 (W7b, 10.9). W7c, trained at `g` = 2, tests it. W8n reads W8's
+  grounded plans on this arm's tracker, whose stance can reach the plan's height.
+- *A correction to the pre-registration.* It said the arm would be "laddered as S's were
+  (map and corners; L4 on both skills; encoder and walk on rough)". S's NAO seeds have no
+  map or corners captures, and `w6_sole.sh` laddered the arm as they were laddered: rough
+  through the encoder, the walk and L4, flat through L4. The target reads L4 only, so no
+  computed figure depended on the parenthesis.
+
 ### 10.9 The NAO's leg drives lag its targets; pre-registered (W7)
 
 **Measured** (`transfer/scripts/swing_drive.py`, `transfer/results/swing_drive.json`;

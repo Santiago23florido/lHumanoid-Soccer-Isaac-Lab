@@ -61,6 +61,43 @@ def test_a_velocity_limit_only_lowers_the_ceiling():
     assert capped < free
 
 
+def _body(velocity: float) -> dict:
+    """A planar leg with a G1-like spread of joint speeds: ranges wide, ankle the limit."""
+
+    def joint(q0, lower, upper, inertia):
+        return {
+            "q0": q0,
+            "lower": lower,
+            "upper": upper,
+            "effort": 300.0,
+            "velocity": velocity,
+            "swing_inertia": inertia,
+        }
+
+    return {
+        "joints": {
+            "hip": joint(-0.2, -2.35, 3.05, 0.73),
+            "knee": joint(0.42, -0.33, 2.54, 0.10),
+            "ankle": joint(-0.23, -0.68, 0.73, 0.012),
+        },
+        "thigh": np.array([0.0, -0.30]),
+        "shank": np.array([0.0, -0.30]),
+    }
+
+
+@pytest.mark.parametrize("steps", [2, 3, 4, 5, 6])
+def test_removing_a_limit_never_lowers_the_lift_ceiling(steps):
+    capped = swing_bandwidth.lift_ceiling(
+        _body(20.0), steps * 0.02, swing_bandwidth.VARIANTS["hard"]
+    )
+    free = swing_bandwidth.lift_ceiling(
+        _body(20.0), steps * 0.02, swing_bandwidth.VARIANTS["hard_no_velocity_cap"]
+    )
+    timeless = swing_bandwidth.lift_ceiling(_body(20.0), None, swing_bandwidth.VARIANTS["hard"])
+    assert capped <= free * (1 + 1e-9)
+    assert free <= timeless * (1 + 1e-9)
+
+
 def test_planar_leg_by_hand():
     # A straight leg hanging down; the knee bends by theta, the hip stays.
     thigh, shank = np.array([0.0, -0.1]), np.array([0.0, -0.1029])

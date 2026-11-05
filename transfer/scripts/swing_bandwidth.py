@@ -24,6 +24,11 @@ one leg (hip pitch, knee, ankle pitch) at the tracker's crouch -- the NAO's from
   the lift ceiling over the asked lift, for the airborne time and for one more control step
   (flexion that starts while the foot still bears load), beside the clearance ratio the
   body reached, by the swing's length;
+* **whether the ceiling holds**: the ceiling assumes a leg at rest at lift-off, so it bounds
+  what a body does only if its swings start that way. Per variant, the share of swings
+  whose reached lift exceeds the ceiling, and the swing knee's speed at the body's own
+  lift-off (its first airborne sample in ``clearance_mechanism``'s widened window; positive
+  flexes, both bodies' convention);
 * **what the swing knee did**: its peak speed over each planned swing, read from the
   captures' ``encoder_input`` (joint velocities, articulation order), in rad/s and rad/T,
   and the share of swings in which it reached its velocity limit.
@@ -61,6 +66,10 @@ sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import clearance_mechanism as cm  # noqa: E402
+from humanoid_transfer.common.skill_state import (  # noqa: E402
+    DEFAULT_CONTACT_THRESHOLD,
+    SKILL_LAYOUT,
+)
 from humanoid_transfer.nao.assets import nao_kinematics as nk  # noqa: E402
 from humanoid_transfer.transfer.embodiment import NAO  # noqa: E402
 
@@ -316,17 +325,27 @@ def lift_ceiling(body: dict, duration: float | None, variant: dict) -> float:
         bounds[role] = (low, high)
     if any(low > 0 or high < 0 for low, high in bounds.values()):
         return 0.0
-    d_hip, d_knee = np.meshgrid(
-        np.linspace(*bounds["hip"], GRID), np.linspace(*bounds["knee"], GRID), indexing="ij"
+    # The ankle takes -(hip + knee), so for each hip excursion the knee's interval is its
+    # own cut by the ankle's. Sampling that interval, ends included, keeps the grid on the
+    # boundary where the highest rise lies; a square grid lands on it at points that move
+    # with the bounds, and could lower the ceiling when a limit is removed.
+    (hip_low, hip_high), (knee_low, knee_high), (ankle_low, ankle_high) = (
+        bounds[role] for role in JOINTS
     )
-    d_ankle = -(d_hip + d_knee)
-    feasible = (d_ankle >= bounds["ankle"][0]) & (d_ankle <= bounds["ankle"][1])
+    d_hip = np.linspace(hip_low, hip_high, GRID)[:, None]
+    low = np.maximum(knee_low, -ankle_high - d_hip)
+    high = np.minimum(knee_high, -ankle_low - d_hip)
+    d_knee = low + (high - low) * np.linspace(0.0, 1.0, GRID)[None, :]
+    feasible = np.broadcast_to(high >= low, d_knee.shape)
     rise = ankle_rise(body["thigh"], body["shank"], d_hip, d_knee)
     return float(max(0.0, rise[feasible].max())) if feasible.any() else 0.0
 
 
-def capture_swings(path: Path, knees: tuple[str, str]) -> tuple[list[dict], float, np.ndarray]:
-    """The planned swings, the control step, and both knees' speed aligned with the swings."""
+def capture_swings(
+    path: Path, knees: tuple[str, str]
+) -> tuple[list[dict], float, np.ndarray, np.ndarray]:
+    """The planned swings, the control step, both knees' signed velocity and the body's
+    contacts, aligned with the swings."""
     data = np.load(path)
     if "probes" in data.files:
         probes = json.loads(str(data["probes"]))
@@ -345,21 +364,37 @@ def capture_swings(path: Path, knees: tuple[str, str]) -> tuple[list[dict], floa
     valid = ~(done[:-1] | done[1:])
     valid[:20] = False
     names = [str(n) for n in data["joint_names"]]
-    speed = np.abs(data["encoder_input"][1:, keep][..., 9 + len(names) : 9 + 2 * len(names)])
-    knee_speed = speed[..., [names.index(k) for k in knees]].astype(float)
+    velocity = data["encoder_input"][1:, keep][..., 9 + len(names) : 9 + 2 * len(names)]
+    knee_velocity = velocity[..., [names.index(k) for k in knees]].astype(float)
+    contact = SKILL_LAYOUT.unpack(z)["foot_load"] > DEFAULT_CONTACT_THRESHOLD
     rows = cm.swings(z, due, fields, valid, probe_of_env)
-    return rows, float(data["control_dt"]), knee_speed
+    return rows, float(data["control_dt"]), knee_velocity, contact
+
+
+def _liftoff_speed(r: dict, knee_velocity: np.ndarray, contact: np.ndarray) -> float:
+    """The swing knee's velocity at the body's first airborne sample of the swing's window
+    (``clearance_mechanism.swings`` widens it by two samples each way); NaN if it never
+    leaves the ground."""
+    window = np.arange(r["start"] - 2, r["start"] + r["length"] + 2)
+    air = ~contact[window, r["env"], r["side"]]
+    if not air.any():
+        return math.nan
+    return float(knee_velocity[window[np.argmax(air)], r["env"], r["side"]])
 
 
 def against_plans(body: dict, paths: list[Path], unit: float) -> dict:
     rows, steps = [], set()
     cap = body["joints"]["knee"]["velocity"]
     for path in paths:
-        swings, dt, knee_speed = capture_swings(path, body["knees"])
+        swings, dt, knee_velocity, contact = capture_swings(path, body["knees"])
         for r in swings:
-            window = knee_speed[r["start"] : r["start"] + r["length"], r["env"], r["side"]]
+            window = knee_velocity[r["start"] : r["start"] + r["length"], r["env"], r["side"]]
             asked = r["asked"] * body["leg_length"]
-            rows.append((r["length"], r["ratio"], asked, dt, float(window.max())))
+            reached = r["reached"] * body["leg_length"]
+            liftoff = _liftoff_speed(r, knee_velocity, contact)
+            rows.append(
+                (r["length"], r["ratio"], asked, dt, float(np.abs(window).max()), reached, liftoff)
+            )
         steps |= {(r["length"] + e, dt) for r in swings for e in EXTRA_STEPS}
     table = {
         name: {key: lift_ceiling(body, key[0] * key[1], variant) for key in sorted(steps)}
@@ -374,17 +409,24 @@ def against_plans(body: dict, paths: list[Path], unit: float) -> dict:
         }
         for name in VARIANTS:
             for extra in EXTRA_STEPS:
-                values = np.array(
-                    [table[name][(r[0] + extra, r[3])] / max(r[2], 1e-6) for r in members]
-                )
+                ceiling = np.array([table[name][(r[0] + extra, r[3])] for r in members])
+                values = ceiling / np.maximum([r[2] for r in members], 1e-6)
                 out[f"ceiling_{name}_plus{extra}_median"] = float(np.median(values))
                 if extra == 0:
                     out[f"share_asked_above_ceiling_{name}"] = float(np.mean(values < 1.0))
+                # A body that beats a ceiling is not bound by it: its swings break an
+                # assumption of the ceiling (for one, a leg at rest at lift-off).
+                out[f"share_reached_above_ceiling_{name}_plus{extra}"] = float(
+                    np.mean(np.array([r[5] for r in members]) > ceiling)
+                )
         peak = np.array([r[4] for r in members])
         reached = np.array([r[1] for r in members])
+        liftoff = np.array([r[6] for r in members])
         at_cap = peak >= AT_CAP * cap
         out.update(
             {
+                "knee_speed_at_liftoff_median_rad_s": float(np.nanmedian(liftoff)),
+                "knee_speed_at_liftoff_median_over_limit": float(np.nanmedian(liftoff) / cap),
                 "knee_peak_speed_median_rad_s": float(np.median(peak)),
                 "knee_peak_speed_median_rad_per_T": float(np.median(peak) * unit),
                 # Above the limit only if the simulator does not enforce it.
@@ -478,6 +520,13 @@ def main() -> int:
                 f"{cap * unit:.2f} rad/T, peak median "
                 f"{plan['knee_peak_speed_median_rad_per_T']:.2f} rad/T, at the limit in "
                 f"{plan['share_knee_at_velocity_limit']:.2f} of swings"
+            )
+            print(
+                "    reached above the ceiling in "
+                f"{plan['share_reached_above_ceiling_hard_plus0']:.3f} of swings (+1 step "
+                f"{plan['share_reached_above_ceiling_hard_plus1']:.3f}); "
+                f"knee at lift-off {plan['knee_speed_at_liftoff_median_rad_s']:+.2f} rad/s = "
+                f"{plan['knee_speed_at_liftoff_median_over_limit']:+.2f} of its limit"
             )
             _print_lengths(plan)
 

@@ -163,6 +163,17 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
      half-sine, NAO +0.019 ± 0.005. The foot is no more often airborne, and the change is
      an earlier touchdown, not an earlier lift-off (`transfer_probes_*.json`). Rough's
      early lift-off is not reproduced by the shape of the load transfer alone.
+   - *The plans load feet they hold above the ground* (`plan_contact.json`, from
+     `plan_contact.py`; measured, a correlation; `skill_space.md` §10.10).
+     - The teachers' loaded feet rest at 0.000 `L` (90th percentile 0.006 flat, 0.013
+       rough). The plans the G1 was given hold them at 0.018 (flat) and 0.029 (rough) at
+       the 90th, and the biped's at 0.
+     - The higher a plan holds the still-loaded foot before a lift-off, the earlier the
+       G1 lifts off (Spearman −0.35 on rough). The higher the first loaded samples, the
+       later it lands (+0.49).
+     - Rough's plans hold loaded feet higher than flat's. That fits rough failing and
+       flat passing, and B1 learning, from rough's plans, which field to believe.
+     - W8 puts the plans' loaded feet on the ground at deployment, on the frozen trackers.
 4. **The NAO lifts its feet half as high as asked, at every cadence.**
    - *On the skills.* Plans ask 0.07–0.09 `L`; the body gives 0.03–0.05; B1-NAO gives
      0.01, with grazes in half of every planned swing.
@@ -278,10 +289,11 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 
 - Why the G1's tracker lifts early on rough's plans. Family coverage of load-transfer
   shapes (H3) is not supported: the frozen tracker does not lift early on them (W3 step 1).
-  Still open, as hypotheses: the generator's extra contact changes per plan (3.21–3.73
-  against the teacher's 2.92, `sampler_sharpness.json`), rough's irregular steps, and the
-  reward's resolution. B1 keeps the duty, so whatever it is, it lies in rough's plans and
-  can be learned.
+  The leading candidate is the plans' own inconsistency: they load feet they hold above
+  the ground, and the G1 leaves the ground where they do (§2.2, item 3). W8 tests it. The
+  other candidates remain as hypotheses: the generator's extra contact changes per plan
+  (3.21–3.73 against the teacher's 2.92, `sampler_sharpness.json`), and the reward's
+  resolution.
 - Why the NAO's absolute swing peak is low (0.011–0.037 `L` under the plan's), once the
   sole-point offset is set aside. W6 tests the offset's part (skill_space.md §10.8). For the
   rest, the NAO's leg can about make the asked lift once it may flex a step before
@@ -362,11 +374,13 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   - *Why it is cheap.* It is deploy-time on frozen trackers (about 2 h), and its
     intervention on the lift tests whether the lift sets the stance, which no correlation
     can.
-  - *What waits.* An RL arm is gated on it. The G1's rough question (§2.3) waits for offline
-    work; it needs no machine.
-  - *The order.* W7 runs before W6. It is short, and decides what a later NAO arm trains
-    with. W6 had not started, and its queue was stopped while waiting and relaunched behind
-    W7.
+  - *What waits.* An RL arm is gated on it.
+  - *The G1's rough question, offline first.* It found the plans' inconsistency (§2.2,
+    item 3), and W8 (`skill_space.md` §10.10) tests it at deployment on both bodies' frozen
+    trackers. It is the same kind of test as W7, and it touches no body.
+  - *The order.* W7, then W8, then W6. The first two are short and decide what a later arm
+    trains with. W6 had not started, and its queue was stopped while waiting and relaunched
+    behind them.
 
 ## 4. Experiment log
 
@@ -387,7 +401,8 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-05 | 6a96bb8 | W1 in the simulator: control re-run, then 3 frozen NAO trackers × 2 skills × 3 commands, and S0's walk, under `HUMANOID_RESAMPLE=generator` (10:01–11:43) | Control reproduces (≤ 0.00097). Asked duty −0.029 / −0.024, as predicted; body duty +0.006 / +0.003. Criterion fails (+0.0088 ± 0.0010). W4 not run | `w1_resample.json`, `w1_contact.json`, `body_rate_verdicts_w1.json` |
 | 2026-11-05 | cce652f | Swing by swing: lift against touchdown lag | NAO: low swings land early (Spearman +0.38 to +0.52; lowest quarter 0.10–0.13 `T` early); G1 unrelated | `touchdown_lift.json` |
 | 2026-11-05 | 2100ac2 | W3 step 1: both frozen incumbents on the transfer probes (11:43–11:48) | Prediction fails on both bodies, with the sign reversed: at warp 0.5 the stance runs longer (G1 +0.039 ± 0.004, NAO +0.019 ± 0.005), by an earlier touchdown. Steps 3–4 and W4 not run; the queue closed at 11:48 | `transfer_probes_*.json`, `logs/contract/w3_w4.status` |
-| 2026-11-05 | (this entry's commit) | W7 pre-registered: the NAO's leg drives measured, then faster drives (`K × 4`, `D × 2`) on the frozen trackers, queued after W5 and before W6 | Drives' `D / K` 0.83–0.92 `T` (G1 0.10); NAO hip delivers 0.34 of its target's excursion (G1 0.60); open-loop replay at `g` = 4: planar rise 0.22 → 0.39 of asked | `swing_drive.json`, `logs/contract/w7_drives.status` |
+| 2026-11-05 | 8d52199 | W7 pre-registered: the NAO's leg drives measured, then faster drives (`K × 4`, `D × 2`) on the frozen trackers, queued after W5 and before W6 | Drives' `D / K` 0.83–0.92 `T` (G1 0.10); NAO hip delivers 0.34 of its target's excursion (G1 0.60); open-loop replay at `g` = 4: planar rise 0.22 → 0.39 of asked | `swing_drive.json`, `logs/contract/w7_drives.status` |
+| 2026-11-05 | (this entry's commit) | W8 pre-registered: where the plans' loaded feet are, and the G1's events against it; the plans' loaded feet put on the ground on both bodies' frozen trackers, queued after W7 and before W6 | Teachers' loaded feet at 0 (p90 0.006 / 0.013 `L`), the G1's plans' at p90 0.018 / 0.029, the biped's at 0; early lift-off with the plan's height before it (Spearman −0.35 rough), late touchdown with it after (+0.49) | `plan_contact.json`, `logs/contract/w8_plan_contact.status` |
 
 ## 5. Comparative evaluation
 

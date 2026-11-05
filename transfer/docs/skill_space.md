@@ -2408,8 +2408,8 @@ command in the script's docstring).
   - Otherwise the one seed is reported as such, as a fact with a reframing, not as a
     conclusion about H6.
 - **Order.** After W5, so it never delays the approved queues (`transfer/scripts/w6_sole.sh`).
-  *(2026-11-05: moved behind W7, 10.9, which is deploy-time and decides what a later NAO
-  arm trains with. W6 had not started; its script is unchanged.)*
+  *(2026-11-05: moved behind W7 and W8, 10.9–10.10, which are deploy-time and decide what a
+  later arm trains with. W6 had not started; its script is unchanged.)*
 
 ### 10.9 The NAO's leg drives lag its targets; pre-registered (W7)
 
@@ -2468,7 +2468,78 @@ deployed path, the W1 linear captures of the three NAO trackers and S's three G1
   The gains were derived for stance (`nao.py`). Every NAO result in this repository was
   obtained with them, and none is replaced. A result here is a body-model candidate,
   reported apart.
-- **Order.** After W5, before W6.
+- **Order.** After W5, before W8 (10.10) and W6.
+
+### 10.10 The plans load feet they hold above the ground; pre-registered (W8)
+
+**Measured** (`transfer/scripts/plan_contact.py`, `transfer/results/plan_contact.json`;
+deployed path, S's three seeds of each body, both skills, three commands).
+- *Where a loaded foot is.* In the teachers' gaits a foot carrying more than the contact
+  threshold rests on the ground: sole height a median 0.000 `L`, 0.006 (flat) and 0.013
+  (rough) at the 90th percentile. In the plans the G1 was given, a loaded foot sits at a
+  median 0.0025 (flat) and 0.0050 (rough) `L`, and at 0.018 and 0.029 at the 90th. In
+  light contact it sits at 0.013 and 0.014, against the teachers' 0.0065 and 0.0043. The
+  generator models load and position as separate fields, and its plans do not keep them
+  consistent where contact changes.
+- *What the trackers do with it.* Each planned event is matched to the body's own within
+  0.5 `T`, and set against the plan's sole height over its two loaded samples next to the
+  event. On rough's plans:
+  - the G1 lifts off earlier the higher the plan holds the still-loaded foot (Spearman
+    −0.35). The quarter held highest (above 0.016 `L`) lifts off 0.124 `T` early, the
+    lowest 0.022;
+  - it lands later the higher the first loaded samples (+0.49; 0.112 `T` late against
+    0.005).
+
+  On flat's plans the G1 behaves the same way (−0.27, +0.53), but flat's plans hold their
+  loaded feet lower: event heights at a median 0.0038 and 0.0077 `L`, against rough's 0.0065
+  and 0.0174. The NAO shows the same relation (−0.29 to −0.30, +0.34 to +0.37).
+- *Why this fits the G1's failure on rough and its success on flat.* It accounts for the
+  lift-off 0.054 `T` early and the touchdown 0.049 late, a stance 0.06–0.09 short (10.2).
+  It accounts for B1 too: trained on rough's own plans, B1 learned which of the two fields
+  to believe there. The family's half-sines (10.5) never pose the conflict: the
+  biped's loaded feet are on the ground, at 0.000 `L` at the median and the 90th
+  percentile.
+
+**Pre-registered (2026-11-05, before any run).**
+- **Hypothesis.** Where a plan loads a foot it also holds above the ground, the tracker
+  follows the position and leaves the ground. Making the plans say one thing should give
+  back the stance.
+- **Change.** `HUMANOID_PLAN_CONTACT=ground` (`ReferenceCommandCfg.plan_contact`; default
+  `as_drawn`; `latent/plan_contact.py`). Each foot the task's plan loads above the contact
+  threshold is put on the ground by its height alone; its horizontal position, velocity,
+  load and every other field are kept, bit for bit (`tests/test_plan_contact.py`).
+  - *Where it acts.* The plan as drawn and resampled, before the tracker reads it. Under
+    the autonomous reference the generator's history is made of those plans, so it reads
+    the consistent version too. This is declared, not isolated.
+  - *What it does not touch.* The procedural biped's plans, already consistent, and nothing
+    trained.
+  - *Why it is no strategy.* It enforces what the plan's own load implies: a foot carrying
+    weight is on the ground. It says nothing about how the body should move.
+- **Test** (`transfer/scripts/w8_plan_contact.sh`). The frozen trackers -- S's three G1 seeds
+  (`warm_r3_logload`, `_s42_log`, `_s43_log`) and the three NAO trackers W1 used, all
+  symmetrized -- through L4 of `rough_b4` and `flat_dagger2` and S0's walk. Each is paired
+  with its own captures of the plans as drawn.
+- **Criterion** (`transfer/scripts/w8_compare.py`).
+  - *G1, the target:* L4's largest gate C deviation on rough, the paper's reading (mean
+    over the three commands; now 0.148–0.161), falls by more than twice the standard
+    error of the three paired seed differences, and flat's (0.082–0.090) rises by no more
+    than that.
+  - *NAO:* W1's target, the duty deviation over both skills, falls by more than twice its
+    standard error.
+  - *No regression, each body:* falls at most two more in total, speed ratio at least 0.9
+    at every command, S0's walk passing.
+  - *Reported beside them:* gate C passes, airborne-where-light, the lift-off and
+    touchdown lags.
+- **Reading.**
+  - *If the G1 passes,* the rough deficit is the plans' inconsistency, removable at
+    deployment for every body. Candidate adoption then follows `incumbents.json`'s rule,
+    with S0's chains re-run.
+  - *If it does not,* the correlation was not the cause, or a tracker trained on
+    inconsistent plans cannot use consistent ones. Reported with a reframing.
+- **Data hygiene.** The relation was found on rough's and flat's own captures, so these two
+  skills are diagnosed for this question. The change is generic, and its threshold is the
+  contact threshold gate C uses: nothing was fitted.
+- **Order.** After W7, before W6.
 
 ## What this stage hands to the next
 

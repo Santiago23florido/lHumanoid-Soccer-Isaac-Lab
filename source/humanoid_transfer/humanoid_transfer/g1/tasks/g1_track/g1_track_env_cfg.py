@@ -67,6 +67,8 @@ CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
 LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
 """How the reward scores the feet's loads (``ReferenceCommandCfg.load_space``)."""
 RESAMPLE_SPACE = os.environ.get("HUMANOID_RESAMPLE", "linear")
+PLAN_CONTACT = os.environ.get("HUMANOID_PLAN_CONTACT", "as_drawn")
+"""Whether a plan's loaded feet are put on the ground (``ReferenceCommandCfg.plan_contact``)."""
 """How plans and histories are read between the generator's grid and this body's steps
 (``ReferenceCommandCfg.resample_space``)."""
 LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
@@ -208,6 +210,7 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             procedural_calibration=str(CALIBRATION),
             load_space=LOAD_SPACE,
             resample_space=RESAMPLE_SPACE,
+            plan_contact=PLAN_CONTACT,
             procedural_load_shape=LOAD_SHAPE,
             load_precision=str(LOAD_PRECISION),
         )

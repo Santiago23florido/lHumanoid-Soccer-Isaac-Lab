@@ -2822,6 +2822,35 @@ deployed path, S's three seeds of each body, both skills, three commands).
   W6 tracker.
 - **Order.** After W6.
 
+**W8n result (2026-11-05, 21:37–22:03: reads *not the offset*, on one tracker).**
+`python transfer/scripts/w8_compare.py --bodies nao --nao-trackers warm_nao_sole_s31_sym
+--output transfer/results/w8n_sole.json`. W6's screen did not pass (10.8), so its seed 31
+is the only tracker. As drawn → grounded, mean over three commands, deployed path:
+
+| Tracker | Rough, largest | Rough, duty deviation | Flat, largest | Flat, duty deviation | Airborne where light (rough / flat) | Falls |
+| --- | --- | --- | --- | --- | --- | --- |
+| W6 seed 31 (sole at contact) | 0.140 → 0.169 (+0.029) | 0.097 → 0.103 (+0.006) | 0.202 → 0.201 | 0.181 → 0.181 | −0.057 / −0.063 | 0 → 0 |
+| W8's three, URDF sole (per tracker) | +0.039 / +0.045 / +0.043 | +0.017 / +0.019 / +0.019 | −0.001 / −0.000 / +0.001 | +0.002 / +0.003 / +0.002 | −0.052 to −0.062 / −0.057 to −0.070 | 0 → 0 |
+
+- **Reading, as pre-registered.** Grounding raises rough's duty deviation on this tracker
+  (`single.rough_b4.duty` = +0.006 > 0), so the screen reads *not the offset*. One tracker
+  decides nothing, and this is reported as a fact.
+- *What did change.* The harm is about a third of what it was on the URDF sole point
+  (+0.006 against +0.017 to +0.019), and rough's largest deviation rises by about two
+  thirds as much (+0.029 against +0.039 to +0.045). Flat does not move on either sole
+  point. No falls, the speed ratio at least 1.00, and S0's walk passes (speed 0.995 →
+  1.055, as the URDF trackers' 0.994–0.997 → 1.055–1.059).
+- *Where the loaded foot is* (`transfer/results/w6_mechanism.json`, entry
+  `arm_s31_ground`, from `w6_mechanism.py`). The grounded plans put a loaded foot at 0.0000.
+  W6's tracker stands at 0.0027 `L` on flat and 0.0069 on rough, so on rough the plan
+  still asks for 0.007 `L` the stance does not give, about two thirds of the URDF offset.
+  Why a loaded NAO foot reads higher on rough than on flat is not measured here.
+- **Reframing** (hypothesis). The sole offset is part of W8's NAO miss, not all of it.
+  What remains sits where the stance level still differs from the grounded plan's, on
+  rough. A test would read the NAO's rough stance level against the terrain under the
+  foot. It is not queued: no NAO candidate depends on it, and the G1's candidate does not
+  touch the NAO.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

@@ -16,6 +16,7 @@ W6's arm. Per capture, plan ``contract_due[t]`` against the state at ``t + 1``
 * the duty and the lift-off and touchdown lags (``capture_fidelity``).
 
 Everything is the mean over the six captures, then per skill. Leg lengths throughout.
+``arm_s31_ground`` is the same tracker on W8n's grounded plans (§10.10).
 
     python transfer/scripts/w6_mechanism.py --output transfer/results/w6_mechanism.json
 """
@@ -45,6 +46,7 @@ TAGS = {
     "control_s32": "warm_nao_r1_s32_sym",
     "control_s33": "warm_nao_r1_s33_sym",
     "arm_s31": "warm_nao_sole_s31_sym",
+    "arm_s31_ground": "warm_nao_sole_s31_sym_ground",
 }
 SKILLS = ("flat_dagger2", "rough_b4")
 COMMANDS = ("forward", "fast", "turning")

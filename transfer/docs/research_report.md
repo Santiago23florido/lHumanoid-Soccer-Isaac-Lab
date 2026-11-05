@@ -312,6 +312,10 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     because of its sole offset (§2.2, item 4). A loaded G1 foot reads 0.000–0.0005.
   - *Hypothesis:* grounded plans ask for a stance height the NAO's sole point cannot
     reach. W8's switch on W6's tracker (sole point at the resting contact) tests it.
+  - *Tested by W8n* (§5.5; one tracker): *not the offset* by its screen. The harm on
+    rough's duty shrinks to about a third (+0.006 against +0.017 to +0.019). On rough the
+    loaded foot still stands 0.007 `L` above the grounded plan (flat 0.003); why a loaded
+    NAO foot reads higher on rough is not measured.
 - Why the NAO's absolute swing peak is low (0.011–0.037 `L` under the plan's), once the
   sole-point offset is set aside. For the rest, the NAO's leg can about make the asked lift
   once it may flex a step before lift-off, as it does (`swing_bandwidth.json`). Why the
@@ -453,6 +457,11 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     its pre-registration screens.
   - *What the miss points to.* The stance error was removed and the swing did not rise
     (§5.6). That leaves the drives, which W7c, already queued, tests.
+- **After W8n: the NAO keeps plans as drawn; no follow-up queued.**
+  - *What it gave.* *Not the offset*, on one tracker; the harm shrank to a third.
+  - *Rejected:* a run on the NAO's rough stance level now. No NAO candidate depends on it,
+    and W7c, which may produce one, does not use grounded plans.
+  - *What it leaves.* The G1 candidate stands as recorded, for the G1 only.
 
 ## 4. Experiment log
 
@@ -604,6 +613,11 @@ As drawn → grounded, frozen trackers, mean over three commands, deployed path.
   not move.
 - **G1 candidate.** It meets `incumbents.json`'s rule (S0's chains byte-identical, pytest
   and ruff pass). It is recorded in `candidates.json`, and `incumbents.json` is not changed.
+- **W8n: the NAO on W6's tracker** (`w8n_sole.json`; one tracker, since W6's screen did not
+  pass). Grounding still raises rough's duty deviation, by +0.006 (W8's trackers: +0.017
+  to +0.019), and rough's largest by +0.029 (+0.039 to +0.045). Flat does not move; no
+  falls; the walk passes. The screen reads *not the offset*: the offset is part of the
+  NAO's miss, not all of it (`skill_space.md` §10.10).
 
 ### 5.6 W6: the NAO's sole point at its resting contact (one seed; screen not passed)
 

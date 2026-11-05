@@ -321,8 +321,8 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   derived for stance (`nao.py`), not identified on the robot, and the NAO's gait fidelity
   depends on them (W7). Nothing in this repository measures the real robot's drives.
 - Whether W7's falls at gain 4 (13, all on rough at the fast command) are the frozen
-  trackers' mismatch with a stiffer leg or a property of the stiffer body. W7b (gain 2 on
-  all three trackers) and, if it passes, an RL arm on the faster body separate the two.
+  trackers' mismatch with a stiffer leg or a property of the stiffer body. At gain 2 none
+  fall (W7b). W7c, trackers trained on the faster drives, is the test of the mismatch.
 - Whether B1-NAO's shuffle is the interpolated plans' doing. W4 was to test it under the
   generator-space interface, and its condition (W1 passing) failed. The zero-shot trackers'
   contact events do not follow the interface, which makes that cause less likely; it was
@@ -413,6 +413,16 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     pre-registered with its in-sample third declared (`skill_space.md` §10.9).
   - *Where it runs.* After W8, which was already waiting, and before W5b and W6. It
     decides whether an RL arm runs, which neither of those does.
+- **After W7b: the RL arm at gain 2 (W7c), behind W6 and W8n.**
+  - *What opened it.* W7b read *both* with no regression, which W7's pre-registration
+    names as the condition for an arm.
+  - *Its question.* Whether training on the faster drives adds to deploying on them. The
+    control is therefore S's seeds frozen at gain 2, not at the derived gains, which are
+    reported beside it.
+  - *Why gain 2, not 4.* Gain 2 is the gain that passed. Training at 4 might remove W7's
+    falls, but no evidence yet calls for it.
+  - *The order.* W5b and W6 were already queued. W8n closes W8's NAO question and costs
+    0.5 h. The arm, about 9 h, runs last, so nothing announced earlier waits on it.
 - **After W8: a G1 candidate recorded, not adopted; the NAO's miss tested through W6.**
   - *What the rule gives.* The G1's grounded plans meet `incumbents.json`'s adoption rule:
     the target is better by 6.5 SE; pytest, ruff and the chains pass; flat L4 and the
@@ -449,6 +459,7 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-05 | 8d52199 | W7 pre-registered: the NAO's leg drives measured, then faster drives (`K × 4`, `D × 2`) on the frozen trackers, queued after W5 and before W6 | Drives' `D / K` 0.83–0.92 `T` (G1 0.10); NAO hip delivers 0.34 of its target's excursion (G1 0.60); open-loop replay at `g` = 4: planar rise 0.22 → 0.39 of asked | `swing_drive.json`, `logs/contract/w7_drives.status` |
 | 2026-11-05 | 551f797 | W8 pre-registered: where the plans' loaded feet are, and the G1's events against it; the plans' loaded feet put on the ground on both bodies' frozen trackers, queued after W7 and before W6 | Teachers' loaded feet at 0 (p90 0.006 / 0.013 `L`), the G1's plans' at p90 0.018 / 0.029, the biped's at 0; early lift-off with the plan's height before it (Spearman −0.35 rough), late touchdown with it after (+0.49) | `plan_contact.json`, `logs/contract/w8_plan_contact.status` |
 | 2026-11-05 | 24f5e10 | W7 in the simulator: `HUMANOID_NAO_LEG_GAIN=4` on 3 frozen NAO trackers × 2 skills × 3 commands and S0's walk, then the incumbent at gain 2 (12:53–14:39); W7b pre-registered and queued after W8 | Reads *both*: lift +0.203 ± 0.003, duty deviation −0.065 ± 0.005, gate C 0 → 10 of 18 rows. Fails no regression on falls (+13, all `rough_b4` fast). RL arm not opened. Gain 2 on the incumbent: no falls, lift 0.620, duty 0.080 | `w7_drives.json`, `logs/contract/w7b_drives.status` |
+| 2026-11-05 | (next commit) | W7b in the simulator: `HUMANOID_NAO_LEG_GAIN=2` on S's NAO seeds 32 and 33 (L4 both skills, walk) and the incumbent's walk (17:12–18:11); W7c pre-registered and queued after W8n | Reads *both*, no regression: lift +0.128 ± 0.002, duty deviation −0.045 ± 0.003, gate C 0 → 7 of 18, no falls in 1150 episodes. RL arm opens at gain 2 | `w7b_drives.json`, `logs/contract/w7c_trained.status` |
 | 2026-11-05 | fbecceb | W8 in the simulator: `HUMANOID_PLAN_CONTACT=ground` on S's three G1 seeds and the three NAO trackers, L4 on both skills and S0's walk (14:41–17:10); S0's chains, pytest and ruff for the G1 candidate | G1 passes: rough largest −0.027 ± 0.004, flat −0.019 ± 0.001, no falls (seed 42's three gone), walk deviations all smaller. NAO misses: rough duty +0.018 ± 0.001. Chains byte-identical. G1 candidate recorded, `incumbents.json` unchanged | `w8_plan_contact.json`, `candidates.json` |
 | 2026-11-05 | f7919b5 | W5: pushes 0.1 / 0.2 `V` and estimate noise ×2 / ×4 on both incumbents and the NAO's generator-space variant (11:49–12:51) | Pushes: no effect. Noise ×2: flat falls 262/294 (G1), 272/304 (NAO); rough 0/64 even at ×4. W5b (`flat_b4`) queued after W8 | `w5_robust.json` |
 
@@ -531,7 +542,18 @@ the teacher's own grid.
 - **Why this is a body-model candidate, not a tracker result.** The intervention changes the
   simulated NAO's drives. Every NAO result in this repository, the paper's included, was
   obtained with the derived gains, and none is replaced.
-- **W7b** runs the same criteria at gain 2 over the three trackers.
+- **W7b: gain 2 passes** (`w7b_drives.json`; `K × 2`, `D × √2`; the incumbent's L4 is
+  W7's dose, declared in-sample).
+
+  | tracker | lift | duty deviation | gate C passed | falls |
+  | --- | --- | --- | --- | --- |
+  | `r1_3498` (incumbent) | 0.489 → 0.620 | 0.124 → 0.080 | 0 → 4 of 6 | 0 → 0 |
+  | S seed 32 | 0.491 → 0.616 | 0.134 → 0.094 | 0 → 1 | 0 → 0 |
+  | S seed 33 | 0.455 → 0.582 | 0.138 → 0.088 | 0 → 2 | 0 → 0 |
+  | paired difference | +0.128 ± 0.002 | −0.045 ± 0.003 | | 0 |
+
+  - No fall in 1150 episodes, and S0's walk passes. The RL arm opens at gain 2 (W7c),
+    as pre-registered.
 
 ### 5.5 W8: the plans' loaded feet on the ground (validated; G1 candidate)
 

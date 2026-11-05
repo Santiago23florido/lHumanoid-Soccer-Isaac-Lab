@@ -2553,6 +2553,55 @@ seeds).**
   incumbent's third of the evidence is in-sample. W7's own verdict stands as written.
 - **Order.** After W8, before W5b and W6.
 
+**W7b result (2026-11-05: reads *both*, no regression; the RL arm opens at `g` = 2).**
+`python transfer/scripts/w7_compare.py --gain 2 --output transfer/results/w7b_drives.json`.
+
+| Tracker | Lift | Duty deviation | Body duty | Gate C passes | Falls |
+| --- | --- | --- | --- | --- | --- |
+| `r1_3498_sym_v3` | 0.489 → 0.620 | 0.124 → 0.080 | 0.580 → 0.551 | 0 → 4 of 6 | 0 → 0 |
+| S seed 32 | 0.491 → 0.616 | 0.134 → 0.094 | 0.585 → 0.557 | 0 → 1 of 6 | 0 → 0 |
+| S seed 33 | 0.455 → 0.582 | 0.138 → 0.088 | 0.590 → 0.557 | 0 → 2 of 6 | 0 → 0 |
+| Paired difference (± SE) | +0.128 ± 0.002 | −0.045 ± 0.003 | −0.030 ± 0.001 | | 0 |
+
+- No tracker falls in any of the 1150 episodes. The speed ratio stays at least 1.00, and S0's
+  walk passes for all three (speed 0.995–0.997).
+- The seeds gain less than the incumbent, and rough at the fast command stays the hardest
+  row: largest deviation 0.183–0.186 for the seeds.
+- Against `g` = 4 (W7), half the stiffness gives about 0.6 of the lift (+0.128 against
+  +0.203) and 0.7 of the duty change (−0.045 against −0.065), without the falls.
+
+**W7c, pre-registered (2026-11-05, after W7b's result, before any training).**
+- **Question.** Does a tracker trained against the faster drives do better than a frozen
+  one deployed on them? W7 and W7b changed the body under trackers that learned the slower
+  one.
+- **Arm** (`transfer/scripts/w7c_train.sh`). `r1_3498` continued 1000 iterations exactly as
+  S's NAO seeds were (`w6_sole.sh`'s recipe: 70 % procedural, the mirror loss, the
+  checkpoint's adapted rate), with `HUMANOID_NAO_LEG_GAIN=2` in training and evaluation.
+  - Seeds 31, 32 and 33, `warm_nao_g2_s<seed>`.
+  - Laddered as S's were: rough with the encoder, the walk and L4; flat with L4.
+  - A 3-iteration smoke run must show the scaled leg gains in `params/env.yaml` first.
+- **Control.** S's seeds 31–33, deployed frozen at `g` = 2. Seeds 32 and 33 are W7b's
+  captures; seed 31 (`warm_nao_r1`) runs first in the same queue.
+- **Criterion** (`transfer/scripts/w7c_compare.py` → `transfer/results/w7c_trained.json`).
+  - *Target:* the largest gate C deviation is the paper's reading: per command, the
+    largest of the stride, period and duty deviations, then the mean over both skills ×
+    three commands. The arm's seed mean must fall below the control's by more than 2 SE of
+    the difference of seed means, `sqrt(s_a²/3 + s_c²/3)`.
+  - *No regression:* falls at most two more in total, speed ratio at least 0.9 at every
+    command, S0's walk passing, and the lift not lower by more than 2 SE.
+  - *Reported beside it:* the arm against S's seeds at the derived gains (the whole change
+    against the system as it stands), gate C passes, and the duty deviation.
+- **Reading.**
+  - *Passes:* training on the faster body adds to deploying on it. A body-model candidate
+    (faster drives plus their tracker), reported apart.
+  - *Fails:* the deploy-time result stands alone, reported with a reframing.
+  - *Either way:* no NAO result is replaced. Adopting any of it needs the real NAO's drive
+    response, which no file here measures.
+- **Zero-shot.** Training uses S's NAO recipe, the procedural family and the walk
+  teacher's contract. It uses neither skill's plans.
+- **Budget and order.** About 9 h (three trainings of about 2.5 h, plus ladders), after W8n.
+  It uses part of the 13 h the closed W3 arms left in the approved program.
+
 ### 10.10 The plans load feet they hold above the ground; pre-registered (W8)
 
 **Measured** (`transfer/scripts/plan_contact.py`, `transfer/results/plan_contact.json`;

@@ -2375,6 +2375,35 @@ as instrumentation: it decides nothing, and it is reported apart.
   `flat_b4`, on both incumbents (about 25 minutes, after W8). Reported in this table, it too
   decides nothing. If `flat_b4` holds where `flat_dagger2` falls, the flat incumbent's
   choice is put back to the adoption rule with robustness on the record.
+- **W5b result (2026-11-05, 18:12–18:38;** the same table, `w5_robust.json`, rows
+  `<body> <tag> flat_b4`).
+
+  | tracker, `flat_b4` | nominal | push 0.1 / 0.2 `V` | estimate noise ×2 | ×4 |
+  | --- | --- | --- | --- | --- |
+  | G1 incumbent | 0/64, passes (largest 0.096) | 0/64, passes / 0/64, largest 0.121 | 0/64, passes (0.086) | 0/64, passes (0.081) |
+  | NAO incumbent | 0/64 (largest 0.166) | 0/64 (0.164) / 0/64 (0.163) | 0/64 (0.170) | 0/64 (0.196) |
+
+  - *The hypothesis holds.* Trained across noise levels and reading the level, the flat
+    generator does not fall at four times the estimator's precision on either body.
+    `flat_dagger2`, with the same tracker, falls in nine episodes of ten at twice. The
+    G1's gait is no worse with noise. The NAO's largest deviation rises by 0.030 at four
+    times.
+  - *The one cost seen.* At pushes of 0.2 `V` the G1's largest deviation rises from 0.096
+    to 0.121, and gate C fails on the forward command.
+  - **Back to the adoption rule.**
+    - *Robustness is not in the rule.* The rule reads each generator's target and the
+      regression suite (`incumbents.json`), and robustness is in neither.
+    - *What the suite shows.* On today's incumbents, at L4's three commands
+      (`zero_shot_<body>_<tag>_{flat_dagger2,flat_b4}_auto_kin_l4_*.json`), `flat_b4`
+      passes gate C on the G1 at two of three where `flat_dagger2` passes three. Turning
+      is lost on duty, 0.106. On the NAO neither passes. `flat_b4`'s duty deviations are
+      lower (0.109–0.166 against 0.137–0.184), and its forward stride is further off
+      (0.112 against 0.065).
+    - *So the rule keeps `flat_dagger2`.* `flat_b4` trades one of the G1's gate C passes
+      (turning, duty 0.106 against the 0.10 limit) for not failing under a degraded
+      estimate.
+    - *Whether robustness belongs in the regression suite* is a change to the criterion,
+      and so the user's call. It is put to them in the recommendation (report §7).
 
 ### 10.8 The NAO's sole point is not where its foot rests; pre-registered (W6)
 

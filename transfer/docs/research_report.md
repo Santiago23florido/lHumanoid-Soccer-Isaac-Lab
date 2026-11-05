@@ -224,6 +224,11 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
        saturated drive delivers its full effort whatever its gains, so the cost is a lead:
        the targets must sit well ahead of the leg. This fits the controller's part but has
        not been shown to cause it.
+     - *Measured since* (`swing_drive.json`, from `swing_drive.py`). The NAO's swing joints
+       move as isolated PD joints: one step of the PD law, against the leg's own inertia,
+       predicts the next with R² 0.84 at the hip and 0.72 at the knee. Within a swing the
+       hip delivers a median 0.34 of its target's excursion; the G1's hip delivers 0.60. W7
+       (`skill_space.md` §10.9) tests faster drives on the frozen trackers.
    - *Not a short swing* (`clearance_mechanism.json`, from `clearance_mechanism.py`). The
      NAO's feet stay in the air as long as asked (median ratio 1.00). Swings that last the
      full asked time still reach only 0.43 (corners) to 0.58 (grid) of the asked height.
@@ -349,6 +354,19 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   the interface does not reach the NAO's body, and the family's load shapes do not reproduce
   the G1's failure on rough. W5 and W6 run as queued. The freed budget goes to the user with
   the new framings (§2.3), not into a new arm chosen after seeing these results.
+  - *The user's answer:* the choice is mine. *Chosen:* W7, the NAO's leg drives
+    (`skill_space.md` §10.9).
+  - *Why this one.* It is the most direct test of the strongest lead. Duty and clearance
+    fail together on the NAO, swing by swing. The interface is ruled out. The drives
+    measurably lag the targets (`swing_drive.json`).
+  - *Why it is cheap.* It is deploy-time on frozen trackers (about 2 h), and its
+    intervention on the lift tests whether the lift sets the stance, which no correlation
+    can.
+  - *What waits.* An RL arm is gated on it. The G1's rough question (§2.3) waits for offline
+    work; it needs no machine.
+  - *The order.* W7 runs before W6. It is short, and decides what a later NAO arm trains
+    with. W6 had not started, and its queue was stopped while waiting and relaunched behind
+    W7.
 
 ## 4. Experiment log
 
@@ -368,7 +386,8 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-05 | 3fe7631 | The swing ceiling's assumptions checked against the captures | At-rest ceiling beaten in 18 % (skills) / 26 % (probes) of NAO swings, the knee at 0.45 / 0.38 of its limit at lift-off; one-step ceiling 1.01 / 1.15 holds (beaten in 1.6 % / 1.7 %); G1 3.2 / 4.1. A thin margin, not a body limit; the shortfall is mostly the controller's. Square grid fixed (range-only 0.314 → 0.318 `L`) | `swing_bandwidth.json` |
 | 2026-11-05 | 6a96bb8 | W1 in the simulator: control re-run, then 3 frozen NAO trackers × 2 skills × 3 commands, and S0's walk, under `HUMANOID_RESAMPLE=generator` (10:01–11:43) | Control reproduces (≤ 0.00097). Asked duty −0.029 / −0.024, as predicted; body duty +0.006 / +0.003. Criterion fails (+0.0088 ± 0.0010). W4 not run | `w1_resample.json`, `w1_contact.json`, `body_rate_verdicts_w1.json` |
 | 2026-11-05 | cce652f | Swing by swing: lift against touchdown lag | NAO: low swings land early (Spearman +0.38 to +0.52; lowest quarter 0.10–0.13 `T` early); G1 unrelated | `touchdown_lift.json` |
-| 2026-11-05 | (this entry's commit) | W3 step 1: both frozen incumbents on the transfer probes (11:43–11:48) | Prediction fails on both bodies, with the sign reversed: at warp 0.5 the stance runs longer (G1 +0.039 ± 0.004, NAO +0.019 ± 0.005), by an earlier touchdown. Steps 3–4 and W4 not run; the queue closed at 11:48 | `transfer_probes_*.json`, `logs/contract/w3_w4.status` |
+| 2026-11-05 | 2100ac2 | W3 step 1: both frozen incumbents on the transfer probes (11:43–11:48) | Prediction fails on both bodies, with the sign reversed: at warp 0.5 the stance runs longer (G1 +0.039 ± 0.004, NAO +0.019 ± 0.005), by an earlier touchdown. Steps 3–4 and W4 not run; the queue closed at 11:48 | `transfer_probes_*.json`, `logs/contract/w3_w4.status` |
+| 2026-11-05 | (this entry's commit) | W7 pre-registered: the NAO's leg drives measured, then faster drives (`K × 4`, `D × 2`) on the frozen trackers, queued after W5 and before W6 | Drives' `D / K` 0.83–0.92 `T` (G1 0.10); NAO hip delivers 0.34 of its target's excursion (G1 0.60); open-loop replay at `g` = 4: planar rise 0.22 → 0.39 of asked | `swing_drive.json`, `logs/contract/w7_drives.status` |
 
 ## 5. Comparative evaluation
 

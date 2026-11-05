@@ -2408,6 +2408,67 @@ command in the script's docstring).
   - Otherwise the one seed is reported as such, as a fact with a reframing, not as a
     conclusion about H6.
 - **Order.** After W5, so it never delays the approved queues (`transfer/scripts/w6_sole.sh`).
+  *(2026-11-05: moved behind W7, 10.9, which is deploy-time and decides what a later NAO
+  arm trains with. W6 had not started; its script is unchanged.)*
+
+### 10.9 The NAO's leg drives lag its targets; pre-registered (W7)
+
+**Measured** (`transfer/scripts/swing_drive.py`, `transfer/results/swing_drive.json`;
+deployed path, the W1 linear captures of the three NAO trackers and S's three G1 seeds).
+- *The drives are slow in the body's own time.* A PD drive follows a moving target with the
+  time constant `D / K`. The NAO's leg drives (`nao.py`, derived for stance against the
+  whole body) take 0.92 `T` at the hip, 0.83 at the knee and 0.87 at the ankle. The G1's
+  take 0.10 `T` at the hip and knee. A planned swing lasts a median 0.50 `T`.
+- *The NAO's swing joints move as isolated PD joints.* From each recorded state, integrating
+  the joint's own PD law against the leg's own inertia predicts the next step. Actual on
+  predicted: hip slope 0.88, R² 0.84; knee 0.77, 0.72; ankle 1.00, 0.97. The G1's hip fits
+  worse (0.72, 0.50); the body around it moves too.
+- *What the drives deliver.* In a swing the NAO's hip target moves a median 0.26 rad from
+  the swing's start (it moves at all in 90 % of swings), and the hip itself 0.09 rad. That
+  is a median 0.34 of its own target's excursion. The knee's target does not rise after
+  lift-off in 58 % of swings: the NAO lifts with its hip. The G1's hip delivers 0.60 of its
+  target and its knee 1.25.
+- *What faster drives would give, open-loop.* The same targets are replayed through the
+  isolated joints with the leg gains scaled to `K g`, `D √g`. That keeps the damping ratio
+  against every inertia, so a stance joint stays critically damped, and divides `D / K` by
+  `√g`. The hip and knee's planar sole rise, as a share of the asked lift, is 0.22 at
+  `g` = 1 (the record's own joints give 0.16), 0.31 at 2, 0.39 at 4 and 0.45 at 8. The
+  planar rise covers only part of the lift `z*` measures (0.49 of asked for the incumbent),
+  and the replay ignores the tracker's response to a faster leg.
+
+**Pre-registered (2026-11-05, before any run).**
+- **Hypothesis.** The NAO lifts low because its leg drives lag the tracker's targets by most
+  of a swing, and a low swing lands early, lengthening the stance (10.3,
+  `touchdown_lift.json`). Faster drives on the same frozen tracker should raise the lift,
+  and if the lift sets the stance, shorten it.
+- **Change.** `HUMANOID_NAO_LEG_GAIN=4` (`nao_track_env_cfg.LEG_GAIN`, default 1;
+  `nao_kinematics.scaled_drive_gains`): every leg drive at `K × 4`, `D × 2`, so `D / K` is
+  halved to 0.42–0.46 `T`. Effort and velocity limits are unchanged, and nothing is trained.
+- **Test** (`transfer/scripts/w7_drives.sh`). The frozen trackers W1 used -- `r1_3498` and
+  S's seeds 32 and 33, symmetrized -- through L4 of `flat_dagger2` and `rough_b4` and S0's
+  walk, on the linear interface. Each is paired with its own capture under the derived
+  gains: the incumbent's W1 control re-run, and the seeds' records. As a dose, the
+  incumbent also runs at `g` = 2, on both skills.
+- **Criterion** (`transfer/scripts/w7_compare.py`). Paired over the three trackers, mean
+  over both skills × three commands, deployed path:
+  1. *Lift:* the clearance reached over asked (`common/contact.py`) rises by more than
+     twice the standard error of the paired differences.
+  2. *Duty:* W1's target, the duty factors' relative deviation from the teacher's own grid,
+     falls by more than twice its standard error.
+  3. *No regression:* falls at most two more in total, speed ratio at least 0.9 at every
+     command, S0's walk passing.
+- **Reading.**
+  - *Both* (with 3): the drives' lag is a cause of both gaps, and the lift sets the
+    stance. An RL arm then opens: S's NAO recipe with the faster drives, three seeds,
+    pre-registered before it runs.
+  - *Lift only:* the lift does not set the stance.
+  - *Neither:* the frozen tracker was trained against the slower leg, so this says
+    nothing either way about the drives. Reported with a reframing.
+- **What it changes, declared.** The simulated NAO's drives, which is part of the body.
+  The gains were derived for stance (`nao.py`). Every NAO result in this repository was
+  obtained with them, and none is replaced. A result here is a body-model candidate,
+  reported apart.
+- **Order.** After W5, before W6.
 
 ## What this stage hands to the next
 

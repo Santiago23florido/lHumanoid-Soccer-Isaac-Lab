@@ -86,6 +86,11 @@ rests in the simulator, :data:`~humanoid_transfer.nao.assets.nao_kinematics.SOLE
 lower -- the G1's definition, so a stance sole reads height 0 as every plan asks."""
 if SOLE not in ("urdf", "contact"):
     raise ValueError(f"HUMANOID_SOLE must be 'urdf' or 'contact', not {SOLE!r}")
+LEG_GAIN = float(os.environ.get("HUMANOID_NAO_LEG_GAIN", "1"))
+"""The leg drives made faster as ``K g``, ``D sqrt(g)``
+(:func:`~humanoid_transfer.nao.assets.nao_kinematics.scaled_drive_gains`). The damping
+ratio against every inertia is kept, and the time constant ``D / K`` is divided by
+``sqrt(g)``. W7 (skill_space.md §10.9) probes it; 1, the derived gains, everywhere else."""
 
 COMMAND = "base_velocity"
 BASE_BODY = "base_link"
@@ -233,6 +238,13 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Scene: the NAO on flat ground, crouched as low as the task's body walked.
         self.scene.robot = get_nao_stand_cfg(prim_path="{ENV_REGEX_NS}/Robot")
+        if LEG_GAIN != 1.0:
+            legs = self.scene.robot.actuators["legs"]
+            stiffness, damping = nk.scaled_drive_gains(legs.stiffness, legs.damping, LEG_GAIN)
+            self.scene.robot.actuators = {
+                **self.scene.robot.actuators,
+                "legs": legs.replace(stiffness=stiffness, damping=damping),
+            }
         posture = contract_posture(POSTURE_CONTRACT)
         self.scene.robot.init_state.joint_pos = {**NAO_STAND_JOINT_POS, **posture}
         self.scene.robot.init_state.pos = (0.0, 0.0, nk.sole_height_below_base(posture) + 0.005)

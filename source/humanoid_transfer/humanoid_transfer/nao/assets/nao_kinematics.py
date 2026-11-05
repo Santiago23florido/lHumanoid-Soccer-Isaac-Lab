@@ -51,6 +51,7 @@ __all__ = [
     "FOOT_BODIES",
     "SOLE_FRAMES",
     "SOLE_REST",
+    "scaled_drive_gains",
     "sole_points_in_foot",
     "SUPPORT_POLYGON_X",
     "SUPPORT_POLYGON_Y_SINGLE",
@@ -773,3 +774,23 @@ def capturable_velocity_in_direction(
             np.where(direction[..., 1] < 0, (y_min - com[1]) / direction[..., 1], np.inf),
         )
     return omega * np.minimum(to_x, to_y)
+
+
+def scaled_drive_gains(
+    stiffness: dict[str, float], damping: dict[str, float], gain: float
+) -> tuple[dict[str, float], dict[str, float]]:
+    """PD gains made faster by ``gain`` without changing how damped they are.
+
+    ``K -> K g`` and ``D -> D sqrt(g)``. Against any inertia ``I`` the damping ratio
+    ``D / (2 sqrt(K I))`` is unchanged, so a stance joint stays critically damped
+    against the whole body it carries, while the drive's slow time constant ``D / K``
+    -- what a lightly loaded swing joint follows its target with -- shrinks by
+    ``sqrt(g)``. ``gain`` 1 returns the gains as given.
+    """
+    if gain <= 0:
+        raise ValueError(f"a drive gain must be positive, not {gain}")
+    root = math.sqrt(gain)
+    return (
+        {name: value * gain for name, value in stiffness.items()},
+        {name: value * root for name, value in damping.items()},
+    )

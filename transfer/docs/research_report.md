@@ -158,8 +158,38 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
      0.64 of the asked clearance on the grid, the slowest strides (2.6 `T`) included, and
      0.37–0.47 on the corners (asked 0.055–0.129 `L`, reached 0.026–0.048). The G1 reaches
      0.93–1.06 everywhere.
-   - *Not a body limit.* The NAO lifts higher when asked higher, and B2 (the NAO trained on
-     the task's own reward) lifts 0.08–0.31 `L`.
+   - *A body limit at the plans' swing speed, not at long swings* (`swing_bandwidth.json`,
+     from `swing_bandwidth.py`). **Correction:** this item said "Not a body limit": the NAO
+     lifts higher when asked higher, and B2 (the NAO trained on the task's own reward)
+     lifts 0.08–0.31 `L`. B2's mean stance and flight last longer than 1.55 `T` (its note
+     in `transfer/paper/README.md`); there only the joints' ranges bound the lift, 0.314 `L`
+     at the walking crouch, which B2's 0.31 meets. The plans' swings are 2–5 control steps
+     in 97 % of the skills' swings, and at that length most of them ask more than the NAO's
+     leg can do.
+     The wrong claim had put the whole shortfall on the tracker (the "learned shortfall"
+     below, in its first version) and on the reframing list as an open mechanism.
+     - *The bound.* Whatever its targets, a joint at rest that must be back within the
+       swing moves at most as far as full effort, then full braking, allow: effort over the
+       leg's own inertia, under the joint's velocity limit. Over the hip, knee and ankle
+       pitch at the NAO's walking crouch (knee 1.557 rad, the foot kept flat), the sole can
+       rise within the airborne time at most a median 0.72 of the asked lift on the skills
+       (0.77 on the probes). 81 % of the skills' planned swings ask above that (67 % of the
+       probes'). With one more control step of flexion before lift-off, 1.01 (1.15). The
+       G1's bound is 3.2 times its asked lift, exceeded in 1 % of its skills' swings.
+     - *What binds it.* The knee's velocity limit, the URDF's 6.40 rad/s: 1.02 rad per `T`,
+       against the G1's 5.17. Without it the bound would be 1.14 of asked. The simulator
+       enforces it: in 20 captures the NAO's swing knee never exceeds 6.51 rad/s.
+       Dynamic similarity scales a plan by `L`, `m` and `g`; the joints' speed does not
+       scale with them, and `z*` does not carry it.
+     - *What does not bind.* The tracker reaches 0.51 of asked (0.54 on the probes), about
+       two thirds of the bound, and its swing knee reaches the velocity limit in only 6 % of
+       the skills' swings (9 % of the probes'); median peak 0.61 rad/`T`. The leg drives
+       were sized critically damped against the whole body a stance leg carries
+       (`derive_gains.py`). Against the leg alone, in swing, they are overdamped (damping
+       ratio 2.0 hip, 4.0 knee, 15 ankle) and respond in 0.82–0.87 `T`, longer than the
+       swing they must make (median 4 steps, 0.50 `T`). The G1's respond in 0.09–0.36 `T`.
+       To move within a swing, the NAO's policy must put its targets far ahead of its leg;
+       this gap below the bound is consistent with that, and not yet shown to be it.
    - *Not a short swing* (`clearance_mechanism.json`, from `clearance_mechanism.py`). The
      NAO's feet stay in the air as long as asked (median ratio 1.00). Swings that last the
      full asked time still reach only 0.43 (corners) to 0.58 (grid) of the asked height.
@@ -182,18 +212,27 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
        tolerances". That is the clearance gap. The reward sees the absolute peak's gap,
        6–18 tolerances, plus a constant 6 tolerances in stance. The conclusion "not a loose
        reward" stands; the reward's view of the gap was overstated.
-   - *What remains.* The low absolute peak (0.011–0.037 `L`): a learned shortfall, the
-     mechanism open. Hypotheses: a trade against balance at the NAO's sixth of the G1's
-     knee torque; the 4-sample view, against the G1's 8. Within each probe, swings that
-     lift higher carry more trunk-height error (Spearman +0.36 to +0.40; G1 −0.11 to
-     −0.37). That is consistent with the balance trade but does not establish it.
+   - *What remains.* The low absolute peak (0.011–0.037 `L`) is, by the bound above, partly
+     the body's: most of the plans' swings ask more lift than the NAO's knee can deliver in
+     the time. The rest, the third between the bound and what the tracker reaches, is the
+     controller's; the overdamped swing drives are one candidate, a trade against balance
+     another. Within each probe, swings that lift higher carry more trunk-height error
+     (Spearman +0.36 to +0.40; G1 −0.11 to −0.37); that fits the balance trade but does
+     not establish it.
+     - *For W6.* Its arm must lift 0.007–0.010 `L` more. On the skills the bound's median and
+       the trackers' differ by 0.21 of the asked lift, so W6's target stays
+       physically reachable; it is not a free gain either.
 
 ### 2.3 Unresolved
 
 - Why the trackers lift early at light loads: family coverage (hypothesis H3, W3) or
   reward resolution.
 - Why the NAO's absolute swing peak is low (0.011–0.037 `L` under the plan's), once the
-  sole-point offset is set aside. W6 tests the offset's part (skill_space.md §10.8).
+  sole-point offset is set aside. W6 tests the offset's part (skill_space.md §10.8). Of the
+  rest, the plans exceed the NAO's leg bound in 81 % of the skills' swings
+  (`swing_bandwidth.json`); what lies between the bound and the tracker is not explained.
+- How much of the NAO's gate-C duty gap the swing bound explains. It bounds the lift, not
+  the duty; a foot that cannot clear grazes, and a graze reads as contact. Not measured.
 - Whether B1-NAO's shuffle is the interpolated plans' doing (W4).
 - The true-state path's short strides on flat (instrumentation).
 
@@ -237,6 +276,14 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     6 tolerances away from where it learned it.
   - *How it is budgeted.* One screened seed first, run after W5, so it never delays the
     approved queues. Seeds 32 and 33 run only on a passing screen.
+- **The NAO's swing bound is reported, not acted on.** It came out of the same wait.
+  - *Why no run.* The two levers are the body's: the leg gains (derived in
+    `derive_gains.py` for stance) and the velocity limit (the real NAO's motor). Changing
+    either changes the body every NAO result in this repository was obtained on, so it is
+    a decision for the project, put to the user.
+  - *What it does change.* Read against the NAO's plans, a clearance ratio of 1 is not
+    attainable in most swings; the bound, not 1, is the ceiling a NAO candidate is judged
+    against on clearance.
 
 ## 4. Experiment log
 
@@ -252,6 +299,7 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-04 | 8dd2368 | W5 robustness probes, queued behind W3/W4 | waiting | `logs/contract/w5_robust.status` |
 | 2026-11-04 | d466b6b | Clearance asked vs reached on the family's probes | NAO 0.37–0.64 of asked at every cadence; G1 0.93–1.06 | `clearance_probes.json` |
 | 2026-11-04 | 0a8c1a0 | Where the NAO's sole point rests; why its swings are low | Flat foot +0.01006 `L` (G1 −0.00003); a quarter to a half of the clearance gap; swings not short; W6 pre-registered and queued after W5 | `sole_offset.json`, `clearance_mechanism.json`, `logs/contract/w6_sole.status` |
+| 2026-11-05 | (this commit) | What each body's swing leg can do in the plans' time | NAO bound 0.72 of the asked lift on the skills (asked above it in 81 % of swings; the knee's 6.40 rad/s binds, and is enforced); tracker 0.51; G1 bound 3.2; "not a body limit" corrected | `swing_bandwidth.json` |
 
 ## 5. Comparative evaluation
 

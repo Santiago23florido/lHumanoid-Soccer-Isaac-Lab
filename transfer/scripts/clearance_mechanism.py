@@ -75,8 +75,13 @@ def swings(z, due, fields, valid, probe_of_env):
                 rows.append(
                     {
                         "probe": int(probe_of_env[e]),
+                        "env": e,
+                        "side": s,
+                        "start": a,
                         "length": b - a,
                         "air": int((~cb[window, e, s]).sum()),
+                        "asked": float(asked),
+                        "reached": float(reached),
                         "ratio": float(reached / max(asked, 1e-3)),
                         "errors": fields[a:b, e, : len(FIELDS)].mean(axis=0),
                     }

@@ -329,6 +329,7 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-04 | d466b6b | Clearance asked vs reached on the family's probes | NAO 0.37–0.64 of asked at every cadence; G1 0.93–1.06 | `clearance_probes.json` |
 | 2026-11-04 | 0a8c1a0 | Where the NAO's sole point rests; why its swings are low | Flat foot +0.01006 `L` (G1 −0.00003); a quarter to a half of the clearance gap; swings not short; W6 pre-registered and queued after W5 | `sole_offset.json`, `clearance_mechanism.json`, `logs/contract/w6_sole.status` |
 | 2026-11-05 | 2bd4f12 | What each body's swing leg can do in the plans' time | NAO bound 0.72 of the asked lift on the skills (asked above it in 81 % of swings; the knee's 6.40 rad/s binds, and is enforced); tracker 0.51; G1 bound 3.2; "not a body limit" corrected. *Corrected in the next row:* the bound assumes a leg at rest at lift-off and does not bind | `swing_bandwidth.json` |
+| 2026-11-05 | 3fe7631 | The swing ceiling's assumptions checked against the captures | At-rest ceiling beaten in 18 % (skills) / 26 % (probes) of NAO swings, the knee at 0.45 / 0.38 of its limit at lift-off; one-step ceiling 1.01 / 1.15 holds (beaten in 1.6 % / 1.7 %); G1 3.2 / 4.1. A thin margin, not a body limit; the shortfall is mostly the controller's. Square grid fixed (range-only 0.314 → 0.318 `L`) | `swing_bandwidth.json` |
 
 ## 5. Comparative evaluation
 

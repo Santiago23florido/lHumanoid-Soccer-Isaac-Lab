@@ -240,6 +240,9 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
        predicts the next with R² 0.84 at the hip and 0.72 at the knee. Within a swing the
        hip delivers a median 0.34 of its target's excursion; the G1's hip delivers 0.60. W7
        (`skill_space.md` §10.9) tests faster drives on the frozen trackers.
+     - *Shown since, by intervention* (W7, §5.4). Four times stiffer leg drives on the same
+       frozen trackers raise the lift from 0.48 to 0.68 of asked. So the drives' lag is a
+       cause of the controller's part, and the tracker was not the whole of it.
    - *Not a short swing* (`clearance_mechanism.json`, from `clearance_mechanism.py`). The
      NAO's feet stay in the air as long as asked (median ratio 1.00). Swings that last the
      full asked time still reach only 0.43 (corners) to 0.58 (grid) of the asked height.
@@ -284,6 +287,9 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
      - So the NAO's duty gap and its clearance gap look like one failure: a foot that does
        not rise comes down early, and its stance is long. Which causes which is not shown;
        a tracker that lifts more would show it.
+     - *Shown since* (W7, §5.4). Faster drives raise the lift, and in the same runs the
+       touchdowns come later, the stances shorten and the duty deviation halves. It is one
+       failure, and the lift sets the stance.
 
 ### 2.3 Unresolved
 
@@ -299,9 +305,14 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   rest, the NAO's leg can about make the asked lift once it may flex a step before
   lift-off, as it does (`swing_bandwidth.json`). Why the tracker reaches half of that is
   not explained.
-- Whether the NAO's low swings cause its long stances. They come together, swing by swing
-  (§2.2, item 4), and the interface is ruled out (item 2), but no run has changed one
-  without the other.
+- ~~Whether the NAO's low swings cause its long stances.~~ Answered by W7 (§5.4): raising
+  the lift alone, through the drives, shortened the stances.
+- Whether the NAO's real drives are as slow as the simulated ones. The simulated gains are
+  derived for stance (`nao.py`), not identified on the robot, and the NAO's gait fidelity
+  depends on them (W7). Nothing in this repository measures the real robot's drives.
+- Whether W7's falls at gain 4 (13, all on rough at the fast command) are the frozen
+  trackers' mismatch with a stiffer leg or a property of the stiffer body. W7b (gain 2 on
+  all three trackers) and, if it passes, an RL arm on the faster body separate the two.
 - Whether B1-NAO's shuffle is the interpolated plans' doing. W4 was to test it under the
   generator-space interface, and its condition (W1 passing) failed. The zero-shot trackers'
   contact events do not follow the interface, which makes that cause less likely; it was
@@ -381,6 +392,17 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   - *The order.* W7, then W8, then W6. The first two are short and decide what a later arm
     trains with. W6 had not started, and its queue was stopped while waiting and relaunched
     behind them.
+- **After W7: gain 2 on the seeds (W7b), not an arm at gain 4.**
+  - *What W7 gave.* It read *both*, by a wide margin, and failed only the falls criterion.
+    Its pre-registration then closes the arm at gain 4, and that verdict stands.
+  - *Rejected:* reading the falls as a frozen-tracker artifact and opening the arm anyway.
+    That would change a criterion after seeing the data.
+  - *Rejected:* stopping at W7. The dose (the incumbent at gain 2) kept most of the gain
+    and did not fall, and the two seeds at gain 2 cost about 1 h.
+  - *Chosen:* W7b. W7's criteria, unchanged, at gain 2 over the same three trackers,
+    pre-registered with its in-sample third declared (`skill_space.md` §10.9).
+  - *Where it runs.* After W8, which was already waiting, and before W5b and W6. It
+    decides whether an RL arm runs, which neither of those does.
 
 ## 4. Experiment log
 
@@ -403,6 +425,7 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-05 | 2100ac2 | W3 step 1: both frozen incumbents on the transfer probes (11:43–11:48) | Prediction fails on both bodies, with the sign reversed: at warp 0.5 the stance runs longer (G1 +0.039 ± 0.004, NAO +0.019 ± 0.005), by an earlier touchdown. Steps 3–4 and W4 not run; the queue closed at 11:48 | `transfer_probes_*.json`, `logs/contract/w3_w4.status` |
 | 2026-11-05 | 8d52199 | W7 pre-registered: the NAO's leg drives measured, then faster drives (`K × 4`, `D × 2`) on the frozen trackers, queued after W5 and before W6 | Drives' `D / K` 0.83–0.92 `T` (G1 0.10); NAO hip delivers 0.34 of its target's excursion (G1 0.60); open-loop replay at `g` = 4: planar rise 0.22 → 0.39 of asked | `swing_drive.json`, `logs/contract/w7_drives.status` |
 | 2026-11-05 | 551f797 | W8 pre-registered: where the plans' loaded feet are, and the G1's events against it; the plans' loaded feet put on the ground on both bodies' frozen trackers, queued after W7 and before W6 | Teachers' loaded feet at 0 (p90 0.006 / 0.013 `L`), the G1's plans' at p90 0.018 / 0.029, the biped's at 0; early lift-off with the plan's height before it (Spearman −0.35 rough), late touchdown with it after (+0.49) | `plan_contact.json`, `logs/contract/w8_plan_contact.status` |
+| 2026-11-05 | (next commit) | W7 in the simulator: `HUMANOID_NAO_LEG_GAIN=4` on 3 frozen NAO trackers × 2 skills × 3 commands and S0's walk, then the incumbent at gain 2 (12:53–14:39); W7b pre-registered and queued after W8 | Reads *both*: lift +0.203 ± 0.003, duty deviation −0.065 ± 0.005, gate C 0 → 10 of 18 rows. Fails no regression on falls (+13, all `rough_b4` fast). RL arm not opened. Gain 2 on the incumbent: no falls, lift 0.620, duty 0.080 | `w7_drives.json`, `logs/contract/w7b_drives.status` |
 | 2026-11-05 | f7919b5 | W5: pushes 0.1 / 0.2 `V` and estimate noise ×2 / ×4 on both incumbents and the NAO's generator-space variant (11:49–12:51) | Pushes: no effect. Noise ×2: flat falls 262/294 (G1), 272/304 (NAO); rough 0/64 even at ×4. W5b (`flat_b4`) queued after W8 | `w5_robust.json` |
 
 ## 5. Comparative evaluation
@@ -460,6 +483,31 @@ of the twelve pairs.
     level, reading none.
   - *The follow-up.* W5b runs `flat_b4`, trained as `rough_b4` was, under the same
     perturbations.
+
+### 5.4 W7: faster NAO leg drives on the frozen trackers (validated; body-model candidate)
+
+`transfer/results/w7_drives.json` (from `w7_compare.py`; `skill_space.md` §10.9). Derived
+gains → `K × 4`, `D × 2`. Mean over two skills × three commands, deployed path; gate C on
+the teacher's own grid.
+
+| tracker | lift (reached / asked) | duty deviation | gate C passed | falls |
+| --- | --- | --- | --- | --- |
+| `r1_3498` (incumbent) | 0.489 → 0.688 | 0.124 → 0.063 | 0 → 4 of 6 | 0 → 1 |
+| S seed 32 | 0.491 → 0.692 | 0.134 → 0.075 | 0 → 3 | 0 → 6 |
+| S seed 33 | 0.455 → 0.663 | 0.138 → 0.062 | 0 → 3 | 0 → 6 |
+| paired difference | +0.203 ± 0.003 | −0.065 ± 0.005 | | +13 |
+| incumbent at `K × 2`, `D × √2` (dose) | 0.620 | 0.080 | 4 of 6 | 0 |
+
+- **Lift and duty both pass, by 76 and 12 SE.** The touchdowns come later
+  (+0.011 ± 0.002 `T`), and the feet graze less in swing (−0.034 ± 0.003).
+- **No regression fails, on falls.** All 13 are on `rough_b4` at the fast command (1, 6
+  and 6 of about 64 episodes). Speed holds at 0.99 or above, and S0's walk passes for all
+  three.
+- **Not adopted, and the RL arm at gain 4 does not open,** as pre-registered.
+- **Why this is a body-model candidate, not a tracker result.** The intervention changes the
+  simulated NAO's drives. Every NAO result in this repository, the paper's included, was
+  obtained with the derived gains, and none is replaced.
+- **W7b** runs the same criteria at gain 2 over the three trackers.
 
 ## 6. Conclusions
 

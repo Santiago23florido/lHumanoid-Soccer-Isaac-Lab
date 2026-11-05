@@ -2499,6 +2499,60 @@ deployed path, the W1 linear captures of the three NAO trackers and S's three G1
   reported apart.
 - **Order.** After W5, before W8 (10.10) and W6.
 
+**Result (2026-11-05: reads *both*, fails no regression on falls; the RL arm does not
+open).** `python transfer/scripts/w7_compare.py --output transfer/results/w7_drives.json`.
+Three trackers, derived gains → `g` = 4, mean over both skills × three commands:
+
+| Tracker | Lift (reached / asked) | Duty deviation | Body duty | Gate C passes | Falls |
+| --- | --- | --- | --- | --- | --- |
+| `r1_3498_sym_v3` | 0.489 → 0.688 | 0.124 → 0.063 | 0.580 → 0.540 | 0 → 4 of 6 | 0 → 1 |
+| S seed 32 | 0.491 → 0.692 | 0.134 → 0.075 | 0.585 → 0.543 | 0 → 3 of 6 | 0 → 6 |
+| S seed 33 | 0.455 → 0.663 | 0.138 → 0.062 | 0.590 → 0.539 | 0 → 3 of 6 | 0 → 6 |
+| Paired difference (± SE) | +0.203 ± 0.003 | −0.065 ± 0.005 | −0.044 ± 0.003 | | +13 |
+
+- *Criteria 1 and 2 pass by a wide margin.* The lift rises by 76 SE and the duty deviation
+  falls by 12. Touchdowns come later (+0.011 ± 0.002 `T`), and the foot grazes less in
+  swing (−0.034 ± 0.003). The NAO passes gate C for the first time on its own grid: 10 of
+  the 18 rows.
+- *Criterion 3 fails on falls.* All 13 falls are on `rough_b4` at the fast command: 1 of 63
+  episodes for the incumbent, 6 of 65 and 6 of 63 for the seeds. Elsewhere none fall. The
+  speed ratio stays at least 0.99, and S0's walk passes for all three (speed 0.997–1.003,
+  no fall excess).
+- *The dose.* At `g` = 2 the incumbent keeps most of the gain: lift 0.620, duty deviation
+  0.080, body duty 0.551, gate C 4 of 6. It has no falls, `rough_b4` fast included. It ran
+  without the walk.
+- **Reading, as pre-registered.** *Both*: the drives' lag is a cause of both gaps, and the
+  lift sets the stance. The falls criterion fails, so the RL arm does not open at `g` = 4.
+- **Reframing** (hypothesis, not measured). Each tracker was trained against the derived
+  drives, and their lag is part of what it learned to command. A leg four times stiffer
+  on the hardest condition (rough terrain, the fastest command) overshoots targets shaped
+  for a slower one. That would make the falls a frozen-tracker mismatch, not a property of
+  the faster body. The dose fits this: half the stiffness keeps most of the gain and drops
+  the falls.
+- **What the gains are.** `nao.py` (the comment above `NAO_STIFFNESS`) derives the leg
+  gains at `ω_n` = 12 rad/s against the whole body's inertia, critically damped in stance.
+  A swinging leg carries only its own, much smaller, inertia, so the same gains overdamp
+  it by construction. The gains are a modelling choice, not an identification of the real
+  NAO's drives. Whether the real robot's drives respond faster is not measured in this
+  repository.
+
+**W7b, pre-registered (2026-11-05, after W7's result, before any run at `g` = 2 on the
+seeds).**
+- **Change.** `HUMANOID_NAO_LEG_GAIN=2`: `K × 2`, `D × √2`, so `D / K` falls from 0.83–0.92
+  to 0.59–0.65 `T`.
+- **Test** (`transfer/scripts/w7b_drives.sh`). The same three trackers.
+  - The incumbent's L4 at `g` = 2 is W7's dose, already read; its walk is added.
+  - S's seeds 32 and 33 run L4 on both skills and the walk at `g` = 2, none of it seen.
+- **Criterion.** W7's three, unchanged:
+  `python transfer/scripts/w7_compare.py --gain 2 --output transfer/results/w7b_drives.json`.
+- **Reading.** *Both* with no regression opens the RL arm at `g` = 2. That arm uses S's NAO
+  recipe with `HUMANOID_NAO_LEG_GAIN=2`, three seeds warm from `r1_3498`, and is
+  pre-registered before it runs and reported as a body-model candidate. Any other reading
+  is reported with a reframing.
+- **Declared.** The gain was chosen after W7's falls at `g` = 4 were seen, so the
+  incumbent's third of the evidence is in-sample. W7's own verdict stands as written.
+- **Order.** After W8, before W5b and W6.
+
 ### 10.10 The plans load feet they hold above the ground; pre-registered (W8)
 
 **Measured** (`transfer/scripts/plan_contact.py`, `transfer/results/plan_contact.json`;

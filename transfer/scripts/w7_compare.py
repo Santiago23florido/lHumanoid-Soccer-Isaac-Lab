@@ -18,7 +18,10 @@ The reading is ``both`` (the drive's lag is a cause of both gaps and the lift se
 duty), ``lift only``, ``duty only`` or ``neither`` (a frozen tracker under a faster leg is
 not informative either way). The incumbent at gain 2 is reported beside it as a dose.
 
+W7b (``w7b_drives.sh``) reads the same criteria at gain 2 over the same three trackers.
+
     python transfer/scripts/w7_compare.py --output transfer/results/w7_drives.json
+    python transfer/scripts/w7_compare.py --gain 2 --output transfer/results/w7b_drives.json
 """
 
 from __future__ import annotations
@@ -36,11 +39,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from contact_fidelity import score  # noqa: E402
 
-PAIRS = [
-    ("r1_3498_sym_v3_linrep", "r1_3498_sym_v3_g4"),
-    ("warm_nao_r1_s32_sym", "warm_nao_r1_s32_sym_g4"),
-    ("warm_nao_r1_s33_sym", "warm_nao_r1_s33_sym_g4"),
-]
+BASES = (
+    ("r1_3498_sym_v3_linrep", "r1_3498_sym_v3"),
+    ("warm_nao_r1_s32_sym", "warm_nao_r1_s32_sym"),
+    ("warm_nao_r1_s33_sym", "warm_nao_r1_s33_sym"),
+)
+"""Each tracker's capture under the derived gains, and the stem its faster captures carry."""
+
+
+def pairs_at(gain: int) -> list[tuple[str, str]]:
+    return [(old, f"{stem}_g{gain}") for old, stem in BASES]
+
+
 DOSE = ("r1_3498_sym_v3_linrep", "r1_3498_sym_v3_g2", "r1_3498_sym_v3_g4")
 SKILLS = ("flat_dagger2", "rough_b4")
 COMMANDS = ("forward", "fast", "turning")
@@ -99,15 +109,16 @@ def features(tag: str, skills=SKILLS) -> dict | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--gain", type=int, choices=(2, 4), default=4)
     args = parser.parse_args()
     pairs = []
-    for old, new in PAIRS:
+    for old, new in pairs_at(args.gain):
         a, b = features(old), features(new)
         if a is None or b is None:
             print(f"{old} / {new}: results missing")
             continue
         pairs.append({"derived": old, "faster": new, "before": a, "after": b})
-    report: dict = {"gain": 4.0, "pairs": pairs}
+    report: dict = {"gain": float(args.gain), "pairs": pairs}
     keys = ("lift", "duty", "duty_body", "touchdown_lag", "graze")
     if len(pairs) >= 2:
         diff = {k: np.array([p["after"][k] - p["before"][k] for p in pairs]) for k in keys}

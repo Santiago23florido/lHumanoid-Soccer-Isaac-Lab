@@ -403,6 +403,7 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-05 | 2100ac2 | W3 step 1: both frozen incumbents on the transfer probes (11:43–11:48) | Prediction fails on both bodies, with the sign reversed: at warp 0.5 the stance runs longer (G1 +0.039 ± 0.004, NAO +0.019 ± 0.005), by an earlier touchdown. Steps 3–4 and W4 not run; the queue closed at 11:48 | `transfer_probes_*.json`, `logs/contract/w3_w4.status` |
 | 2026-11-05 | 8d52199 | W7 pre-registered: the NAO's leg drives measured, then faster drives (`K × 4`, `D × 2`) on the frozen trackers, queued after W5 and before W6 | Drives' `D / K` 0.83–0.92 `T` (G1 0.10); NAO hip delivers 0.34 of its target's excursion (G1 0.60); open-loop replay at `g` = 4: planar rise 0.22 → 0.39 of asked | `swing_drive.json`, `logs/contract/w7_drives.status` |
 | 2026-11-05 | 551f797 | W8 pre-registered: where the plans' loaded feet are, and the G1's events against it; the plans' loaded feet put on the ground on both bodies' frozen trackers, queued after W7 and before W6 | Teachers' loaded feet at 0 (p90 0.006 / 0.013 `L`), the G1's plans' at p90 0.018 / 0.029, the biped's at 0; early lift-off with the plan's height before it (Spearman −0.35 rough), late touchdown with it after (+0.49) | `plan_contact.json`, `logs/contract/w8_plan_contact.status` |
+| 2026-11-05 | (W5 run) | W5: pushes 0.1 / 0.2 `V` and estimate noise ×2 / ×4 on both incumbents and the NAO's generator-space variant (11:49–12:51) | Pushes: no effect. Noise ×2: flat falls 262/294 (G1), 272/304 (NAO); rough 0/64 even at ×4. W5b (`flat_b4`) queued after W8 | `w5_robust.json` |
 
 ## 5. Comparative evaluation
 
@@ -442,6 +443,23 @@ of the twelve pairs.
 - **The prediction fails on both bodies,** with the stance moving the other way.
 - **Steps 3 and 4 (the shaped family's RL arms, about 13 h) are not run,** as
   pre-registered.
+
+### 5.3 W5: pushes and a degraded estimate (instrumentation)
+
+`transfer/results/w5_robust.json` (from `w5_table.py`; forward command; `skill_space.md`
+§10.7).
+
+- **Pushes of up to 0.2 `V` change nothing** on either body or skill: no falls, the largest
+  gate C deviation within 0.007 of nominal.
+- **Estimate noise splits the skills, not the bodies.**
+  - *Flat (`flat_dagger2`).* At twice the estimator's precision it falls in nine episodes of
+    ten: G1 262/294, NAO 272/304. At four times both bodies walk backwards.
+  - *Rough (`rough_b4`).* No falls at four times, on either body.
+  - *Where it lies.* The tracker is the same in both rows, so the gap is the generator's.
+    `rough_b4` was trained across noise levels, reading the level; `flat_dagger2` at one
+    level, reading none.
+  - *The follow-up.* W5b runs `flat_b4`, trained as `rough_b4` was, under the same
+    perturbations.
 
 ## 6. Conclusions
 

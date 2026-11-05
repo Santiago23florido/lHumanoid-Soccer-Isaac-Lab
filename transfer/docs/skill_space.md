@@ -2346,6 +2346,35 @@ as instrumentation: it decides nothing, and it is reported apart.
   - W3's first seeds and their controls, where they exist.
 - **Read.** Falls, speed ratio, the gait's deviation from the teacher, and the contact
   metrics.
+- **Result (2026-11-05, 11:49–12:51;** `transfer/results/w5_robust.json`, from
+  `w5_table.py`; forward command, 32 environments, falls over episodes).
+
+  | tracker, skill | nominal | push 0.1 / 0.2 `V` | estimate noise ×2 | ×4 |
+  | --- | --- | --- | --- | --- |
+  | G1 incumbent, flat (`flat_dagger2`) | 0/64, passes | 0/64, 0/64, both pass | **262/294**, speed 0.57 | **550/582** |
+  | G1 incumbent, rough (`rough_b4`) | 0/64 | 0/64, 0/64 | 0/64 | 0/64 |
+  | NAO incumbent, flat | 0/64 | 0/64, 0/64 | **272/304**, speed 0.85 | **792/824** |
+  | NAO incumbent, rough | 0/64 | 0/64, 0/64 | 0/64 | 0/64 |
+  | NAO, generator-space interface, flat / rough | 0/64 / 0/64 | 0 falls | **261/293** / 0/64 | **783/815** / 0/64 |
+
+  - *Pushes change nothing.* No falls on either body at 0.2 `V`. The largest gate C
+    deviation moves by at most 0.007, and the lift by at most 0.02.
+  - *A degraded estimate breaks the flat skill and not the rough one.* At twice the
+    estimator's precision the flat skill falls in nine episodes of ten, on both bodies;
+    at four times it walks backwards. Rough holds at four times with no fall, its gait
+    within 0.006 of nominal on the G1. The tracker is the same in both rows, so the
+    difference is the generator's.
+    - `rough_b4` was trained across history-noise levels of 0.125–32 times the precision,
+      and reads the level as an input (§9.1, B4).
+    - `flat_dagger2` was trained at one inflated level (§8.4), and reads none.
+    - Hypothesis: a generator that has not seen the deployed noise level fails where the
+      estimate degrades, as B3 found for the chain.
+  - *Not pre-registered, so it decides nothing.* But it bears on the flat incumbent's
+    choice: `flat_b4`, trained as `rough_b4` was, was set aside for one S0 check (§9.1).
+- **W5b, added (`transfer/scripts/w5b_flat_b4.sh`).** The same four perturbations on
+  `flat_b4`, on both incumbents (about 25 minutes, after W8). Reported in this table, it too
+  decides nothing. If `flat_b4` holds where `flat_dagger2` falls, the flat incumbent's
+  choice is put back to the adoption rule with robustness on the record.
 
 ### 10.8 The NAO's sole point is not where its foot rests; pre-registered (W6)
 

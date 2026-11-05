@@ -2624,6 +2624,79 @@ deployed path, S's three seeds of each body, both skills, three commands).
   contact threshold gate C uses: nothing was fitted.
 - **Order.** After W7, before W6.
 
+**Result (2026-11-05: the G1 passes, the NAO does not).**
+`python transfer/scripts/w8_compare.py --output transfer/results/w8_plan_contact.json`. As drawn
+→ grounded, frozen trackers, mean over three commands:
+
+| Body | Seed | Rough, largest | Flat, largest | Duty deviation, both skills | Falls |
+| --- | --- | --- | --- | --- | --- |
+| G1 | 41 (`warm_r3_logload`) | 0.148 → 0.128 | 0.089 → 0.070 | 0.102 → 0.084 | 0 → 0 |
+| G1 | 42 | 0.161 → 0.128 | 0.090 → 0.071 | 0.098 → 0.082 | 3 → 0 |
+| G1 | 43 | 0.150 → 0.120 | 0.082 → 0.065 | 0.093 → 0.078 | 0 → 0 |
+| G1 | paired difference (± SE) | −0.027 ± 0.004 | −0.019 ± 0.001 | −0.017 ± 0.001 | |
+| NAO | `r1_3498` | 0.154 → 0.193 | 0.174 → 0.173 | 0.124 → 0.133 | 0 → 0 |
+| NAO | 32 | 0.164 → 0.209 | 0.187 → 0.186 | 0.134 → 0.145 | 0 → 0 |
+| NAO | 33 | 0.169 → 0.212 | 0.209 → 0.210 | 0.138 → 0.148 | 0 → 0 |
+| NAO | paired difference (± SE) | +0.042 ± 0.002 | −0.000 ± 0.001 | +0.010 ± 0.001 | |
+
+- **The G1 meets its target.** Rough's largest deviation falls by 6.5 SE, and flat's falls
+  too (by 27 SE) instead of rising. The no-regression terms hold: no falls (seed 42's three
+  on rough are gone), speed at least 1.00, S0's walk at fall excess 0.
+  - *What it closes.* Rough moves 0.027 of the 0.081 between the zero-shot model and B1
+    (0.153 ± 0.004 against 0.072 ± 0.001, `transfer/paper/README.md`, B1's note). It still
+    passes gate C at none of the nine rough rows; flat passes all nine (eight before).
+  - *How.* The stance lengthens toward the teacher's (body duty +0.008 on flat, +0.011 on
+    rough). Lift-off comes later and touchdown earlier, and airborne-where-light falls by
+    0.06 on both skills.
+  - *The walk.* Every gate C deviation of S0's walk is smaller (stride length 0.195–0.216
+    → 0.131–0.159), and its speed ratio rises from 1.004–1.009 to 1.064–1.067.
+- **The NAO misses its target.** Rough's duty deviation rises (+0.018 ± 0.001), and flat's
+  does not move. No falls, speed held, the walk passes.
+- **Reading, as pre-registered.**
+  - *G1:* the rough deficit is partly the plans' inconsistency, and grounding their loaded
+    feet removes that part at deployment. Candidate adoption follows `incumbents.json`'s
+    rule (below).
+  - *NAO:* the change does not carry. That contradicts the hypothesis's "for every body".
+- **Reframing for the NAO** (measured offsets, the cause a hypothesis). In the same
+  captures (`plan_contact.json`, `trackers.<body> <skill>.bodies.loaded`), a loaded G1 foot
+  reads a median 0.0000 `L` on flat and 0.0005 on rough. A loaded NAO foot reads 0.0116 and
+  0.0134: the sole point's 0.010 `L` resting offset (10.8). As drawn, the plans hold it at
+  0.0036 and 0.0059. Grounding them moves the plan to 0, which the G1's foot reaches and the
+  NAO's cannot, so on the NAO it widens the gap between plan and body in stance. W6
+  (`HUMANOID_SOLE=contact`) removes the offset, and W8's switch on W6's tracker is the test.
+- **Adoption check for the G1** (`incumbents.json`'s rule; S0, run 2026-11-05 at `af6f526`).
+  - Target: rough's largest deviation, better by more than 2 SE.
+  - pytest and ruff pass.
+  - The chains of `rough_b3`, `rough_b4` and `flat_b4` are byte-identical to their records
+    (`regression_s0.sh`'s chain loop). `plan_contact` acts in the command, not the
+    generator, so they cannot depend on it.
+  - Flat L4 is better on all three seeds, and the walk is as above.
+  - The NAO's deployment is unchanged, so its half of S0 is unaffected.
+  - **Not written into `incumbents.json`.** The assignment keeps the original incumbents, and
+    adoption is the user's call at review. The candidate is recorded in
+    `transfer/results/candidates.json`.
+
+**W8n, pre-registered (2026-11-05, after W8's result, before W6 has trained).**
+- **Hypothesis.** W8 missed on the NAO because of the sole offset. A grounded plan asks a
+  loaded foot to read 0, which the URDF sole point, resting at +0.010 `L`, cannot. On W6's
+  trackers the sole point rests at 0 (`HUMANOID_SOLE=contact`, 10.8), so grounding should
+  not hurt them, and should help as it did the G1.
+- **Test** (`transfer/scripts/w8_sole.sh`). Run after W6, on every W6 tracker that exists
+  (seed 31; seeds 32 and 33 only if W6's screen passed). L4 of both skills and S0's walk
+  with `HUMANOID_PLAN_CONTACT=ground`, under W6's own conditions. Each is paired with its
+  own capture of the plans as drawn. Nothing is trained.
+- **Criterion** (`w8_compare.py --bodies nao --nao-trackers <W6's tags>` →
+  `transfer/results/w8n_sole.json`).
+  - *Three trackers:* W8's NAO criterion, unchanged.
+  - *One tracker* (no standard error): a screen. It reads *the offset* if grounding leaves
+    rough's duty deviation no higher (`single.rough_b4.duty` ≤ 0). On the URDF sole point
+    that difference was +0.017 to +0.019 per tracker. Otherwise it reads *not the offset*.
+    One seed decides nothing, and either reading is reported as a fact.
+- **Declared.** The hypothesis and this test were written after W8's NAO result. W6's
+  trackers differ from S's in training (the sole definition), so the pairing is within each
+  W6 tracker.
+- **Order.** After W6.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

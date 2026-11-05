@@ -174,6 +174,10 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
      - Rough's plans hold loaded feet higher than flat's. That fits rough failing and
        flat passing, and B1 learning, from rough's plans, which field to believe.
      - W8 puts the plans' loaded feet on the ground at deployment, on the frozen trackers.
+     - *Shown since, by intervention, on the G1* (W8, §5.5). Grounding the plans' loaded
+       feet lowers rough's largest deviation by 0.027 ± 0.004 and flat's by
+       0.019 ± 0.001. Lift-off comes later and touchdown earlier. Part of the rough deficit
+       is the plans' inconsistency. On the NAO it does not carry (§2.3).
 4. **The NAO lifts its feet half as high as asked, at every cadence.**
    - *On the skills.* Plans ask 0.07–0.09 `L`; the body gives 0.03–0.05; B1-NAO gives
      0.01, with grazes in half of every planned swing.
@@ -293,13 +297,19 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 
 ### 2.3 Unresolved
 
-- Why the G1's tracker lifts early on rough's plans. Family coverage of load-transfer
-  shapes (H3) is not supported: the frozen tracker does not lift early on them (W3 step 1).
-  The leading candidate is the plans' own inconsistency: they load feet they hold above
-  the ground, and the G1 leaves the ground where they do (§2.2, item 3). W8 tests it. The
-  other candidates remain as hypotheses: the generator's extra contact changes per plan
-  (3.21–3.73 against the teacher's 2.92, `sampler_sharpness.json`), and the reward's
-  resolution.
+- Why the G1's tracker lifts early on rough's plans: about a third of it is explained.
+  - Family coverage of load-transfer shapes (H3) is not supported: the frozen tracker does
+    not lift early on them (W3 step 1).
+  - The plans' inconsistency is a cause. Grounding their loaded feet (W8, §5.5) moves rough
+    0.027 of the 0.081 between the zero-shot model and B1.
+  - The rest remains. Its candidates stay hypotheses: the generator's extra contact changes
+    per plan (3.21–3.73 against the teacher's 2.92, `sampler_sharpness.json`), and the
+    reward's resolution.
+- Why grounding the plans hurts the NAO on rough (duty deviation +0.018 ± 0.001, W8).
+  - *Measured* (`plan_contact.json`): a loaded NAO foot reads a median 0.012–0.013 `L`,
+    because of its sole offset (§2.2, item 4). A loaded G1 foot reads 0.000–0.0005.
+  - *Hypothesis:* grounded plans ask for a stance height the NAO's sole point cannot
+    reach. W8's switch on W6's tracker (sole point at the resting contact) tests it.
 - Why the NAO's absolute swing peak is low (0.011–0.037 `L` under the plan's), once the
   sole-point offset is set aside. W6 tests the offset's part (skill_space.md §10.8). For the
   rest, the NAO's leg can about make the asked lift once it may flex a step before
@@ -403,6 +413,19 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     pre-registered with its in-sample third declared (`skill_space.md` §10.9).
   - *Where it runs.* After W8, which was already waiting, and before W5b and W6. It
     decides whether an RL arm runs, which neither of those does.
+- **After W8: a G1 candidate recorded, not adopted; the NAO's miss tested through W6.**
+  - *What the rule gives.* The G1's grounded plans meet `incumbents.json`'s adoption rule:
+    the target is better by 6.5 SE; pytest, ruff and the chains pass; flat L4 and the
+    walk are better.
+  - *Why it is not written into `incumbents.json`.* The assignment forbids overwriting the
+    original incumbents, and the user decides adoption at review. The candidate goes to
+    `transfer/results/candidates.json`, a new file.
+  - *Rejected:* making `ground` the G1's default. Old commands would then silently
+    reproduce different numbers.
+  - *The NAO.* Its loaded feet read 0.012–0.013 `L` because of the sole offset, so a
+    grounded plan asks for what its sole point cannot do. Rather than a new NAO run now,
+    W8's switch is added to W6's ladder, pre-registered before W6 runs. W6's tracker is
+    the one whose sole point rests at 0.
 
 ## 4. Experiment log
 
@@ -426,6 +449,7 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-05 | 8d52199 | W7 pre-registered: the NAO's leg drives measured, then faster drives (`K × 4`, `D × 2`) on the frozen trackers, queued after W5 and before W6 | Drives' `D / K` 0.83–0.92 `T` (G1 0.10); NAO hip delivers 0.34 of its target's excursion (G1 0.60); open-loop replay at `g` = 4: planar rise 0.22 → 0.39 of asked | `swing_drive.json`, `logs/contract/w7_drives.status` |
 | 2026-11-05 | 551f797 | W8 pre-registered: where the plans' loaded feet are, and the G1's events against it; the plans' loaded feet put on the ground on both bodies' frozen trackers, queued after W7 and before W6 | Teachers' loaded feet at 0 (p90 0.006 / 0.013 `L`), the G1's plans' at p90 0.018 / 0.029, the biped's at 0; early lift-off with the plan's height before it (Spearman −0.35 rough), late touchdown with it after (+0.49) | `plan_contact.json`, `logs/contract/w8_plan_contact.status` |
 | 2026-11-05 | 24f5e10 | W7 in the simulator: `HUMANOID_NAO_LEG_GAIN=4` on 3 frozen NAO trackers × 2 skills × 3 commands and S0's walk, then the incumbent at gain 2 (12:53–14:39); W7b pre-registered and queued after W8 | Reads *both*: lift +0.203 ± 0.003, duty deviation −0.065 ± 0.005, gate C 0 → 10 of 18 rows. Fails no regression on falls (+13, all `rough_b4` fast). RL arm not opened. Gain 2 on the incumbent: no falls, lift 0.620, duty 0.080 | `w7_drives.json`, `logs/contract/w7b_drives.status` |
+| 2026-11-05 | (next commit) | W8 in the simulator: `HUMANOID_PLAN_CONTACT=ground` on S's three G1 seeds and the three NAO trackers, L4 on both skills and S0's walk (14:41–17:10); S0's chains, pytest and ruff for the G1 candidate | G1 passes: rough largest −0.027 ± 0.004, flat −0.019 ± 0.001, no falls (seed 42's three gone), walk deviations all smaller. NAO misses: rough duty +0.018 ± 0.001. Chains byte-identical. G1 candidate recorded, `incumbents.json` unchanged | `w8_plan_contact.json`, `candidates.json` |
 | 2026-11-05 | f7919b5 | W5: pushes 0.1 / 0.2 `V` and estimate noise ×2 / ×4 on both incumbents and the NAO's generator-space variant (11:49–12:51) | Pushes: no effect. Noise ×2: flat falls 262/294 (G1), 272/304 (NAO); rough 0/64 even at ×4. W5b (`flat_b4`) queued after W8 | `w5_robust.json` |
 
 ## 5. Comparative evaluation
@@ -508,6 +532,28 @@ the teacher's own grid.
   simulated NAO's drives. Every NAO result in this repository, the paper's included, was
   obtained with the derived gains, and none is replaced.
 - **W7b** runs the same criteria at gain 2 over the three trackers.
+
+### 5.5 W8: the plans' loaded feet on the ground (validated; G1 candidate)
+
+`transfer/results/w8_plan_contact.json` (from `w8_compare.py`; `skill_space.md` §10.10).
+As drawn → grounded, frozen trackers, mean over three commands, deployed path.
+
+| body | rough, largest | flat, largest | duty deviation, both skills | falls |
+| --- | --- | --- | --- | --- |
+| G1, seeds 41 / 42 / 43 | 0.148 / 0.161 / 0.150 → 0.128 / 0.128 / 0.120 | 0.089 / 0.090 / 0.082 → 0.070 / 0.071 / 0.065 | 0.102 / 0.098 / 0.093 → 0.084 / 0.082 / 0.078 | 3 → 0 |
+| G1, paired difference | −0.027 ± 0.004 | −0.019 ± 0.001 | −0.017 ± 0.001 | |
+| NAO, `r1_3498` / 32 / 33 | 0.154 / 0.164 / 0.169 → 0.193 / 0.209 / 0.212 | 0.174 / 0.187 / 0.209 → 0.173 / 0.186 / 0.210 | 0.124 / 0.134 / 0.138 → 0.133 / 0.145 / 0.148 | 0 → 0 |
+| NAO, paired difference | +0.042 ± 0.002 | −0.000 ± 0.001 | +0.010 ± 0.001 | |
+
+- **G1: the target is met** (rough better by 6.5 SE, flat better instead of worse), with
+  no regression.
+  - Rough closes 0.027 of the 0.081 to B1 and still passes gate C nowhere. Flat passes at
+    all nine rows (eight before).
+  - S0's walk: every gate C deviation smaller; speed ratio 1.004–1.009 → 1.064–1.067.
+- **NAO: the target is missed.** Rough's duty deviation rises by 0.018 ± 0.001; flat does
+  not move.
+- **G1 candidate.** It meets `incumbents.json`'s rule (S0's chains byte-identical, pytest
+  and ruff pass). It is recorded in `candidates.json`, and `incumbents.json` is not changed.
 
 ## 6. Conclusions
 

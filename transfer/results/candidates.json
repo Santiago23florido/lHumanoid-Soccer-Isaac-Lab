@@ -1,0 +1,25 @@
+{
+  "note": "Candidates from feat/contact-fidelity that met incumbents.json's adoption rule. incumbents.json is not changed: the assignment keeps the original incumbents, and adoption is the user's decision at review. Every figure is read from the evidence files named here, not copied.",
+  "candidates": {
+    "g1_plan_contact_ground": {
+      "body": "g1",
+      "change": "HUMANOID_PLAN_CONTACT=ground at deployment (ReferenceCommandCfg.plan_contact, latent/plan_contact.py): each foot the task's plan loads above the contact threshold is put on the ground by its height alone. Trackers, generators and encoders unchanged; the default stays as_drawn, so every earlier command reproduces.",
+      "trackers": ["warm_r3_logload_sym", "warm_r3_s42_log_sym", "warm_r3_s43_log_sym"],
+      "pre_registration": "transfer/docs/skill_space.md section 10.10 (W8)",
+      "target": "g1.target_met in transfer/results/w8_plan_contact.json (rough's L4 largest deviation, seed-paired, by more than 2 SE; flat no worse)",
+      "regression_suite": {
+        "pytest_and_ruff": "passed at af6f526 (2026-11-05)",
+        "chains": "rough_b3, rough_b4, flat_b4 byte-identical to transfer/results/chain_fidelity_<name>_x1.json (regression_s0.sh's chain loop, at af6f526); plan_contact acts in the command, not the generator",
+        "flat_l4_g1": "w8_plan_contact.json g1.difference.flat_dagger2.largest",
+        "walk": "w8_plan_contact.json g1.no_regression.walk and g1.pairs[*].after.walk",
+        "nao": "unaffected: the NAO's deployment keeps as_drawn"
+      },
+      "not_for": "nao: W8's NAO target failed (w8_plan_contact.json nao.target_met); W8n (w8_sole.sh) tests it on W6's trackers",
+      "evidence": [
+        "transfer/results/w8_plan_contact.json",
+        "transfer/results/zero_shot_g1_warm_r3_*_ground_*_auto_kin_*.json"
+      ],
+      "status": "meets the rule; not adopted"
+    }
+  }
+}

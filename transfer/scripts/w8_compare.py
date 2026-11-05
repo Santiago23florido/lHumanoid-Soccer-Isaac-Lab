@@ -15,7 +15,13 @@ of both skills at three commands:
 
 Contact metrics (``common/contact.py``) are reported beside them.
 
+W8n (``w8_sole.sh``) reads the NAO's half on W6's trackers, whose sole point rests at the
+contact. With one tracker there is no standard error, and the paired differences are
+reported as a screen (``single``).
+
     python transfer/scripts/w8_compare.py --output transfer/results/w8_plan_contact.json
+    python transfer/scripts/w8_compare.py --bodies nao --output transfer/results/w8n_sole.json
+        --nao-trackers warm_nao_sole_s31_sym  # (one command line)
 """
 
 from __future__ import annotations
@@ -86,9 +92,13 @@ def paired(pairs: list[dict], skill: str, key: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--bodies", nargs="+", choices=tuple(TRACKERS), default=list(TRACKERS))
+    parser.add_argument("--nao-trackers", nargs="+", default=list(TRACKERS["nao"]))
     args = parser.parse_args()
+    trackers = {**TRACKERS, "nao": tuple(args.nao_trackers)}
     report: dict = {}
-    for body, tags in TRACKERS.items():
+    for body in args.bodies:
+        tags = trackers[body]
         pairs = []
         for tag in tags:
             a, b = features(body, tag), features(body, f"{tag}_ground")
@@ -97,6 +107,14 @@ def main() -> int:
                 continue
             pairs.append({"as_drawn": tag, "before": a, "after": b})
         entry: dict = {"pairs": pairs}
+        if len(pairs) == 1:
+            entry["single"] = {
+                skill: {
+                    k: pairs[0]["after"][skill][k] - pairs[0]["before"][skill][k]
+                    for k in ("largest", "duty", *CONTACT)
+                }
+                for skill in SKILLS
+            }
         if len(pairs) >= 2:
             diff = {
                 skill: {k: paired(pairs, skill, k) for k in ("largest", "duty", *CONTACT)}

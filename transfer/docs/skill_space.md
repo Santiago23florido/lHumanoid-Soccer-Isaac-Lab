@@ -2280,6 +2280,32 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
   loads) plus the shape. The same target and no-regression rule against S's NAO seeds,
   on the teacher's own grid, under the linear interface (S's), and also under the
   generator-space interface if W1 confirmed it (reported apart).
+- **Step 1's result (2026-11-05): the prediction fails on both bodies, and its sign is
+  reversed.** `transfer/results/transfer_probes_g1_warm_r3_logload_sym.json` and
+  `transfer_probes_nao_r1_3498_sym_v3.json`, from `transfer_probe_effect.py`. Shown: warp 0.5
+  minus the half-sine, mean ± standard error of the twelve paired schedules, left / right
+  foot. No falls.
+
+  | | stance, body − asked | airborne where light contact is asked | lift-off lag | touchdown lag |
+  | --- | --- | --- | --- | --- |
+  | G1 | +0.039 ± 0.004 / +0.034 ± 0.005 | −0.084 ± 0.050 / −0.069 ± 0.051 | +0.001 ± 0.003 / −0.001 ± 0.003 `T` | −0.039 ± 0.003 / −0.034 ± 0.003 `T` |
+  | NAO | +0.019 ± 0.005 / +0.021 ± 0.006 | −0.006 ± 0.073 / +0.002 ± 0.075 | −0.005 ± 0.007 / −0.002 ± 0.008 `T` | −0.025 ± 0.006 / −0.023 ± 0.007 `T` |
+
+  - *What the frozen trackers do with a long load transfer.* The prediction was a shorter
+    stance and more time airborne. Instead the stance is *longer* than asked, by more
+    than at the half-sine, and the foot is no more often in the air. The change is at
+    touchdown: the body lands earlier. The lift-off, where rough's failure sits (10.2:
+    the G1's left foot lifts 0.067 `T` early), does not move.
+  - *Warp 2, reported, not part of the prediction.* On the G1: +0.023 ± 0.011 /
+    +0.021 ± 0.013, and the lift-off 0.013–0.015 `T` later. On the NAO: +0.134 ± 0.009 on both
+    feet, the touchdown 0.11 `T` early.
+  - *What follows, as pre-registered.* Steps 3 and 4 are not run. Rough's early lift-off is
+    not reproduced inside the family by the shape of the load transfer, so the half-sine
+    family is not shown to be its cause. The finding goes to the user for a new framing.
+    The generator's extra contact changes per plan (10.4: 3.21–3.73 against the teacher's
+    2.92) and rough's irregular steps remain, as hypotheses.
+  - *The code stays.* `GaitRanges.load_shape` is off by default and bit-identical when off;
+    nothing has trained with it.
 
 ### 10.6 Pre-registered: is B1's loss on the NAO the interface's? (W4)
 
@@ -2296,6 +2322,9 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
   space (W1), by the largest deviation and the contact-fidelity metrics. One seed: it can
   confirm or rule out a large effect, not resolve a small one; if B1-NAO comes within the
   zero-shot model's seed range, two more seeds are queued before anything is written.
+- **Not run (2026-11-05).** Its condition failed: W1 did not pass (10.3). The question stays
+  open. The zero-shot trackers' contact events do not follow the interface, which makes the
+  interface a less likely cause of B1-NAO's shuffle, but this does not test it.
 
 ### 10.7 Robustness, reported beside the criteria (W5)
 

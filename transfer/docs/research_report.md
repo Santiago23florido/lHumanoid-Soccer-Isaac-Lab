@@ -157,6 +157,12 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
    - *The family.* It asks for light contact 5.5 % of the time.
    - *Real and procedural plans are treated differently.* On procedural plans the
      zero-shot stance runs 0.02 *longer* than asked; on rough's plans 0.09 shorter.
+   - *Not the family's load shapes (W3 step 1, validated; `skill_space.md` §10.5).* The
+     frozen trackers were given in-family stances with real gaits' slow unloading (warp
+     0.5). Their stances run *longer* than asked: G1 +0.039 ± 0.004 more than at the
+     half-sine, NAO +0.019 ± 0.005. The foot is no more often airborne, and the change is
+     an earlier touchdown, not an earlier lift-off (`transfer_probes_*.json`). Rough's
+     early lift-off is not reproduced by the shape of the load transfer alone.
 4. **The NAO lifts its feet half as high as asked, at every cadence.**
    - *On the skills.* Plans ask 0.07–0.09 `L`; the body gives 0.03–0.05; B1-NAO gives
      0.01, with grazes in half of every planned swing.
@@ -265,8 +271,12 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 
 ### 2.3 Unresolved
 
-- Why the trackers lift early at light loads: family coverage (hypothesis H3, W3) or
-  reward resolution.
+- Why the G1's tracker lifts early on rough's plans. Family coverage of load-transfer
+  shapes (H3) is not supported: the frozen tracker does not lift early on them (W3 step 1).
+  Still open, as hypotheses: the generator's extra contact changes per plan (3.21–3.73
+  against the teacher's 2.92, `sampler_sharpness.json`), rough's irregular steps, and the
+  reward's resolution. B1 keeps the duty, so whatever it is, it lies in rough's plans and
+  can be learned.
 - Why the NAO's absolute swing peak is low (0.011–0.037 `L` under the plan's), once the
   sole-point offset is set aside. W6 tests the offset's part (skill_space.md §10.8). For the
   rest, the NAO's leg can about make the asked lift once it may flex a step before
@@ -334,6 +344,11 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   - *A correction.* This entry first called the at-rest ceiling a body limit, put the two
     levers to the user as a decision, and made that ceiling a candidate's clearance limit
     (§2.2, item 4).
+- **After W1 and W3 step 1, the RL arms they gated are not run.** That is W3's steps 3–4
+  (about 13 h) and W4 (about 2.5 h). Both gates failed as their pre-registrations required:
+  the interface does not reach the NAO's body, and the family's load shapes do not reproduce
+  the G1's failure on rough. W5 and W6 run as queued. The freed budget goes to the user with
+  the new framings (§2.3), not into a new arm chosen after seeing these results.
 
 ## 4. Experiment log
 
@@ -351,8 +366,9 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
 | 2026-11-04 | 0a8c1a0 | Where the NAO's sole point rests; why its swings are low | Flat foot +0.01006 `L` (G1 −0.00003); a quarter to a half of the clearance gap; swings not short; W6 pre-registered and queued after W5 | `sole_offset.json`, `clearance_mechanism.json`, `logs/contract/w6_sole.status` |
 | 2026-11-05 | 2bd4f12 | What each body's swing leg can do in the plans' time | NAO bound 0.72 of the asked lift on the skills (asked above it in 81 % of swings; the knee's 6.40 rad/s binds, and is enforced); tracker 0.51; G1 bound 3.2; "not a body limit" corrected. *Corrected in the next row:* the bound assumes a leg at rest at lift-off and does not bind | `swing_bandwidth.json` |
 | 2026-11-05 | 3fe7631 | The swing ceiling's assumptions checked against the captures | At-rest ceiling beaten in 18 % (skills) / 26 % (probes) of NAO swings, the knee at 0.45 / 0.38 of its limit at lift-off; one-step ceiling 1.01 / 1.15 holds (beaten in 1.6 % / 1.7 %); G1 3.2 / 4.1. A thin margin, not a body limit; the shortfall is mostly the controller's. Square grid fixed (range-only 0.314 → 0.318 `L`) | `swing_bandwidth.json` |
-| 2026-11-05 | (W1 run) | W1 in the simulator: control re-run, then 3 frozen NAO trackers × 2 skills × 3 commands, and S0's walk, under `HUMANOID_RESAMPLE=generator` (10:01–11:43) | Control reproduces (≤ 0.00097). Asked duty −0.029 / −0.024, as predicted; body duty +0.006 / +0.003. Criterion fails (+0.0088 ± 0.0010). W4 not run | `w1_resample.json`, `w1_contact.json`, `body_rate_verdicts_w1.json` |
+| 2026-11-05 | 6a96bb8 | W1 in the simulator: control re-run, then 3 frozen NAO trackers × 2 skills × 3 commands, and S0's walk, under `HUMANOID_RESAMPLE=generator` (10:01–11:43) | Control reproduces (≤ 0.00097). Asked duty −0.029 / −0.024, as predicted; body duty +0.006 / +0.003. Criterion fails (+0.0088 ± 0.0010). W4 not run | `w1_resample.json`, `w1_contact.json`, `body_rate_verdicts_w1.json` |
 | 2026-11-05 | cce652f | Swing by swing: lift against touchdown lag | NAO: low swings land early (Spearman +0.38 to +0.52; lowest quarter 0.10–0.13 `T` early); G1 unrelated | `touchdown_lift.json` |
+| 2026-11-05 | (this entry's commit) | W3 step 1: both frozen incumbents on the transfer probes (11:43–11:48) | Prediction fails on both bodies, with the sign reversed: at warp 0.5 the stance runs longer (G1 +0.039 ± 0.004, NAO +0.019 ± 0.005), by an earlier touchdown. Steps 3–4 and W4 not run; the queue closed at 11:48 | `transfer_probes_*.json`, `logs/contract/w3_w4.status` |
 
 ## 5. Comparative evaluation
 
@@ -376,6 +392,22 @@ feet. Deployed path.
 - **Gate C under the other two references:** at the body's rate, unbiased, 0 → 0; at the
   body's rate as first computed, 12 → 11 of 18 (`body_rate_verdicts_w1.json`).
 - **Not adopted.**
+
+### 5.2 W3 step 1: the frozen incumbents on in-family load transfers (validated)
+
+`transfer/results/transfer_probes_{g1_warm_r3_logload_sym,nao_r1_3498_sym_v3}.json`, from
+`transfer_probe_effect.py`. Twelve walking schedules, each written with the half-sine and
+with warps 0.5 and 2. The figures are warp 0.5 minus the half-sine, left foot, mean ± SE
+of the twelve pairs.
+
+| body | stance, body − asked | airborne where light is asked | touchdown lag | predicted |
+| --- | --- | --- | --- | --- |
+| G1 | +0.039 ± 0.004 | −0.084 ± 0.050 | −0.039 ± 0.003 `T` | negative, positive |
+| NAO | +0.019 ± 0.005 | −0.006 ± 0.073 | −0.025 ± 0.006 `T` | negative, positive |
+
+- **The prediction fails on both bodies,** with the stance moving the other way.
+- **Steps 3 and 4 (the shaped family's RL arms, about 13 h) are not run,** as
+  pre-registered.
 
 ## 6. Conclusions
 

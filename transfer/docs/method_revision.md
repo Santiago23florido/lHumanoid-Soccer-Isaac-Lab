@@ -180,14 +180,58 @@ walking task is done (`plan.md`). CrossBFM's feet-slip and contact-force terms a
 line and are not taken. With plans on `M` the line is easy to keep: "do not slide a loaded
 foot" is then part of what the plan asks.
 
-## 6. Order of work
+## 6. The protocol agreed on 2026-11-06: training may see several bodies, inference is zero-shot
+
+The target design: a generator, with a learned latent beside `z*`, trained on
+about five base tasks, whose training may see more than one body. What must hold is
+zero-shot at inference.
+
+**Training may use:**
+- the base tasks as the G1's experts perform them (experts exist only on the G1);
+- the base tasks as other bodies execute them, each through its own decoder, which is
+  trained once and is the same for every task. The NAO may be one of these bodies;
+- the procedural family and the walk, as the decoders already do.
+
+**Inference on a new task `T` must have:**
+- no gradient step anywhere (generator, latent, decoder, estimator) on data of `T` executed
+  by the target body;
+- the target's decoder as trained once, unchanged;
+- the generator learning `T` only from the G1's expert, or not at all if `T` is held out
+  (below).
+
+**The two claims, and their tests.**
+- *Task zero-shot on a seen body.* Leave one base task out: train on four, evaluate on the
+  fifth. Measures:
+  - offline, calibration against the held-out teacher and contact consistency (§2's
+    metrics);
+  - in the simulator, L4 on both bodies with their frozen decoders.
+
+  What task zero-shot costs is the gap to a generator that saw the task. A base task the
+  target executed in training is not a zero-shot result on that target.
+- *Body zero-shot on an unseen body.* Leave one body out of the generator's training. It
+  needs a third body and is not yet possible here.
+
+**The latent's condition.** A latent beside `z*` must carry no identity of the body. Its
+leakage test is pre-registered with it: how well a classifier, or a regression onto the
+body's joints, recovers the body from the latent, against a shuffled control. That is the
+failure of `ζ` and F5 (`research_report.md` §1.2). With several bodies in training, the
+test can be run on every one of them.
+
+**Open.** About five base tasks need G1 experts beyond the two published
+ones (flat, rough) and the walk. `skill_space.md` §9 limits teachers to Isaac Lab's
+published G1 policies, so where the others come from is an open decision.
+
+## 7. Order of work
 
 1. **W9** (`skill_space.md` §10.11). Realisation 1 on the frozen trackers of both bodies,
    paired against W8's grounded captures. About 2.5 h of simulator time, no training.
 2. If W9 passes: realisation 2, pre-registered the same way.
 3. If 1 or 2 shows the mechanism: realisation 3, with its own budget and its own
    approval.
-4. **Open, not yet proposed: a multi-source generator.** It would be trained on the task
+4. **The multi-task generator with a learned latent** (§6), after the consistency work:
+   leave-one-task-out first. Its base tasks wait as decided on where the G1's
+   extra experts come from.
+5. **Open, not yet proposed: a multi-source generator.** It would be trained on the task
    as several source humanoids perform it, all in `z*`, the target excluded. It stays
    zero-shot. GOTT (72.1 % on unseen variants from three training hands, against 17.2 %
    from one) and XHugWBC suggest diversity of sources helps an unseen body. Two things
@@ -196,5 +240,5 @@ foot" is then part of what the plan asks.
      published G1 policies, so another source needs that rule revisited first;
    - *what it does not fix.* It does not address the inconsistency of §2, which is how the
      generator models contact, not which bodies it learned from.
-5. Not proposed: learned shared latents (§3), multi-morphology tracker training (not this
+6. Not proposed: a learned latent on its own in place of `z*` (§3), multi-morphology tracker training (not this
    project's failure mode), and the estimator Transformer (robustness, not fidelity).

@@ -29,7 +29,11 @@ room() {
   busy=$(powershell -NoProfile -Command \
     "@(Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { \$_.CommandLine -match 'capture_contract|scripts.train.py|capture_velocity' }).Count")
   [[ "$free" =~ ^[0-9]+$ && "$gpu" =~ ^[0-9]+$ && "$busy" =~ ^[0-9]+$ ]] || return 1
-  [ "$free" -ge 10 ] && [ "$gpu" -le 2500 ] && [ "$busy" -eq 0 ]
+  # Thresholds: free RAM in GB and GPU memory in use in MiB. W9_ROOM_GB=0 runs alongside
+  # whatever else is open (the choice for W9, 2026-11-06); one Isaac process at a time
+  # is always kept.
+  [ "$free" -ge "${W9_ROOM_GB:-10}" ] && [ "$gpu" -le "${W9_ROOM_GPU_MB:-2500}" ] \
+    && [ "$busy" -eq 0 ]
 }
 wait_for_room() {
   local waited=0

@@ -1509,8 +1509,9 @@ The design takes from the works in [related_work.md](related_work.md). Nothing b
 
 - no gradient step of a body's encoder or tracker uses a task's data; *(2026-11-06, the design for
   the multi-task stage, `method_revision.md` §6: the generator and each body's decoder
-  train on a set of base tasks, and only a held-out task is excluded from every gradient
-  step. Results under it are reported as "held-out task zero-shot", apart from every
+  train on a set of base tasks, the generator on more than one body's data (the G1's
+  experts and every body executing the base tasks), and only a held-out task, rough, is
+  excluded from every gradient step. Results under it are reported as "held-out task zero-shot", apart from every
   earlier result, which keeps this rule.)*
 - the G1's pretrained policies are Isaac Lab's published ones only. *(2026-11-06, a
   design decision: or trained in this repository with Isaac Lab's published recipe, only

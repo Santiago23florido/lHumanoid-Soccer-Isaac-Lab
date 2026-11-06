@@ -55,8 +55,11 @@ fast 0.6 0 0
 turning 0.3 0.2 0.3"
 fi
 # ZS_COMMANDS: another task's L4 commands, one "name vx vy wz" per line (G1 units), read
-# against g1/rollouts/${task}_play_<name>.npz -- a base task's (method_revision.md §6).
+# against g1/rollouts/${task}_${ZS_TEACHER_ROLLOUT}_<name>.npz -- a base task's
+# (method_revision.md §6). ZS_TEACHER_ROLLOUT is "play" unless a task's references were
+# captured elsewhere (backward's in its training variant, skill_space.md §10.12).
 commands="${ZS_COMMANDS:-$commands}"
+teacher_rollout="${ZS_TEACHER_ROLLOUT:-play}"
 if [ "$body" = g1 ]; then
   # ZS_TASK_ID: another tracking task of the same body (the physics tracker's, say).
   task_id="${ZS_TASK_ID:-G1Track-Play-v0}"
@@ -198,7 +201,7 @@ if want l4; then
         --contract-from-truth --command "$vx" "$vy" "$wz"
     fi
     "$python" transfer/scripts/evaluate_contract.py \
-      --run "teacher=g1/rollouts/${task}_play_${name}.npz" \
+      --run "teacher=g1/rollouts/${task}_${teacher_rollout}_${name}.npz" \
       --run "encoder=$rollouts/zs_${tag}_${generator_name}${mode}${est}_${name}_encoder.npz" \
       --run "truth=$truth" \
       --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${mode}${est}_l4_${name}.json" \

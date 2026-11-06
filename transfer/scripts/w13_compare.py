@@ -16,6 +16,10 @@ same incumbent without the tasks), paired by seed, on the deployed path:
 
 Rough is not read here: it is held out until the multi-task generator is evaluated.
 
+Beside the criteria (``g1_gated_out``): the tasks W11 accepted whose W12 generator failed its
+gate, on the G1's W13 trackers at their middle command, with the same "executes" reading. A
+G1 decoder that executes their plans is the precondition W12 names for their DAgger round.
+
     python transfer/scripts/w13_compare.py --output transfer/results/w13_decoders.json
 """
 
@@ -71,6 +75,42 @@ def axis_ratio(body: str, tag: str, task: str) -> float:
     return 0.0 if run is None or not expert else run / expert
 
 
+def gated_out() -> list[str]:
+    """Tasks W11 accepted (calibrated reading) whose W12 generator exists and fails its gate."""
+    accepted = json.loads((RESULTS / "w11_experts.json").read_text(encoding="utf-8"))
+    out = []
+    for task in accepted["accepted_calibrated"]:
+        path = RESULTS / f"contract_base_{task}_b4.json"
+        if path.exists() and not json.loads(path.read_text(encoding="utf-8"))["gate"]["passes"]:
+            out.append(task)
+    return out
+
+
+def aside(tasks: list[str]) -> dict:
+    """The gated-out tasks on the G1's W13 trackers: falls, speed along the axis, deviation."""
+    report = {}
+    for task in tasks:
+        rows = []
+        for seed in SEEDS["g1"]:
+            tag = f"mt_g1_s{seed}_sym"
+            row = condition("g1", tag, f"base_{task}_b4", MIDDLE[task])
+            if row is None:
+                continue
+            row["axis_speed_ratio"] = axis_ratio("g1", tag, task)
+            rows.append({"seed": seed, **row})
+        report[task] = {
+            "rows": rows,
+            "executes": bool(
+                len(rows) == len(SEEDS["g1"])
+                and all(
+                    r["falls"] <= MAX_FALLS and SPEED[0] <= r["axis_speed_ratio"] <= SPEED[1]
+                    for r in rows
+                )
+            ),
+        }
+    return report
+
+
 def walk(body: str, tag: str) -> dict | None:
     path = RESULTS / f"zero_shot_{body}_{tag}_walk_auto_kin.json"
     if not path.exists():
@@ -105,8 +145,14 @@ def paired(values: list[float]) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--gated-out", action="store_true", help="print those tasks and stop")
     args = parser.parse_args()
+    if args.gated_out:
+        print(" ".join(gated_out()))
+        return 0
+    if args.output is None:
+        parser.error("--output is required")
     tasks = new_tasks()
     report: dict = {"tasks": tasks, "middle": {t: MIDDLE[t] for t in tasks}}
     decision = []
@@ -168,6 +214,7 @@ def main() -> int:
                 f"{body} target {entry['target_met']} executes {' '.join(accepted) or 'none'}"
             )
         report[body] = entry
+    report["g1_gated_out"] = aside(gated_out())
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes((json.dumps(report, indent=2) + "\n").encode("utf-8"))
     print("; ".join(decision) or "incomplete")

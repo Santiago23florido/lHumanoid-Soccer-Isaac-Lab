@@ -78,11 +78,24 @@ def run_ranges(task: str) -> dict:
 
 
 def capture_check(dart: Path, ranges: dict) -> dict:
+    """Every moving command of the capture inside ``ranges``.
+
+    Exactly-zero commands are the capture's standing share (``--standing-fraction``), the
+    command term's standing mode on every task, not a point of the task's range: jog's range
+    excludes zero speed and its capture still stands 30 % of the time.
+    """
     command = np.load(dart)["command"].reshape(-1, 3)
+    standing = np.all(command == 0.0, axis=1)
+    moving = command[~standing]
     low = np.array([ranges[k][0] for k in KEYS])
     high = np.array([ranges[k][1] for k in KEYS])
-    inside = bool(np.all((command >= low - 1e-6) & (command <= high + 1e-6)))
-    return {"inside": inside, "min": command.min(0).tolist(), "max": command.max(0).tolist()}
+    inside = bool(np.all((moving >= low - 1e-6) & (moving <= high + 1e-6)))
+    return {
+        "inside": inside,
+        "standing_share": float(standing.mean()),
+        "min": moving.min(0).tolist(),
+        "max": moving.max(0).tolist(),
+    }
 
 
 def main() -> int:

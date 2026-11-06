@@ -3126,6 +3126,50 @@ also writes them to that file.
   - *Every cell fails:* the cause is the fixed-command protocol, which every task shares.
     Backward stays rejected, and that is reported.
 
+**Result (2026-11-06, 23:00).** Three commands produce it:
+- `bash transfer/scripts/w11_play_check.sh`, the 2 × 2 check;
+- `bash transfer/scripts/w11_backward_train.sh`;
+- `python transfer/scripts/w11_accept.py --output transfer/results/w11_experts.json`, which
+  the second script runs at its end.
+
+*The 2 × 2, at −0.35 m/s:*
+
+| Variant | Action noise | Achieved | Ratio | Largest duty | Falls |
+| --- | --- | --- | --- | --- | --- |
+| play | 0 (W11's) | −0.518 | 1.48 | 0.78 | 121 |
+| play | 0.1 | −0.376 | 1.08 | 0.73 | 15 |
+| training | 0 | −0.294 | 0.84 | 0.80 | 0 |
+| training | 0.1 | −0.310 | 0.88 | 0.78 | 0 |
+
+The first pre-registered case holds: the training variant without action noise passes,
+and the play variant fails. Backward was therefore re-read at its three commands in the
+training variant. That is the second declared deviation.
+
+*Backward in the training variant, and jog:*
+
+| Task | Command (m/s) | Achieved | Ratio | Largest duty | Falls |
+| --- | --- | --- | --- | --- | --- |
+| backward | −0.20 | −0.170 | 0.85 | 0.87 | 0 |
+| backward | −0.35 | −0.294 | 0.84 | 0.80 | 0 |
+| backward | −0.50 | −0.410 | 0.82 | 0.73 | 0 |
+| jog | 1.00 | 0.988 | 0.99 | 0.53 | 0 |
+| jog | 1.25 | 1.233 | 0.99 | 0.52 | 0 |
+| jog | 1.50 | 1.469 | 0.98 | 0.53 | 0 |
+
+*Decision.*
+- The registered reading (`accepted`) accepts jog only.
+- The reading with both declared deviations (`accepted_calibrated`) accepts backward,
+  sidestep and jog. In the training variant, backward passes even the registered 0.8 bound.
+
+*What stays declared.*
+- **Backward's L4 references come from its training variant**
+  (`base_backward_train_<name>.npz`). That variant has observation noise and random
+  pushes, which neither the other tasks' play rollouts nor the decoders' L4 runs have.
+- **Why the expert falls when observation noise and pushes are removed is not
+  explained.** In the play variant it runs faster than commanded (ratio 1.48 at −0.35) and
+  falls. Adding action noise alone cuts the falls from 121 to 15. One hypothesis, not
+  tested, is that the policy depends on the perturbations it was trained under.
+
 ### 10.13 One generator per new base task; pre-registered (W12)
 
 **Context.** Step 2 of `method_revision.md` §6: one generator per base task, from the G1's
@@ -3157,6 +3201,36 @@ anywhere in the stage.
 - **Run:** `transfer/scripts/w12_task_generators.sh`, after W11, offline. Budget: about
   12 min per generator (`flat_b4`'s generator took 704 s), so under 1 h. Nothing of either
   body is trained.
+
+**Result (2026-11-06, 23:08).** The generators come from
+`bash transfer/scripts/w12_task_generators.sh`, which ran twice: once on W11's first
+acceptance and once after backward's re-read. The figures are in
+`transfer/results/contract_base_<task>_b4.json`.
+
+| Task | Calibration error (left, right) | Gate | Chain fidelity |
+| --- | --- | --- | --- |
+| backward | 0.0612, 0.0623 | fails | 0.085 ± 0.013 |
+| sidestep | 0.0388, 0.0514 | fails | 0.422 ± 0.026 |
+| jog | 0.0132, 0.0038 | passes | 0.064 ± 0.004 |
+
+- **Backward's chain fidelity** is read on its rollout from the training variant
+  (`base_backward_train_mid.npz`), as §10.12's second deviation requires. W12's script
+  takes that path from a per-task map.
+- **The gate is not miscalibrated for this set.** Every generator already in the set
+  passes it with margin: `walk_dagger3`, 0.0044 and 0.0049; `flat_dagger2`, 0.0076 and
+  0.0063. So do the DART-only generators trained on flat and rough: `flat_h20`, 0.0067 and
+  0.0053; `rough_h20`, 0.030 and 0.020. Unlike the speed bound, nothing here calls for a
+  deviation.
+- **A cause that does not fit.** The walk's DART-only generator also failed this gate
+  (`walk`, 0.060), and data with starts fixed it (`walk_starts`, 0.0044). W11's captures
+  already include starts: a standing share of 0.3 and resampling every 2–6 s. And
+  `flat_h20` passed with the same amount of data. So "more data" is not supported, and no
+  data round is run.
+- **Decision, as pre-registered.** Backward and sidestep leave this stage. Their recipe is
+  not tuned. The multi-task stage has the walk (task 0), flat and jog. Rough stays held out.
+- **The way back is the one this section already declared:** a DAgger round on these two
+  tasks, once a G1 decoder executes them. W13 measures that precondition beside its
+  criteria (§10.14).
 
 ### 10.14 Each body's decoder trained once on the base tasks; pre-registered (W13)
 
@@ -3215,8 +3289,48 @@ outside the family's ranges, so S cannot be expected to execute the new tasks.
   - A body whose decoders execute a task can produce that task's data for step 4.
   - A task no body executes leaves the generator's multi-body set but stays in its G1 set.
   - A failure is reported with its figures and a reframing. It is not tuned afterwards.
+- **The task set that W11 and W12 produced:** walk, flat and jog. "The new tasks" above is
+  jog alone. `python transfer/scripts/base_task_set.py --output
+  transfer/results/base_tasks.json` gives jog's range as x 1.0–1.5 m/s, with no lateral
+  speed and no yaw.
+  - *The builder's range check.* It now leaves out exactly-zero commands, which are the
+    capture's standing share. Jog's range excludes zero speed, yet its capture stands 31 %
+    of the time. The standing mode is the command term's on every task.
+- **Beside the criteria, added before W13 ran.** Backward and sidestep, which W12's gate
+  left out, are run on the G1's three W13 trackers at their middle command. They are read
+  with the same "executes" rule (`g1_gated_out` in `w13_decoders.json`). A decoder that
+  executes them is the precondition for their DAgger round (10.13). This is not a W13
+  criterion, and nothing is trained on those tasks.
 - **Not read here:** rough. It waits for the multi-task generator (step 6).
 - **Run:** `transfer/scripts/w13_decoders.sh`, after W12.
+
+**The smoke run (2026-11-06, 23:16–23:25).**
+- *The G1 passed at once.* Its log carries `task_contract`, `task_flat` and `task_jog`.
+- *The NAO's first smoke run failed:* "flat_dagger2: not on the contract's grid and units".
+  - *Cause.* Every generator normalises `z*` with its own statistics. The G1's contracts
+    share one set. The NAO's walk contract, `walk_dagger2e`, fitted its own on different
+    data.
+  - *The fix.* `command.py` now maps each environment's history into the task generator's
+    units, and maps the plan back. This is an exact affine map through `z*`, applied only
+    when the statistics differ. The G1's path is unchanged.
+  - *Rerun.* The second smoke run passed. Its only logged reset happened to draw no flat or
+    jog environment, so the first NAO training log is where the share of each task is
+    checked.
+- **An open finding, not yet measured, that may bias the NAO's published results.**
+  - *What.* L4 makes the task's generator the contract, so the command term normalises
+    everything it hands the NAO tracker (history, estimate, plan) with that generator's
+    statistics, not with those the tracker trained under.
+  - *How large the input shift is* (`python transfer/scripts/units_shift.py --own
+    logs/contract/walk_dagger2e/generator.pt --other logs/contract/flat_dagger2/generator.pt
+    logs/contract/rough_b4/generator.pt`): an offset of up to 0.118 std
+    (`foot_position.left.y`), 0.033 on average, and a scale change of up to 17.6 %
+    (`foot_velocity.left.y`).
+  - *Who is affected.* Every NAO evaluation on a G1-derived task generator: flat and rough
+    in the paper, W8 and W9's NAO arms. The G1 is not affected.
+  - *What is not known.* How much it moves those results. That needs a re-evaluation with
+    the tracker's own units pinned, to be pre-registered separately.
+  - *Why W13 is unchanged.* S's NAO results were read the same way, and W13 is paired
+    against them, so W13 keeps that evaluation path for both arms.
 - **Budget**, from S's logs: 1000 iterations took 1.45 h on the G1 and 2.33 h on the NAO,
   so about 11.5 h of training before any slowdown from drawing several tasks' plans. The
   evaluation adds about 6–8 h.

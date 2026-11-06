@@ -85,6 +85,19 @@ def test_a_capture_must_lie_inside_its_declared_ranges(tmp_path):
     assert not builder.capture_check(tmp_path / "out.npz", ranges)["inside"]
 
 
+def test_standing_commands_are_not_points_of_a_range(tmp_path):
+    builder = _builder()
+    jog = {"lin_vel_x": [1.0, 1.5], "lin_vel_y": [0.0, 0.0], "ang_vel_z": [0.0, 0.0]}
+    command = np.array([[[0.0, 0.0, 0.0], [1.2, 0.0, 0.0], [0.0, 0.0, 0.0], [1.5, 0.0, 0.0]]])
+    np.savez(tmp_path / "jog.npz", command=command)
+    check = builder.capture_check(tmp_path / "jog.npz", jog)
+    assert check["inside"] and check["standing_share"] == 0.5
+    assert check["min"] == [1.2, 0.0, 0.0]
+    # A moving command below the range is still refused.
+    np.savez(tmp_path / "slow.npz", command=command + np.array([0.5, 0.0, 0.0]))
+    assert not builder.capture_check(tmp_path / "slow.npz", jog)["inside"]
+
+
 def test_flat_ranges_are_isaac_labs():
     builder = _builder()
     if not builder.FLAT_CFG.exists():

@@ -26,6 +26,9 @@ body=logs/contract/walk_zs_g1_r3_6194_sym/generator.pt
 
 # The play rollout each generator's chain fidelity is read on: the middle command of each task.
 declare -A gait=([backward]=mid [sidestep]=left [jog]=mid)
+# Backward's fixed-command rollouts are its training variant's (skill_space.md §10.12, second
+# declared deviation; w11_backward_train.sh).
+declare -A rollout=([backward]=train)
 
 until grep -q "^w11 done" logs/contract/w11_experts.status 2>/dev/null; do sleep 120; done
 note "w12 start"
@@ -42,7 +45,7 @@ for task in $accepted; do
   note "$name training start"
   "$python" -u transfer/scripts/train_contract.py --name "$name" \
     --data "g1/rollouts/base_${task}_dart.npz" \
-    --gait "g1/rollouts/base_${task}_play_${gait[$task]}.npz" \
+    --gait "g1/rollouts/base_${task}_${rollout[$task]:-play}_${gait[$task]}.npz" \
     --encoder-from "$body" --warp-loads --solver midpoint --flow-steps 8 --horizon 20 \
     --commit 13 --sigma-from-body --noise-conditional \
     --results "transfer/results/contract_${name}.json" \

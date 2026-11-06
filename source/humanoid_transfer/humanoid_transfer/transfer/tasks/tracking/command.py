@@ -273,6 +273,7 @@ class ReferenceCommand(UniformVelocityCommand):
                 "name": "contract",
                 "generator": primary,
                 "plan_matrix": self.plan_matrix,
+                "renormalise": False,
                 "length": length,
                 "commit": self.commit,
                 "ranges": None,
@@ -292,11 +293,16 @@ class ReferenceCommand(UniformVelocityCommand):
                 and generator.view == primary.view
                 and generator.skill == primary.skill
                 and generator.warp_loads == primary.warp_loads
-                and torch.allclose(generator.skill_norm.mean, primary.skill_norm.mean)
-                and torch.allclose(generator.skill_norm.std, primary.skill_norm.std)
             )
             if not same:
                 raise ValueError(f"{spec['contract']}: not on the contract's grid and units")
+            # A generator normalises z* with its own statistics. The G1's generators share
+            # one set; the NAO's walk contract has its own, so its history is mapped into each
+            # task generator's units and the plan back (an exact affine map, via z*).
+            renormalise = not (
+                torch.allclose(generator.skill_norm.mean, primary.skill_norm.mean)
+                and torch.allclose(generator.skill_norm.std, primary.skill_norm.std)
+            )
             matrix = plan_interpolation(grid_step, generator.horizon, self.dt_star).to(self.device)
             commit = max(1, round(generator.commit * grid_step / self.dt_star))
             if commit - 1 + self.view > matrix.shape[0]:
@@ -316,6 +322,7 @@ class ReferenceCommand(UniformVelocityCommand):
                     "name": spec["name"],
                     "generator": generator,
                     "plan_matrix": matrix,
+                    "renormalise": renormalise,
                     "length": matrix.shape[0],
                     "commit": commit,
                     # Dimensionless to this body's units: the inverse of what the
@@ -382,13 +389,18 @@ class ReferenceCommand(UniformVelocityCommand):
             if len(chosen) == 0:
                 continue
             generator, matrix = task["generator"], task["plan_matrix"]
+            history = window[chosen]
+            if task["renormalise"]:
+                history = generator.skill_norm(self.generator.skill_norm.inverse(history))
             noise = torch.randn(len(chosen), generator.noise_size, device=self.device)
             with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
-                plan = generator.sample(window[chosen], command[chosen], noise).float()
+                plan = generator.sample(history, command[chosen], noise).float()
             plan = torch.nan_to_num(plan, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
-            full = torch.cat([window[chosen, -1:], plan], dim=1)
+            full = torch.cat([history[:, -1:], plan], dim=1)
             own = resample_rows(generator, matrix, full, space)
             own = apply_plan_contact(own, generator.skill_norm, self.cfg.plan_contact)
+            if task["renormalise"]:
+                own = self.generator.skill_norm(generator.skill_norm.inverse(own))
             moved = plan_integrals(generator.skill_norm.inverse(plan), float(generator.grid_step))
             moved = torch.cat([torch.zeros_like(moved[:, :1]), moved], dim=1)
             moved = torch.einsum("lk,nkd->nld", matrix, moved)

@@ -21,6 +21,12 @@ selects for. ``accepted_calibrated`` lowers the bound to the reference's smalles
 keeps every other criterion; ``accepted`` is the registered reading. The later stages read
 ``accepted_calibrated``.
 
+**Second declared deviation** (§10.12, the reading the 2 x 2 check pre-registered). Backward
+passes at -0.35 m/s in its training variant without action noise and falls in the play
+variant, so its calibrated reading uses its fixed-command rollouts in the training variant,
+``base_backward_train_<name>.npz`` (``w11_backward_train.sh``). The registered reading keeps
+the play rollouts.
+
     python transfer/scripts/w11_accept.py --output transfer/results/w11_experts.json
 """
 
@@ -48,6 +54,8 @@ SPEED_RATIO = (0.8, 1.2)
 MAX_DUTY = 0.9
 # The published flat expert's single-axis play rollouts (``turning`` combines three axes).
 REFERENCE = ("forward", "fast")
+# The rollouts each task's calibrated reading uses, when not its play rollouts.
+VARIANT = {"backward": "train"}
 
 
 def play_commands() -> dict:
@@ -145,6 +153,11 @@ def calibration() -> dict:
     }
 
 
+def complete_and(rows: dict, key: str) -> bool:
+    """Every command captured and passing ``key``."""
+    return bool(all(r is not None and r[key] for r in rows.values()))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--output", type=Path, required=True)
@@ -159,21 +172,26 @@ def main() -> int:
         "tasks": {},
     }
     for task, commands in play_commands().items():
-        rows = {}
-        for name, command in commands.items():
-            path = REPO_ROOT / "g1" / "rollouts" / f"base_{task}_play_{name}.npz"
-            rows[name] = check(path, command, AXIS[task]) if path.exists() else None
-            if rows[name] is not None:
-                rows[name]["passes_calibrated"] = passes(rows[name], low)
-        complete = all(r is not None for r in rows.values())
-        report["tasks"][task] = {
-            "commands": rows,
+        readings = {}
+        for variant in dict.fromkeys(("play", VARIANT.get(task, "play"))):
+            rows = {}
+            for name, command in commands.items():
+                path = REPO_ROOT / "g1" / "rollouts" / f"base_{task}_{variant}_{name}.npz"
+                rows[name] = check(path, command, AXIS[task]) if path.exists() else None
+                if rows[name] is not None:
+                    rows[name]["passes_calibrated"] = passes(rows[name], low)
+            readings[variant] = rows
+        played, deviated = readings["play"], readings[VARIANT.get(task, "play")]
+        entry = {
+            "commands": played,
             "dart_tracking": dart_tracking(task),
-            "accepted": bool(complete and all(r["passes"] for r in rows.values())),
-            "accepted_calibrated": bool(
-                complete and all(r["passes_calibrated"] for r in rows.values())
-            ),
+            "accepted": complete_and(played, "passes"),
+            "accepted_calibrated": complete_and(deviated, "passes_calibrated"),
         }
+        if deviated is not played:
+            entry["calibrated_variant"] = VARIANT[task]
+            entry[f"commands_{VARIANT[task]}"] = deviated
+        report["tasks"][task] = entry
     report["accepted"] = [t for t, e in report["tasks"].items() if e["accepted"]]
     report["accepted_calibrated"] = [
         t for t, e in report["tasks"].items() if e["accepted_calibrated"]
@@ -181,14 +199,19 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     for task, entry in report["tasks"].items():
-        for name, r in entry["commands"].items():
+        variants = [("play", entry["commands"])]
+        if "calibrated_variant" in entry:
+            variant = entry["calibrated_variant"]
+            variants.append((variant, entry[f"commands_{variant}"]))
+        for variant, name, r in ((v, n, r) for v, rows in variants for n, r in rows.items()):
+            label = name if variant == "play" else f"{name} ({variant})"
             if r is None:
-                print(f"{task:9s} {name:10s} missing")
+                print(f"{task:9s} {label:16s} missing")
                 continue
             verdict = "pass" if r["passes"] else "FAIL"
             verdict += " / calibrated " + ("pass" if r["passes_calibrated"] else "FAIL")
             print(
-                f"{task:9s} {name:10s} speed {r['achieved_speed']:+.3f}"
+                f"{task:9s} {label:16s} speed {r['achieved_speed']:+.3f}"
                 f" (ratio {r['speed_ratio']:.2f})  duty {max(r['duty']):.2f}"
                 f"  falls {r['falls']}  {verdict}"
             )

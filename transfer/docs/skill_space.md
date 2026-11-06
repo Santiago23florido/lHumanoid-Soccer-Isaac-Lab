@@ -754,7 +754,7 @@ The general correction is to train each body's tracker once on every
 skill available, and to test with a skill held out of that set. It is
 still N + M trainings, but on the union of skills rather than on one.
 That changes the requirement ("trained once, with walking"), so it is
-left to the user.
+left open.
 
 ### 7.4 The NAO
 
@@ -1001,7 +1001,7 @@ Limits and stopping rules:
 - **The NAO.** It is trained only once the G1 passes L4, and the published
   generator stays frozen for it. A twin outside the NAO's competence is
   reported as a physical limit of that body, not a transfer failure.
-- **Escalations, decided by the user.** A model-based decoder, training on
+- **Escalations, decided at review.** A model-based decoder, training on
   the union of skills, or a different length unit.
 
 **Threats to validity, declared.**
@@ -1449,7 +1449,7 @@ Limits and stopping rules:
     the teacher's segments would provide), or the chain's own rhythm matched to the
     teacher's directly.
   - *Nothing in use changed.*
-- **Iterative cycles, at the user's request:** each proposal judged on step 1's
+- **Iterative cycles, as decided at review:** each proposal judged on step 1's
   criterion, the next tried when one fails, each recorded as it ends.
 
   | cycle | what | rough (0.162) | flat (0.078) |
@@ -1523,7 +1523,7 @@ S0 is:
 - L1b of the walk.
 
 **Deviation, 2026-10-24.** S0's walk is measured on the deployed path under the *autonomous*
-reference, decided by the user. Until then it used the physical one, in which the reference
+reference, decided at review. Until then it used the physical one, in which the reference
 restarts from the body at each plan. No tracker trains in that mode, and a body can steer it
 towards a slower gait. In it, round 8's new decoders walked at 0.81 and 0.85 of the teacher's
 speed; under the autonomous reference, which every tracker trains in and L4 deploys with, they
@@ -1646,7 +1646,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     weight. Two paired states -- the same planned gait at the same phase -- are held up
     differently on the two bodies. A shared `ζ` read by one shared predictor, and forbidden
     to encode the body, cannot be right on both. The test asked for the impossible.
-  - *Taken to the user.* The user chose to keep `ζ` shared and body-blind, and give each body
+  - *Decided at review:* keep `ζ` shared and body-blind, and give each body
     its own physics readout (round 2).
 - **F5, round 2: the three pre-registered checks pass** (`free_latent_f5_r2.json`; `ζ` shared,
   each body's head trained on its own procedural data, centre of pressure as a fraction of
@@ -1697,7 +1697,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     trunk and the height step by step, about as the teachers' bodies do, plus about 30 %
     sampling noise. The biped's plans held the trunk fixed. The prior turned the sway into joint
     motion its residual never practised.
-  - *Round 2 is the user's choice* (`plan_trust.py`, variant v2t):
+  - *Round 2, as decided at review* (`plan_trust.py`, variant v2t):
     - the prior trusts each plan by its measured sampling noise;
     - it aims the trunk at the plan's slow tilt;
     - the biped's plans carry the measured noise and the gait's trunk sway.
@@ -1743,10 +1743,10 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     v2t is level on rough (15 %), better on the grid (35 against 32), worse on the corners
     (25 against 27) and on flat (4 falls; the gate missed on speed, ratio up to 1.19). Both
     from-scratch trackers stay well below the incumbent, which has three times the training.
-    The user's rule applies: a round that does not pass is reported and reframed, not
+    The project's rule applies: a round that does not pass is reported and reframed, not
     concluded.
   - *F1, under the deployed estimator, G1:* `rough_b4` falls 0/192 against `rough_b3`'s 4/190
-    (about 2 SE). The NAO's half of the re-baseline is left: the run paused when the user's own
+    (about 2 SE). The NAO's half of the re-baseline is left: the run paused when other
     jobs needed the GPU.
 - **F1 decided, under the deployed estimator** (`zero_shot_{g1_r3_6194_sym_v3,nao_r1_3498_sym_v3}_*_auto_kin_l4_*.json`).
   Falls over the three commands; "passes" is at the body's rate:
@@ -1948,7 +1948,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     pre-registered bar, though: more cells mastered by over two standard errors, where it
     has one probe. The duty moves by six standard errors, but across the probes' tolerance
     in few of them.
-  - *Seeds decide it* (`logload_seeds.sh`, `compare_seeds.py`; the user's choice of
+  - *Seeds decide it* (`logload_seeds.sh`, `compare_seeds.py`; decided on
     2026-10-25). Three seeds per arm (41, 42, 43), each the incumbent continued as the
     control, with only the load's space differing. Statistic: the difference in probes passed
     per seed; standard error from a hierarchical bootstrap over the probes and, within each
@@ -1994,7 +1994,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
       stays 0.14 off, and forward gets worse (0.12 against 0.07).
     - *Both arms walk too fast* (1.64 and 1.32 of the teacher's speed).
   - *By the rule it is not adopted:* it regresses on S0 (the walk) and on the family's duty.
-    As the user's rule has it, the round is reported and reframed, not concluded. The core,
+    As the project's rule has it, the round is reported and reframed, not concluded. The core,
     distilled the same way, also walks slow (0.85, `zero_shot_g1_warm_core_walk_kin.json`), so
     the slowdown may come with the distillation rather than with the prior. The next check is
     a distilled student's walk before PPO.
@@ -2213,7 +2213,7 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
   (`flat_dart`, `flat_dagger_{1,2}`), so the generator produces 2–3 times the light contact
   it was trained on, with slightly too many contact changes per plan: a learned property
   of every flow variant tried.
-- **Not pursued here, for the user.** A generator that represents contact explicitly -- a
+- **Not pursued here; left open.** A generator that represents contact explicitly -- a
   discrete contact channel next to the continuous loads, as the event model of §7 did for
   timing alone -- is the structural option; it means retraining every task generator and
   re-running S0, so it waits for review. The tracker side (W3) does not depend on it: B1,
@@ -2259,7 +2259,7 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
     error of the twelve paired differences, on at least one foot.
   - *If it holds,* the failure seen on rough is reproduced inside the family, with no
     task, and step 3 is its correction. *If not,* steps 3 and 4 are not run, and the
-    finding goes to the user for a new framing.
+    finding is reported for a new framing.
   - *The NAO.* Its own step-1 result decides step 4 the same way.
 - **Step 3, the G1.**
   - *Training.* `r3_6194` continued for 1000 iterations exactly as S's seeds were
@@ -2301,7 +2301,7 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
     feet, the touchdown 0.11 `T` early.
   - *What follows, as pre-registered.* Steps 3 and 4 are not run. Rough's early lift-off is
     not reproduced inside the family by the shape of the load transfer, so the half-sine
-    family is not shown to be its cause. The finding goes to the user for a new framing.
+    family is not shown to be its cause. The finding is reported for a new framing.
     The generator's extra contact changes per plan (10.4: 3.21–3.73 against the teacher's
     2.92) and rough's irregular steps remain, as hypotheses.
   - *The code stays.* `GaitRanges.load_shape` is off by default and bit-identical when off;
@@ -2403,7 +2403,7 @@ as instrumentation: it decides nothing, and it is reported apart.
       (turning, duty 0.106 against the 0.10 limit) for not failing under a degraded
       estimate.
     - *Whether robustness belongs in the regression suite* is a change to the criterion,
-      and so the user's call. It is put to them in the recommendation (report §7).
+      and so a decision for review. It is put in the recommendation (report §7).
 
 ### 10.8 The NAO's sole point is not where its foot rests; pre-registered (W6)
 
@@ -2846,7 +2846,7 @@ deployed path, S's three seeds of each body, both skills, three commands).
   - Flat L4 is better on all three seeds, and the walk is as above.
   - The NAO's deployment is unchanged, so its half of S0 is unaffected.
   - **Not written into `incumbents.json`.** The assignment keeps the original incumbents, and
-    adoption is the user's call at review. The candidate is recorded in
+    adoption is decided at review. The candidate is recorded in
     `transfer/results/candidates.json`.
 
 **W8n, pre-registered (2026-11-05, after W8's result, before W6 has trained).**

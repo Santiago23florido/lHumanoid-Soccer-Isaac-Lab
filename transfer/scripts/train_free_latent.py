@@ -7,7 +7,7 @@ foot's measured balance and the biped's gait phase. Two states are a pair when
 they follow the same probe at the same phase (one of ``--phase-bins``): the
 same planned gait at the same moment, each dynamically valid on its own body.
 
-**Round 2 (the user's choice after round 1).** Round 1 read both bodies' balance
+**Round 2 (chosen after round 1).** Round 1 read both bodies' balance
 with one predictor; paired states are held up differently on the two bodies,
 so it could not pass (§9.1). Here ``ζ`` stays shared, aligned and blind to the
 body -- what a plan carries from one body to another -- while each body reads

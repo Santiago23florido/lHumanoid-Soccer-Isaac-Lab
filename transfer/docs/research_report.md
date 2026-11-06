@@ -198,7 +198,7 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
          it rested on assumes a leg at rest at lift-off. The NAO's swings do not start at
          rest, and a fifth to a quarter of them beat that ceiling (below). That version
          affected three things: it put most of the shortfall on the body; it put the NAO's
-         leg gains and velocity limit to the user as the levers; and it made the bound,
+         leg gains and velocity limit forward as the levers; and it made the bound,
          not 1, a NAO candidate's clearance ceiling (§3). No run and no pre-registration
          used it.
        - *Its ceilings came from a square grid* that missed the flat-foot boundary. The
@@ -399,14 +399,14 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     leg allows about that and not much more, so a ratio near 1 is the most a candidate can
     show, not a level to beat.
   - *A correction.* This entry first called the at-rest ceiling a body limit, put the two
-    levers to the user as a decision, and made that ceiling a candidate's clearance limit
+    levers forward as a decision, and made that ceiling a candidate's clearance limit
     (§2.2, item 4).
 - **After W1 and W3 step 1, the RL arms they gated are not run.** That is W3's steps 3–4
   (about 13 h) and W4 (about 2.5 h). Both gates failed as their pre-registrations required:
   the interface does not reach the NAO's body, and the family's load shapes do not reproduce
-  the G1's failure on rough. W5 and W6 run as queued. The freed budget goes to the user with
+  the G1's failure on rough. W5 and W6 run as queued. The freed budget is reassigned with
   the new framings (§2.3), not into a new arm chosen after seeing these results.
-  - *The user's answer:* the choice is mine. *Chosen:* W7, the NAO's leg drives
+  - *Chosen:* W7, the NAO's leg drives
     (`skill_space.md` §10.9).
   - *Why this one.* It is the most direct test of the strongest lead. Duty and clearance
     fail together on the NAO, swing by swing. The interface is ruled out. The drives
@@ -447,7 +447,7 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     the target is better by 6.5 SE; pytest, ruff and the chains pass; flat L4 and the
     walk are better.
   - *Why it is not written into `incumbents.json`.* The assignment forbids overwriting the
-    original incumbents, and the user decides adoption at review. The candidate goes to
+    original incumbents, and adoption is decided at review. The candidate goes to
     `transfer/results/candidates.json`, a new file.
   - *Rejected:* making `ground` the G1's default. Old commands would then silently
     reproduce different numbers.
@@ -481,7 +481,7 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     runs' times in §4). The next NAO question,
     why a trained tracker keeps a short swing on either drive, needs a new hypothesis on
     its objective. That is a choice for the next study, recorded in §7, not one to start
-    on the remaining budget without the user.
+    on the remaining budget without review.
 
 ## 4. Experiment log
 
@@ -575,8 +575,8 @@ of the twelve pairs.
   - *Its one cost:* at 0.2 `V` pushes the G1's largest deviation rises from 0.096 to 0.121.
   - *Under the adoption rule* the flat incumbent stays `flat_dagger2`. On today's
     incumbents `flat_b4` loses the G1's gate C at the turning command (duty 0.106), and
-    robustness is in neither the rule's target nor its suite. Whether it should be is put
-    to the user (§7; `skill_space.md` §10.7).
+    robustness is in neither the rule's target nor its suite. Whether it should be is left
+    open (§7; `skill_space.md` §10.7).
 
 ### 5.4 W7: faster NAO leg drives on the frozen trackers (validated; not kept by training, W7c)
 
@@ -753,7 +753,7 @@ were read while choosing every intervention); flat is semi-blind; the walk is S0
 
 ## 7. Recommendation
 
-1. **G1: adopt `HUMANOID_PLAN_CONTACT=ground` at deployment** — the user's decision. It
+1. **G1: adopt `HUMANOID_PLAN_CONTACT=ground` at deployment** — a decision for review. It
    meets `incumbents.json`'s rule (§5.5; `candidates.json`). It is a deployment switch: no
    tracker, generator or encoder changes, and the default stays `as_drawn`, so every
    earlier command reproduces. Not for the NAO.
@@ -769,7 +769,7 @@ were read while choosing every intervention); flat is semi-blind; the walk is S0
      lifts off with its plan keeps a short, low swing (§6.3). Both leads there are
      measured correlations, and the first step is a deploy-time or offline test of one of
      them, not an RL arm.
-3. **Put a degraded estimate in S0** — a question for the user. Robustness is in neither
+3. **Put a degraded estimate in S0** — an open question. Robustness is in neither
    the adoption rule's target nor its suite, so the rule keeps `flat_dagger2`, which falls
    nine times in ten at twice the estimator's noise where `flat_b4` does not fall. If the
    suite gains that test, `flat_b4` is the flat candidate on both bodies. Its costs, from

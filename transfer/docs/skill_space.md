@@ -3074,6 +3074,38 @@ figures, and its recipe is not tuned afterwards.
 about 1 h of captures. The multi-task generator and its leave-one-task-out test are
 pre-registered after this, on the accepted set.
 
+### 10.13 One generator per new base task; pre-registered (W12)
+
+**Context.** Step 2 of `method_revision.md` §6: one generator per base task, from the G1's
+experts. The walk (`walk_dagger3e`) and flat (`flat_dagger2`, `flat_b4`) already have
+theirs. This trains one for each new task that W11 accepts. Rough's generators are not used
+anywhere in the stage.
+
+**Pre-registered (2026-11-06, while W11 trains, before any expert exists).**
+- **Recipe**, the same as `rough_b4` and `flat_b4` (`chain_study_b4.sh`):
+  - horizon 20, commit 13, midpoint solver with 8 flow steps, log-warped loads;
+  - the G1 body's encoder (`walk_zs_g1_r3_6194_sym`), trained under its noise and
+    noise-conditional.
+- **Data:** the expert's DART rollouts (`g1/rollouts/base_<task>_dart.npz`) only.
+- **Chain fidelity** is read on one play rollout per task, its middle command: backward
+  `mid` (−0.35 m/s), sidestep `left` (0.25 m/s), jog `mid` (1.25 m/s). This choice is
+  declared, not derived.
+- **Declared asymmetry.** The walk's and flat's generators had DAgger rounds; these do not.
+  - A DAgger round needs a G1 decoder that executes the task in a closed loop.
+  - The current G1 tracker cannot: 5 of W11's 9 play commands lie outside the family's
+    ranges (`method_revision.md` §6).
+  - A DAgger round for the new tasks is therefore possible only after step 3, and would be
+    pre-registered then.
+- **Gate:** `train_contract.py`'s own, fixed before training. On held-out data, the instant
+  each foot's contact next changes is calibrated to within 0.05. It is reported in
+  `transfer/results/contract_base_<task>_b4.json`.
+- **Reading.** A task enters the multi-task stage if its expert was accepted (W11) and its
+  generator passes the gate. A failing generator is reported with its figures, and its
+  recipe is not tuned afterwards.
+- **Run:** `transfer/scripts/w12_task_generators.sh`, after W11, offline. Budget: about
+  12 min per generator (`flat_b4`'s generator took 704 s), so under 1 h. Nothing of either
+  body is trained.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

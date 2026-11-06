@@ -1508,7 +1508,11 @@ Limits and stopping rules:
 The design takes from the works in [related_work.md](related_work.md). Nothing below changes the zero-shot rule:
 
 - no gradient step of a body's encoder or tracker uses a task's data;
-- the G1's pretrained policies are Isaac Lab's published ones only.
+- the G1's pretrained policies are Isaac Lab's published ones only. *(2026-11-06, a
+  design decision: or trained in this repository with Isaac Lab's published recipe, only
+  the command range changed, as `G1Walk-Teacher-v0` already was. It affects which G1
+  experts may supply a generator's tasks (10.12), and nothing about the bodies' encoders
+  or trackers.)*
 
 **Adoption rule, for every phase.** A candidate replaces an incumbent (`transfer/results/incumbents.json`) only if:
 
@@ -2948,6 +2952,59 @@ the theory in [`method_revision.md`](method_revision.md)).
   - *NAO:* reported either way; no NAO candidate without a pass.
 - **Order and budget.** About 2.5 h of simulator time behind the room waiter. Nothing
   else is queued.
+  *(2026-11-06: W11, 10.12, is now queued after it.)*
+
+### 10.12 Base tasks for a multi-task generator; pre-registered (W11)
+
+**Context.** The target design (`method_revision.md` §6):
+- a generator trained on about five base tasks, whose training may see several bodies;
+- each body's decoder trained once;
+- zero-shot at inference, tested by leaving a task out.
+
+On 2026-11-06 it was decided that the extra experts are trained on the G1 with Isaac
+Lab's recipe. The repository had three tasks: the walk (`G1Walk-Teacher-v0`, itself
+trained here with Isaac Lab's recipe and a narrowed command range) and the published flat
+and rough policies.
+
+**The three new tasks** (`g1/tasks/g1_base`; tests in `tests/test_g1_base_tasks.py`).
+Isaac Lab's `G1FlatEnvCfg` and `G1FlatPPORunnerCfg` (1500 iterations), with only the
+command range changed:
+
+| Task | Command range | Play commands (m/s) |
+| --- | --- | --- |
+| backward | `lin_vel_x` −0.5 to 0 | −0.2, −0.35, −0.5 |
+| sidestep | `lin_vel_y` −0.5 to 0.5 | 0.25, 0.45, −0.35 (lateral) |
+| jog | `lin_vel_x` 1.0 to 1.5 | 1.0, 1.25, 1.5 |
+
+The ranges are free parameters, declared as such.
+
+**Left out, with reasons.**
+- *Turning in place.* The recipe's `feet_air_time_positive_biped` pays nothing below
+  0.1 m/s of linear command, so it asks for no stepping.
+- *Stairs.* `z*` carries no terrain; even rough runs on a plane (`G1RoughOnFlat`).
+
+**Test** (`transfer/scripts/w11_experts.sh`, after W9).
+1. *Smoke.* Three iterations; the saved `env.yaml` must carry the backward range.
+2. *Per task.*
+   - train: seed 42, 4096 environments;
+   - export: `export_actor.py`;
+   - DART rollouts for the generator (`held_out_task.sh`'s settings: 128 environments,
+     1000 steps, action noise 0.1, standing share 0.3, resampling every 2–6 s);
+   - play rollouts at the three commands (32 environments, 900 steps).
+
+**Acceptance** (`transfer/scripts/w11_accept.py` → `transfer/results/w11_experts.json`).
+A task enters the generator's set if, at each of its three play commands:
+- at most one episode ends in a fall;
+- the CoM's speed along the commanded axis is 0.8–1.2 of the command;
+- each foot's duty factor is at most 0.9, so the expert steps.
+
+These select tasks; none is a condition in training. A rejected task is reported with its
+figures, and its recipe is not tuned afterwards.
+
+**Budget.** The walk teacher took 2.0 h for 1500 iterations (`logs/rsl_rl/g1_flat/
+2026-09-23_13-28-36_teacher`, checkpoints 0 to 1499). Three experts are about 6 h, plus
+about 1 h of captures. The multi-task generator and its leave-one-task-out test are
+pre-registered after this, on the accepted set.
 
 ## What this stage hands to the next
 

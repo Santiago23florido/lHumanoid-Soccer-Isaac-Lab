@@ -217,9 +217,11 @@ body's joints, recovers the body from the latent, against a shuffled control. Th
 failure of `ζ` and F5 (`research_report.md` §1.2). With several bodies in training, the
 test can be run on every one of them.
 
-**Open.** About five base tasks need G1 experts beyond the two published
-ones (flat, rough) and the walk. `skill_space.md` §9 limits teachers to Isaac Lab's
-published G1 policies, so where the others come from is an open decision.
+**Where the extra experts come from** (decided on 2026-11-06). They are trained
+on the G1 in this repository with Isaac Lab's published recipe, only the command range
+changed, as the walk teacher already was (`skill_space.md` §9, amended). There are three:
+backward, sidestep and jog (`g1/tasks/g1_base`). W11 (`skill_space.md` §10.12) trains them
+and checks that each walks its task.
 
 ## 7. Order of work
 
@@ -229,8 +231,7 @@ published G1 policies, so where the others come from is an open decision.
 3. If 1 or 2 shows the mechanism: realisation 3, with its own budget and its own
    approval.
 4. **The multi-task generator with a learned latent** (§6), after the consistency work:
-   leave-one-task-out first. Its base tasks wait as decided on where the G1's
-   extra experts come from.
+   leave-one-task-out first, on the tasks W11 accepts.
 5. **Open, not yet proposed: a multi-source generator.** It would be trained on the task
    as several source humanoids perform it, all in `z*`, the target excluded. It stays
    zero-shot. GOTT (72.1 % on unseen variants from three training hands, against 17.2 %

@@ -216,8 +216,21 @@ generator as trained on the base tasks.
    `z*` alone does not: the held-out task's gait fidelity, and the contact consistency of
    §2.
 
-The held-out task is flat (`flat_dagger2`'s task, semi-blind, with L4 already built). The
-base tasks are the walk, rough, backward, sidestep and jog.
+**The held-out task is rough** (a design choice): Isaac Lab's published rough G1 policy on
+a plane (`G1RoughOnFlat`, `held_out_task.sh`), scored by L4 as now. The base tasks are the
+walk, flat, backward, sidestep and jog.
+- *What is excluded.* No rough data enters any gradient step: not its DART or play
+  captures (`g1/rollouts/rough_*`), not its generators (`rough_b4` and its predecessors are
+  not used), not its plans in any decoder's training, and no body executing rough before
+  the final evaluation.
+- *Checked.* The bodies' encoders are trained only on the walk and the procedural family
+  (`zero_shot_ladder.sh`, stage `encoder`), so they never saw rough.
+- *Declared.* Rough was the diagnosed task of the contact-fidelity study: its plans were
+  read while choosing W8 and W9. No rough data trains anything here, but the method's
+  design choices were informed by it.
+- *What is new about it.* Its play commands (forward 0.25, fast 0.6, turning 0.3 with
+  0.3 rad/s) lie inside flat's command range. What the held-out test measures is a gait
+  style the base tasks do not contain, at commands they do.
 
 *Correction (2026-11-06).* An earlier version of this section, and the discussion around it,
 said a decoder must never see any task and is trained only on the procedural family and the

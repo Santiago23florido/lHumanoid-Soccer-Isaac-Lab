@@ -247,6 +247,10 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
      - *Shown since, by intervention* (W7, §5.4). Four times stiffer leg drives on the same
        frozen trackers raise the lift from 0.48 to 0.68 of asked. So the drives' lag is a
        cause of the controller's part, and the tracker was not the whole of it.
+     - *Qualified by W7c* (§5.4). Trackers trained on drives twice as stiff lift 0.56 of
+       asked, against 0.62 for the frozen ones on the same drives and 0.50 at the derived
+       gains. Part of the frozen trackers' gain was their lead on lagging drives, which
+       training removes.
    - *Not a short swing* (`clearance_mechanism.json`, from `clearance_mechanism.py`). The
      NAO's feet stay in the air as long as asked (median ratio 1.00). Swings that last the
      full asked time still reach only 0.43 (corners) to 0.58 (grid) of the asked height.
@@ -324,16 +328,20 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
     resting contact, the stance error is gone, but the swing came down with the reference
     point, and above its own stance it rises as S's lowest seed does. The reward's stance
     term was not what kept the swing low.
-  - *The drives' part.* At `g` = 2 frozen trackers lift more (W7b). W7c tests whether
-    training on those drives adds to that.
+  - *The drives' part.* At `g` = 2 frozen trackers lift more (W7b). Trained on those
+    drives (W7c, §5.4), trackers lift off when the plan does and give most of that back:
+    lift 0.560 against the frozen trackers' 0.624, and the derived gains' 0.499. The
+    tracker's objective keeps a short swing on either drive; why is not explained.
 - ~~Whether the NAO's low swings cause its long stances.~~ Answered by W7 (§5.4): raising
   the lift alone, through the drives, shortened the stances.
 - Whether the NAO's real drives are as slow as the simulated ones. The simulated gains are
   derived for stance (`nao.py`), not identified on the robot, and the NAO's gait fidelity
   depends on them (W7). Nothing in this repository measures the real robot's drives.
 - Whether W7's falls at gain 4 (13, all on rough at the fast command) are the frozen
-  trackers' mismatch with a stiffer leg or a property of the stiffer body. At gain 2 none
-  fall (W7b). W7c, trackers trained on the faster drives, is the test of the mismatch.
+  trackers' mismatch with a stiffer leg or a property of the stiffer body. At gain 2 the
+  frozen trackers fall twice in 1532 episodes (W7b's 1150, none; W7c's frozen seed 31, two
+  of 382), and trackers trained
+  at gain 2 never (0 of 1152, W7c). Gain 4 was not trained, so the question stays open.
 - Whether B1-NAO's shuffle is the interpolated plans' doing. W4 was to test it under the
   generator-space interface, and its condition (W1 passing) failed. The zero-shot trackers'
   contact events do not follow the interface, which makes that cause less likely; it was
@@ -462,6 +470,18 @@ From `transfer/results/contact_fidelity_table.json` (129 L4 results; deployed pa
   - *Rejected:* a run on the NAO's rough stance level now. No NAO candidate depends on it,
     and W7c, which may produce one, does not use grounded plans.
   - *What it leaves.* The G1 candidate stands as recorded, for the G1 only.
+- **After W7c: the study closes; no further arm.**
+  - *What it gave.* The arm fails: trained at gain 2, the trackers are worse than frozen
+    ones deployed at gain 2, and better than the derived system by less than 2 SE.
+  - *Rejected:* a fourth seed or a longer training to make the gain over the derived
+    gains significant. That would extend a test after seeing its result.
+  - *Rejected:* an arm at gain 4. Gain 2's arm already gave back most of the deploy-time
+    gain, so there is no evidence that a stiffer body helps once its trackers adapt.
+  - *Why stop here.* About 21 h of simulator time of the approved 25–30 h are spent (the
+    runs' times in §4). The next NAO question,
+    why a trained tracker keeps a short swing on either drive, needs a new hypothesis on
+    its objective. That is a choice for the next study, recorded in §7, not one to start
+    on the remaining budget without the user.
 
 ## 4. Experiment log
 
@@ -557,7 +577,7 @@ of the twelve pairs.
     robustness is in neither the rule's target nor its suite. Whether it should be is put
     to the user (§7; `skill_space.md` §10.7).
 
-### 5.4 W7: faster NAO leg drives on the frozen trackers (validated; body-model candidate)
+### 5.4 W7: faster NAO leg drives on the frozen trackers (validated; not kept by training, W7c)
 
 `transfer/results/w7_drives.json` (from `w7_compare.py`; `skill_space.md` §10.9). Derived
 gains → `K × 4`, `D × 2`. Mean over two skills × three commands, deployed path; gate C on
@@ -592,6 +612,30 @@ the teacher's own grid.
 
   - No fall in 1150 episodes, and S0's walk passes. The RL arm opens at gain 2 (W7c),
     as pre-registered.
+- **W7c: trackers trained at gain 2 fail** (`w7c_trained.json`, from `w7c_compare.py`;
+  `w7c_mechanism.json`, from `w7c_mechanism.py`; `skill_space.md` §10.9). r1_3498
+  continued 1000 iterations as S's NAO seeds, at `g` = 2, seeds 31–33. Seed means; ± is the
+  standard error of the difference.
+
+  | group | largest deviation | lift | duty deviation | lift-off lag (`T`) | gate C passed | falls |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | arm, trained at `g` = 2 | 0.148 | 0.560 | 0.115 | +0.002 | 3 of 18 | 0 |
+  | S frozen at `g` = 2 (control) | 0.121 | 0.624 | 0.089 | −0.020 | 5 of 18 | 2 |
+  | S at the derived gains | 0.168 | 0.499 | 0.127 | +0.004 | 1 of 18 | 0 |
+  | arm − control | +0.027 ± 0.007 | −0.064 ± 0.031 | +0.027 ± 0.009 | | | |
+  | arm − derived | −0.020 ± 0.016 | +0.061 ± 0.033 | −0.012 ± 0.012 | | | |
+
+  - **The target fails, the other way.** The arm is worse than the frozen trackers by
+    3.7 SE, and its lift fails no regression by 0.001. Falls, speed and S0's walk pass.
+  - **What training changed** (measured). Frozen on the faster drives, S's trackers lift
+    off 0.020 `T` before the plan, on every seed, and swing the full asked time. Trained
+    on them, they lift off with the plan, and their swings shorten to the derived
+    trackers' 0.94 of asked.
+  - **Reframing** (hypothesis). Part of W7b's gain is a frozen tracker's lead, shaped for
+    lagging drives, lifting the foot sooner on faster ones. Training removes it. The
+    tracker's objective keeps a short swing on either drive.
+  - Against the derived system the arm is better on every term, by 1.0–1.9 SE. Not
+    adopted; no NAO result is replaced.
 
 ### 5.5 W8: the plans' loaded feet on the ground (validated; G1 candidate)
 
@@ -669,14 +713,18 @@ were read while choosing every intervention); flat is semi-blind; the walk is S0
 | Does the same hold on the NAO? | W8, then W8n on W6's tracker | Rough duty worse (+0.018 ± 0.001); on W6's one tracker by a third as much | validated: no; the sole offset is part of why |
 | Does the NAO's sole offset hold its swing low? | W6, one seed | The stance moved; the swing came down with it | one seed, screen not passed |
 | Does a degraded estimate break the skills? | W5 / W5b | Flat (`flat_dagger2`) falls 9 in 10 at noise ×2 on both bodies; `flat_b4` and `rough_b4`, trained across noise levels, do not fall at ×4 | validated (instrumentation) |
-| Does training on the faster drives add to deploying on them? | W7c, three seeds | *(running; its result is added here when read)* | |
+| Does training on the faster drives add to deploying on them? | W7c, three seeds | Worse than the frozen trackers at `g` = 2 (largest +0.027 ± 0.007); better than the derived system by 1.0–1.9 SE | validated: no |
 
-- **The NAO's gait gap is mostly its simulated leg drives** (validated by intervention, in
-  the simulator). Its drives respond in 0.83–0.92 `T` against a 0.50 `T` swing. Speeding
-  them up raises the lift and, through later touchdowns, shortens the stance: the duty and
-  clearance gaps are one failure, and the lift sets the stance. The gains are a modelling
-  choice (`nao.py`, derived for stance), not an identification of the real robot, so this
-  is a statement about the body model, not about the NAO.
+- **The NAO's duty and clearance gaps are one failure, and the lift sets the stance**
+  (validated by intervention, on frozen trackers). Faster drives raise the lift and,
+  through later touchdowns, shorten the stance.
+- **But the drives do not set the NAO's gait on their own** (validated: W7c; mechanism
+  measured). Retrained on the faster drives, the trackers lift off with the plan instead
+  of before it, their swings shorten back to the derived trackers' length, and most of the
+  deploy-time gain is gone. What holds the NAO's swing short is then at least partly the
+  tracker's objective, which keeps that swing on either drive. The gains are in any case a
+  modelling choice (`nao.py`, derived for stance), not an identification of the real
+  robot.
 - **About a third of the G1's rough deficit is the plans' inconsistency** (validated). The
   generator loads feet it holds above the ground; putting them on the ground at
   deployment closes 0.027 of the 0.081 between the zero-shot model and B1, and helps flat
@@ -694,24 +742,32 @@ were read while choosing every intervention); flat is semi-blind; the walk is S0
 - The G1's rough early lift-off beyond the plans' inconsistency (two thirds of the gap).
 - Why a loaded NAO foot reads higher on rough than on flat.
 - Whether the real NAO's drives are as slow as the simulated ones.
+- Why a NAO tracker trained on either drive keeps a swing shorter and lower than asked.
+  Two measured leads, neither tested: the NAO's swings that lift higher carry more
+  trunk-height error (Spearman +0.36 to +0.40, §2.2 item 4), and a tracker that lifts off
+  with the plan swings 0.94 of the asked time (`w7c_mechanism.json`).
 - Whether B1-NAO's shuffle is the interpolated plans' doing (W4 was gated on W1 and not
   run).
 - The true-state path's short strides on flat.
 
 ## 7. Recommendation
 
-*(Drafted while W7c runs; its branch is completed when W7c is read.)*
-
 1. **G1: adopt `HUMANOID_PLAN_CONTACT=ground` at deployment** — the user's decision. It
    meets `incumbents.json`'s rule (§5.5; `candidates.json`). It is a deployment switch: no
    tracker, generator or encoder changes, and the default stays `as_drawn`, so every
    earlier command reproduces. Not for the NAO.
-2. **NAO: identify the real robot's leg drives before changing the body model.** Every NAO
-   gait-fidelity gain found here comes from faster simulated drives. Whether they are
-   faithful depends on the real NAO's joint response (a step response per leg joint,
-   or the actuator's documented bandwidth), which no file in this repository holds. If the
-   identified response is at least as fast as gain 2's (`D / K` 0.59–0.65 `T`), adopt it
-   in `nao.py`; then the W7c result decides whether NAO trackers are retrained on it.
+2. **NAO: keep the body model and the incumbent; do not adopt faster drives.**
+   - The deploy-time gain (W7b) does not survive training (W7c). Against the system as it
+     stands, trackers trained on faster drives are better by less than 2 SE.
+   - Whether the simulated drives are faithful still matters for any NAO result. It depends
+     on the real robot's joint response (a step response per leg joint, or the actuator's
+     documented bandwidth), which no file in this repository holds. Identifying it is
+     worth doing before the NAO's gait is studied further, but it is not expected to close
+     the gap by itself.
+   - The next NAO study should start from the tracker's objective: why a tracker that
+     lifts off with its plan keeps a short, low swing (§6.3). Both leads there are
+     measured correlations, and the first step is a deploy-time or offline test of one of
+     them, not an RL arm.
 3. **Put a degraded estimate in S0** — a question for the user. Robustness is in neither
    the adoption rule's target nor its suite, so the rule keeps `flat_dagger2`, which falls
    nine times in ten at twice the estimator's noise where `flat_b4` does not fall. If the
@@ -722,7 +778,9 @@ were read while choosing every intervention); flat is semi-blind; the walk is S0
    - the generator-space interface (W1): the body does not follow the asked duty;
    - more integrator steps (W2): the blur is learned;
    - the family's load-transfer shape (W3): the trackers' failure is not reproduced;
-   - the NAO's sole point at contact (W6): on one seed the swing moved with the reference.
+   - the NAO's sole point at contact (W6): on one seed the swing moved with the reference;
+   - NAO trackers trained on faster drives (W7c): worse than deploying the frozen ones on
+     them, and not significantly better than the system as it stands.
 5. **Next, if budget is spent on the G1's rough deficit.** The remaining two thirds have
    two measured candidates: the generator's extra contact changes per plan (3.21–3.73
    against the teacher's 2.92) and the reward's resolution of light loads. Both are

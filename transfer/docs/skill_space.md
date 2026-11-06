@@ -2678,6 +2678,54 @@ seeds).**
 - **Budget and order.** About 9 h (three trainings of about 2.5 h, plus ladders), after W8n.
   It uses part of the 13 h the closed W3 arms left in the approved program.
 
+**W7c result (2026-11-05 22:03 – 2026-11-06 07:13: fails; the target is missed the other
+way).** `python transfer/scripts/w7c_compare.py --output transfer/results/w7c_trained.json`.
+Seed means, mean over both skills × three commands, deployed path; ± is the standard
+error of the difference of seed means:
+
+| Group (seeds 31 / 32 / 33) | Largest deviation | Lift (reached / asked) | Duty deviation | Gate C passes | Falls |
+| --- | --- | --- | --- | --- | --- |
+| Arm, trained at `g` = 2 | 0.160 / 0.145 / 0.139 | 0.533 / 0.555 / 0.591 | 0.129 / 0.118 / 0.100 | 3 of 18 | 0 |
+| Control, S frozen at `g` = 2 | 0.113 / 0.125 / 0.124 | 0.673 / 0.616 / 0.582 | 0.084 / 0.094 / 0.088 | 5 of 18 | 2 |
+| Arm − control | +0.027 ± 0.007 | −0.064 ± 0.031 | +0.027 ± 0.009 | | |
+| S at the derived gains (beside it) | 0.139 / 0.175 / 0.189 | 0.551 / 0.491 / 0.455 | 0.110 / 0.134 / 0.138 | 1 of 18 | 0 |
+| Arm − derived | −0.020 ± 0.016 | +0.061 ± 0.033 | −0.012 ± 0.012 | | |
+
+- **The target fails.** The arm's largest deviation is *above* the frozen control's, by
+  3.7 SE. The lift fails no regression (−0.064 against a bound of −0.063). Falls, speed
+  (at least 1.00) and S0's walk pass.
+- **Reading, as pre-registered.** *Fails*: training on the faster body does not add to
+  deploying on it. W7b's deploy-time result stands alone.
+- *Beside it.* Against S at the derived gains, the system as it stands, the arm is better
+  on every term (largest −0.020, lift +0.061, duty −0.012), and by less than 2 SE on each
+  (1.2, 1.9 and 1.0).
+- **Where the gait went** (`python transfer/scripts/w7c_mechanism.py --output
+  transfer/results/w7c_mechanism.json`; the same captures; seed mean ± SE).
+
+  | Group | Lift-off lag (`T`) | Air time, body / plan | Swing peak (`L`) | Clearance above stance | Body duty (plan 0.560) |
+  | --- | --- | --- | --- | --- | --- |
+  | S, derived gains | +0.004 ± 0.006 | 0.94 | 0.055 | 0.041 | 0.583 |
+  | S frozen at `g` = 2 | −0.020 ± 0.006 | 0.99 | 0.067 | 0.052 | 0.555 |
+  | Arm, trained at `g` = 2 | +0.002 ± 0.004 | 0.94 | 0.060 | 0.047 | 0.576 |
+
+  - The frozen trackers on the faster drives lift off before the plan does, on every
+    seed (−0.009, −0.022, −0.027 `T`), and swing the full asked time.
+  - Trained on the same drives, the trackers lift off when the plan does, as the derived
+    ones do. Their swings shorten back to the derived trackers' 0.94 of asked, and the
+    peak and duty return most of the way.
+- **Reframing** (hypothesis). Part of W7b's gain is a frozen tracker's mismatch with a
+  body it did not learn. Its targets lead drives that lag; on faster drives the same lead
+  lifts the foot sooner, which buys a full swing, a higher peak and a shorter stance.
+  Training removes the lead: the reward scores contact against the plan, and the trained
+  tracker lifts when told. So the NAO's gait is not set by the drives alone. The tracker's
+  objective keeps the swing it has on either drive, and what it does not reach once it
+  lifts on time is the asked swing's length and height. Faster drives keep part of the lift
+  through training (+0.061 ± 0.033 over the derived gains), not enough to show at 2 SE.
+- *What this does to the body-model candidate.* W7 and W7b remain deploy-time results on
+  frozen trackers. A body model with faster drives would not by itself be expected to
+  close the NAO's gap once its trackers are retrained, so adopting it rests on the real
+  drives and on that smaller, unconfirmed gain.
+
 ### 10.10 The plans load feet they hold above the ground; pre-registered (W8)
 
 **Measured** (`transfer/scripts/plan_contact.py`, `transfer/results/plan_contact.json`;

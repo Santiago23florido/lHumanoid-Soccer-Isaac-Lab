@@ -913,6 +913,10 @@ class ReferenceCommand(UniformVelocityCommand):
         smoothed = self.metrics["contract_error"]
         self.metrics["error_procedural"] = smoothed * procedural
         self.metrics["error_task"] = smoothed * (1.0 - procedural)
+        if self.tasks is not None:
+            # Each task's share of the episodes that follow a task, logged per task.
+            for t, task in enumerate(self.tasks):
+                self.metrics[f"task_{task['name']}"] = ((self.task == t) & ~self.procedural).float()
 
     def _update_command(self) -> None:
         super()._update_command()

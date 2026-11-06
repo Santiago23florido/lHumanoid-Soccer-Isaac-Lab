@@ -3106,6 +3106,62 @@ anywhere in the stage.
   12 min per generator (`flat_b4`'s generator took 704 s), so under 1 h. Nothing of either
   body is trained.
 
+### 10.14 Each body's decoder trained once on the base tasks; pre-registered (W13)
+
+**Context.** Step 3 of `method_revision.md` §6. Each body's decoder trains once on the base
+tasks' plans with the procedural family, and is then frozen for every task, including the
+held-out one. S's trackers saw the walk and the family only. 5 of W11's 9 play commands lie
+outside the family's ranges, so S cannot be expected to execute the new tasks.
+
+**The change** (`a8a029b`, `ReferenceCommandCfg.tasks`; the task set from
+`transfer/scripts/base_task_set.py` → `transfer/results/base_tasks.json`).
+- Every episode that is not procedural follows one task, drawn uniformly. The tracker is
+  not told which.
+- *The tasks:* the walk (the contract's, task 0), flat (`flat_dagger2`, L4's generator) and
+  each new task that W11 accepts and W12 gates.
+- *Commands:* each task's ranges, dimensionless, so each body receives the task in its own
+  units.
+- *Starts:* the G1 starts inside each expert's states; the NAO seeds its history from the
+  same captures' windows, as it does for the walk.
+- **Rough is in none of it.** The builder and `latent/task_set.py` refuse it, and
+  `tests/test_task_set.py` checks the recorded set.
+
+**Pre-registered (2026-11-06, before any run).**
+- **Recipe:** S's exactly (`paper_queue.sh`): each body's incumbent continued for 1000
+  iterations in its own conditions at its checkpoint's learning rate.
+  - The G1 from `zs_g1_r3_loss` `model_6194`, seeds 41, 42 and 43.
+  - The NAO from `zs_nao_r1` `model_3498`, seeds 31, 32 and 33.
+  - Two changes from S: the task set is added, and the family's share is 0.5 instead of
+    0.7. The share is a free parameter, declared; it gives each task about a tenth of the
+    episodes.
+- **Control:** S's trackers, paired by seed: on the G1 `warm_r3_logload_sym`,
+  `warm_r3_s42_log_sym` and `warm_r3_s43_log_sym`; on the NAO `r1_3498_sym_v3`,
+  `warm_nao_r1_s32_sym` and `warm_nao_r1_s33_sym`.
+  - *Declared:* the NAO's first control is its incumbent itself, as in W8, W9 and the
+    paper. That pair also differs by the 1000 iterations.
+- **Smoke first:** 3 iterations on each body. The log must carry a `task_<name>` metric for
+  every task, and no error. Otherwise W13 stops.
+- **Evaluation**, on the deployed path and symmetrized, as S was:
+  - each W13 tracker: encoder refit, S0's walk, and flat's L4;
+  - every tracker of both arms: each new task's L4 at its middle command (backward −0.35,
+    sidestep 0.25 lateral, jog 1.25 m/s), against its expert's play rollout.
+- **Criterion** (`transfer/scripts/w13_compare.py` → `transfer/results/w13_decoders.json`).
+  - *Target, per body:* over the new tasks, the largest gate C deviation falls by more than
+    2 SE of the three paired differences.
+  - *Executes, per body and task:* every W13 tracker has at most one fall and a speed ratio
+    of 0.8–1.2. This is W11's expert criterion without the duty term.
+  - *No regression:* flat's largest deviation rises by no more than 2 SE; falls rise by at
+    most two in total; S0's walk passes on every W13 tracker.
+- **Reading.**
+  - A body whose decoders execute a task can produce that task's data for step 4.
+  - A task no body executes leaves the generator's multi-body set but stays in its G1 set.
+  - A failure is reported with its figures and a reframing. It is not tuned afterwards.
+- **Not read here:** rough. It waits for the multi-task generator (step 6).
+- **Run:** `transfer/scripts/w13_decoders.sh`, after W12.
+- **Budget**, from S's logs: 1000 iterations took 1.45 h on the G1 and 2.33 h on the NAO,
+  so about 11.5 h of training before any slowdown from drawing several tasks' plans. The
+  evaluation adds about 6–8 h.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

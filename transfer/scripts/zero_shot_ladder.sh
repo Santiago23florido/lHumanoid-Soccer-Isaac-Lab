@@ -54,6 +54,9 @@ else
 fast 0.6 0 0
 turning 0.3 0.2 0.3"
 fi
+# ZS_COMMANDS: another task's L4 commands, one "name vx vy wz" per line (G1 units), read
+# against g1/rollouts/${task}_play_<name>.npz -- a base task's (method_revision.md §6).
+commands="${ZS_COMMANDS:-$commands}"
 if [ "$body" = g1 ]; then
   # ZS_TASK_ID: another tracking task of the same body (the physics tracker's, say).
   task_id="${ZS_TASK_ID:-G1Track-Play-v0}"

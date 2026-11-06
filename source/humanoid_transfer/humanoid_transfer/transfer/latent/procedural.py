@@ -193,6 +193,7 @@ _STATE = (
     "fallen", "frozen", "blend_time", "blend_from", "first", "xi_start", "xi_end", "xi_ref",
     "landing_xi", "period", "duty", "width", "clearance", "height", "z_avg", "zd_avg", "z_int",
     "v_cmd", "w_cmd", "v_noise", "w_noise", "v_int", "v_avg", "segment_left", "record",
+    "exponent",
 )  # fmt: skip
 """Everything a step changes: written back in place, so a captured graph sees it next time."""
 
@@ -255,6 +256,46 @@ class GaitRanges:
     intent_noise: tuple[float, float] = (0.02, 0.03)
     """Stationary spread of the intent's wander, on velocity (``V``) and turn (``1/T``)."""
 
+    load_shape: tuple[float, float] = (1.0, 1.0)
+    """Time-warp exponent ``κ`` of a walking stance's half-sine of load (:func:`load_profile`),
+    drawn log-uniform per segment (a scale, as the period is). ``(1, 1)``, the default, is the
+    half-sine every tracker so far practised. Below one the load comes on at touchdown and
+    drains away slowly before lift-off -- the light contact of a load transfer, which the
+    teachers' stances show and the half-sine barely has; above one, its mirror. The bounds
+    are physical: below 0.5 the load at touchdown is infinite; 2 is 0.5's mirror in log. A
+    stance landed from the air (a run) keeps the half-sine, whose partial impulse sets its
+    amplitude (:meth:`PointMassBiped._landing_amplitude`)."""
+
+    @property
+    def shaped(self) -> bool:
+        """Whether a stance's load can be anything but the half-sine."""
+        return tuple(self.load_shape) != (1.0, 1.0)
+
+
+_PROFILE_FLOOR = 1e-4
+"""Stance progress below which :func:`load_profile` reads its limit (``0 * inf`` otherwise)."""
+
+
+def load_profile(progress: torch.Tensor, warp: torch.Tensor) -> torch.Tensor:
+    """A stance's load shape at ``progress`` ``s ∈ [0, 1]``: ``κ s^(κ−1) sin(π s^κ)``.
+
+    The half-sine ``sin(π u)`` read on the warped clock ``u = s^κ``, times ``du/ds``: by the
+    change of variables its integral is the half-sine's, ``2/π``, for every ``κ``, so the
+    stance's impulse -- and with it the biped's vertical balance -- does not depend on the
+    shape. ``κ = 1`` is the half-sine. Near lift-off it falls as ``π κ² (1 − s)``, a third
+    as steeply at ``κ = 0.6``; at touchdown it starts at ``π κ s^(2κ−1)``, finite for
+    ``κ ≥ 0.5`` (``π/2`` at ``κ = 0.5``).
+    """
+    s = progress.clamp(min=_PROFILE_FLOOR, max=1.0)
+    warped = s**warp
+    return (warp * warped / s * torch.sin(math.pi * warped)).clamp(min=0.0)
+
+
+def load_profile_peak(warp: torch.Tensor, samples: int = 257) -> torch.Tensor:
+    """The largest value of :func:`load_profile` over a stance, per ``κ`` (1 for the half-sine)."""
+    s = torch.linspace(0.0, 1.0, samples, device=warp.device, dtype=warp.dtype)
+    return load_profile(s[None, :], warp.reshape(-1, 1)).amax(dim=-1).reshape(warp.shape)
+
 
 _GAIT_SHAPE = (
     "forward",
@@ -266,6 +307,7 @@ _GAIT_SHAPE = (
     "height",
     "clearance",
     "lean",
+    "load_shape",
 )
 """The keys of a segment that the bank holds: the gait itself."""
 
@@ -279,6 +321,7 @@ GAIT_KEYS = (
     "height",
     "clearance",
     "lean",
+    "load_shape",
     "standing",
     "first",
     "duration",
@@ -298,8 +341,13 @@ def feasible(
     width: torch.Tensor,
     ranges: GaitRanges,
     min_swing: float,
+    load_shape: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Which gaits a leg can carry out: long enough swings, strides within reach, bounded bounce."""
+    """Which gaits a leg can carry out: long enough swings, strides within reach, bounded bounce.
+
+    ``load_shape``: each gait's stance-load warp (:func:`load_profile`); its peak sets the
+    bounce (half-sines without it).
+    """
     speed = torch.hypot(forward, lateral)
     ok = ((1.0 - duty) * period[:, None] >= min_swing).all(dim=-1)
     ok &= speed * period <= ranges.max_stride
@@ -311,6 +359,10 @@ def feasible(
     ok &= step <= ranges.max_step
     ok &= (speed[:, None] / (1.0 - duty)).amax(dim=-1) <= ranges.max_swing_speed
     peak = torch.pi / (4.0 * duty)
+    if load_shape is not None:
+        # Shaped stances are the walking ones; a run's lands from the air, as a half-sine.
+        shaped = peak * load_profile_peak(load_shape)[:, None]
+        peak = torch.where(duty >= 0.5, shaped, peak)
     bounce = (peak - 1.0).clamp(min=0.0) * (duty * period[:, None] / torch.pi) ** 2
     ok &= bounce.amax(dim=-1) <= ranges.max_bounce
     return ok
@@ -344,9 +396,17 @@ def sample_parameters(
             "clearance": _uniform(ranges.clearance, m, generator, device),
             "lean": _uniform(ranges.lean, m, generator, device),
         }
+        low, high = ranges.load_shape
+        if low != high:
+            # Drawn last, and only when it varies: an unshaped family keeps its random stream.
+            bounds = (math.log(low), math.log(high))
+            draw["load_shape"] = torch.exp(_uniform(bounds, m, generator, device))
+        else:
+            draw["load_shape"] = torch.full((m,), float(low), device=device)
         ok = feasible(
-            period, duty, draw["forward"], draw["lateral"], draw["width"], ranges, min_swing
-        )
+            period, duty, draw["forward"], draw["lateral"], draw["width"], ranges, min_swing,
+            draw["load_shape"] if ranges.shaped else None,
+        )  # fmt: skip
         for key, value in draw.items():
             pieces.setdefault(key, []).append(value[ok])
         have += int(ok.sum())
@@ -402,6 +462,9 @@ class PointMassBiped:
         horizon: How far past now a plan reaches, in ``T``.
         seed: Seeds the biped's own generator; nothing else is random.
         graph: Capture the step as a CUDA graph on a GPU (off: step eagerly, for checks).
+        shaped: Whether stances may carry other load profiles than the half-sine
+            (``GaitRanges.load_shape``); None: whenever the ranges let the exponent vary. Probes
+            that fix an exponent need it on. Off, the biped is the half-sine one, bit for bit.
     """
 
     def __init__(
@@ -415,10 +478,12 @@ class PointMassBiped:
         device: torch.device | str = "cpu",
         seed: int = 0,
         graph: bool = True,
+        shaped: bool | None = None,
     ) -> None:
         self.num_envs = n = num_envs
         self.use_graph = graph
         self.ranges = ranges = ranges or GaitRanges()
+        self.shaped = ranges.shaped if shaped is None else bool(shaped)
         self.device = torch.device(device)
         self.body_step = float(body_step)
         self.substep = float(substep)
@@ -456,6 +521,8 @@ class PointMassBiped:
         self.load, self.cop = zeros(2), zeros(2)
         self.amplitude = full(math.pi / (4.0 * START_DUTY), 2)
         """Peak of each foot's half-sine of load for its current stance, in ``m g``."""
+        self.exponent = full(1.0, 2)
+        """Each foot's load-profile exponent for its current stance (1: the half-sine)."""
         self.phase = zeros()
         self.offset = full(0.5)
         self.mode = zeros(dtype=torch.long)
@@ -509,6 +576,9 @@ class PointMassBiped:
         if not self.probe:
             self.probe = {key: self.next[key].clone() for key in GAIT_KEYS}
             self.probe["offset"] = self.offset.clone()
+        # A probe that names no load profile is the half-sine: the pre-registered maps stay
+        # the same gaits whatever the family's ranges.
+        self.probe["load_shape"][ids] = 1.0
         for key, value in params.items():
             self.probe[key][ids] = value.to(self.device, self.probe[key].dtype)
         self.probe["standing"][ids] = False
@@ -555,6 +625,7 @@ class PointMassBiped:
         self.blend_time[ids] = BLEND_TIME
         self.duty[ids] = START_DUTY
         self.amplitude[ids] = math.pi / (4.0 * START_DUTY)
+        self.exponent[ids] = 1.0
         self.height[ids], self.z_avg[ids], self.zd_avg[ids] = height, height, 0.0
         self.z_int[ids] = 0.0
         for name in ("v_cmd", "w_cmd", "v_noise", "w_noise", "v_int", "v_avg"):
@@ -1035,6 +1106,10 @@ class PointMassBiped:
         frac = self._frac()
         self.stance_time = torch.where(column, frac * self.period[:, None], self.stance_time)
         self.amplitude = torch.where(column, math.pi / (4.0 * duty), self.amplitude)
+        if self.shaped:
+            # Both feet are down when a gait begins: both take the segment's profile.
+            shape = self.goal["load_shape"][:, None].expand(-1, 2)
+            self.exponent = torch.where(column, shape, self.exponent)
         self.mode = torch.where(mask, GAIT, self.mode)
         self.mode_time = torch.where(mask, 0.0, self.mode_time)
         self.blend_time = torch.where(mask, 0.0, self.blend_time)
@@ -1185,6 +1260,12 @@ class PointMassBiped:
         duty = torch.minimum(duty, (1.0 - self.min_swing / self.period)[:, None])
         self.duty = torch.where(landing, duty, self.duty)
         self.amplitude = torch.where(landing, self._landing_amplitude(frac), self.amplitude)
+        if self.shaped:
+            # A foot takes the segment's load profile when it lands beside the other (a walk's
+            # load transfer); landing from the air it carries the half-sine its amplitude assumes.
+            beside = self.contact.flip(1)
+            shape = torch.where(beside, self.goal["load_shape"][:, None], 1.0)
+            self.exponent = torch.where(landing, shape, self.exponent)
         self.liftoff = torch.where(lifting[..., None], self.foot, self.liftoff)
         self.swing_time = torch.where(lifting, 0.0, self.swing_time)
         self.clearance = torch.where(lifting, self.goal["clearance"][:, None], self.clearance)
@@ -1230,7 +1311,12 @@ class PointMassBiped:
         balance_load, balance_cop, kappa = self._balance()
         until_lift = torch.remainder(self.duty - frac, 1.0) * self.period[:, None]
         progress = (self.stance_time / (self.stance_time + until_lift).clamp(min=1e-6)).clamp(0, 1)
-        gait_load = self.contact * self.amplitude * torch.sin(math.pi * progress)
+        if self.shaped:
+            # The half-sine on a warped clock: the same impulse for every warp.
+            profile = load_profile(progress, self.exponent)
+        else:
+            profile = torch.sin(math.pi * progress)
+        gait_load = self.contact * self.amplitude * profile
         gait_load = gait_load * (1.0 + kappa)[:, None]
         gait_load, ankle = self._track(gait_load, gait, dt)
         load = torch.where(stepping, gait_load, balance_load)

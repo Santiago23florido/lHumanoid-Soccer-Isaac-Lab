@@ -100,6 +100,23 @@ parser.add_argument(
     help="JSON list of fixed gaits of the family; env i follows probe i modulo their number.",
 )
 parser.add_argument("--procedural-seed", type=int, default=0)
+parser.add_argument(
+    "--push",
+    type=float,
+    nargs=2,
+    default=None,
+    metavar=("SPEED", "INTERVAL"),
+    help="Robustness probe: push the base by up to SPEED (V = sqrt(g L)) in each horizontal "
+    "direction every INTERVAL pendulum times (T = sqrt(L / g)) on average -- the same "
+    "disturbance, dynamically, on every body.",
+)
+parser.add_argument(
+    "--estimate-noise",
+    type=float,
+    default=None,
+    help="Robustness probe on the deployed path: noise on the estimate, in multiples of the "
+    "estimator's precision.",
+)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--output", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
@@ -145,6 +162,22 @@ def main() -> int:
         probes = json.loads(args_cli.gait_probes.read_text(encoding="utf-8"))
         command_cfg.procedural_probes = probes
     command_cfg.procedural_seed = args_cli.procedural_seed
+    if args_cli.estimate_noise is not None:
+        command_cfg.estimate_noise = args_cli.estimate_noise
+    if args_cli.push is not None:
+        from isaaclab.envs import mdp
+        from isaaclab.managers import EventTermCfg
+
+        speed, interval = args_cli.push
+        length = float(command_cfg.leg_length)
+        velocity = speed * (9.81 * length) ** 0.5
+        seconds = interval * (length / 9.81) ** 0.5
+        cfg.events.push_robot = EventTermCfg(
+            func=mdp.push_by_setting_velocity,
+            mode="interval",
+            interval_range_s=(0.5 * seconds, 1.5 * seconds),
+            params={"velocity_range": {"x": (-velocity, velocity), "y": (-velocity, velocity)}},
+        )
     if args_cli.command is not None:
         vx, vy, wz = args_cli.command
         command_cfg.ranges.lin_vel_x = (vx, vx)
@@ -246,6 +279,10 @@ def main() -> int:
             args_cli.reference or ("autonomous" if term.cfg.autonomous else "physical")
         ),
         encoder=np.bool_(term.encoder is not None),
+        resample_space=np.array(getattr(term, "resample_space", "linear")),
+        push=np.array(args_cli.push if args_cli.push is not None else [0.0, 0.0]),
+        estimate_noise=np.float64(args_cli.estimate_noise or 0.0),
+        sole_points=np.array(term.cfg.sole_points, dtype=np.float64),
         seed=np.int64(args_cli.seed),
         settle_steps=np.int64(args_cli.settle_steps),
         **arrays,

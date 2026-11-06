@@ -186,18 +186,25 @@ The target design: a generator, with a learned latent beside `z*`, trained on
 about five base tasks, whose training may see more than one body. What must hold is
 zero-shot at inference.
 
-**Training may use:**
-- the base tasks as the G1's experts perform them (experts exist only on the G1);
-- the base tasks as other bodies execute them, each through its own decoder, which is
-  trained once and is the same for every task. The NAO may be one of these bodies;
-- the procedural family and the walk, as the decoders already do.
+**Training sees the base tasks; one task is held out of everything** (the design,
+restated 2026-11-06).
+- *The generator* trains on the base tasks as the G1's experts perform them (experts exist
+  only on the G1). It may also train on the base tasks as the bodies execute them.
+- *Each body's decoder* trains once on the base tasks' plans, with the procedural family,
+  so it generalises across tasks. It is then frozen and is the same for every task,
+  including the held-out one.
+- *The held-out task* appears in no gradient step of anything: generator, latent,
+  decoders or estimators, on any body. It is the zero-shot test.
 
-**Inference on a new task `T` must have:**
-- no gradient step anywhere (generator, latent, decoder, estimator) on data of `T` executed
-  by the target body;
-- the target's decoder as trained once, unchanged;
-- the generator learning `T` only from the G1's expert, or not at all if `T` is held out
-  (below).
+**At inference on the held-out task:** the decoders as trained once, unchanged, and the
+generator as trained on the base tasks.
+
+*Correction (2026-11-06).* An earlier version of this section, and the discussion around it,
+said a decoder must never see any task and is trained only on the procedural family and the
+walk. That was the old rule (`skill_space.md` §9), not the agreed design. Under that
+version the base tasks would have been seen by the generator only, and the decoders could
+not have executed most of the new tasks: 5 of W11's 9 play commands lie outside the family's
+ranges (forward −0.10 to 0.45 `V`, lateral ±0.15 `V`). No run had used it.
 
 **The two claims, and their tests.**
 - *Task zero-shot on a seen body.* Leave one base task out: train on four, evaluate on the

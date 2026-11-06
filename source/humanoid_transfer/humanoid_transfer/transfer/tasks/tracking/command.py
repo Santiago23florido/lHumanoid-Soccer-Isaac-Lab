@@ -143,6 +143,14 @@ class ReferenceCommand(UniformVelocityCommand):
         self.view = math.floor(generator.view * grid_step / self.dt_star + _TOLERANCE)
         if self.commit - 1 + self.view > length:
             raise ValueError("the plan does not cover the commitment and the view on this body")
+        self.tasks = None
+        """With ``cfg.tasks``: per task, its generator, plan matrix, length, commitment,
+        ranges in this body's units, and starts. Task 0 is the contract's."""
+        if cfg.tasks:
+            if cfg.tolerance == "spread" or cfg.plan_trust or cfg.procedural_plan_noise:
+                raise ValueError("several tasks need tolerance 'precision' and no plan trust")
+            self.tasks = self._load_tasks(cfg, grid_step, length)
+            length = max(task["length"] for task in self.tasks)
         nearest = [
             min(max(round((j + 1) * self.dt_star / grid_step) - 1, 0), generator.horizon - 1)
             for j in range(length)
@@ -207,6 +215,10 @@ class ReferenceCommand(UniformVelocityCommand):
         self.metrics["lag"] = torch.zeros(n, device=self.device)
         self._rows = torch.arange(n, device=self.device)
         self.has_plan = torch.zeros(n, dtype=torch.bool, device=self.device)
+        self.task = torch.zeros(n, dtype=torch.long, device=self.device)
+        """The task each env's episode follows (0 without ``cfg.tasks``)."""
+        self.commit_env = torch.full((n,), self.commit, dtype=torch.long, device=self.device)
+        """Each env's commitment in body steps: its task's (the contract's for the biped)."""
         self.starts = self._load_starts(cfg.start_states) if cfg.start_states else None
         self.windows = self._load_windows(cfg.start_windows) if cfg.start_windows else None
         self.procedural = torch.zeros(n, dtype=torch.bool, device=self.device)
@@ -252,6 +264,138 @@ class ReferenceCommand(UniformVelocityCommand):
             f"resample {self.resample_space}, plan contact {self.cfg.plan_contact}\n"
             + super().__str__()
         )
+
+    def _load_tasks(self, cfg: ReferenceCommandCfg, grid_step: float, length: int) -> list[dict]:
+        """Task 0 is the contract's; each further one brings its own generator and ranges."""
+        primary = self.generator
+        tasks = [
+            {
+                "name": "contract",
+                "generator": primary,
+                "plan_matrix": self.plan_matrix,
+                "length": length,
+                "commit": self.commit,
+                "ranges": None,
+                "starts": None,
+                "windows": None,
+            }
+        ]
+        for spec in cfg.tasks:
+            generator = load_contract(spec["contract"], self.device).generator
+            if cfg.flow_solver is not None:
+                generator.flow_solver = cfg.flow_solver
+            if cfg.flow_steps is not None:
+                generator.flow_steps = cfg.flow_steps
+            same = (
+                abs(float(generator.grid_step) - grid_step) < _TOLERANCE
+                and generator.history == primary.history
+                and generator.view == primary.view
+                and generator.skill == primary.skill
+                and generator.warp_loads == primary.warp_loads
+                and torch.allclose(generator.skill_norm.mean, primary.skill_norm.mean)
+                and torch.allclose(generator.skill_norm.std, primary.skill_norm.std)
+            )
+            if not same:
+                raise ValueError(f"{spec['contract']}: not on the contract's grid and units")
+            matrix = plan_interpolation(grid_step, generator.horizon, self.dt_star).to(self.device)
+            commit = max(1, round(generator.commit * grid_step / self.dt_star))
+            if commit - 1 + self.view > matrix.shape[0]:
+                raise ValueError(f"{spec['contract']}: the plan does not cover commit and view")
+            ranges = spec["ranges"]
+            scale = self.command_scale
+            low = torch.tensor(
+                [ranges["lin_vel_x"][0], ranges["lin_vel_y"][0], ranges["ang_vel_z"][0]],
+                device=self.device,
+            )
+            high = torch.tensor(
+                [ranges["lin_vel_x"][1], ranges["lin_vel_y"][1], ranges["ang_vel_z"][1]],
+                device=self.device,
+            )
+            tasks.append(
+                {
+                    "name": spec["name"],
+                    "generator": generator,
+                    "plan_matrix": matrix,
+                    "length": matrix.shape[0],
+                    "commit": commit,
+                    # Dimensionless to this body's units: the inverse of what the
+                    # generator reads (command_scale).
+                    "ranges": (low / scale, high / scale),
+                    "heading": tuple(float(v) for v in ranges["heading"]),
+                    "starts": self._load_starts(spec["starts"]) if spec.get("starts") else None,
+                    "windows": (
+                        self._load_windows(spec["windows"]) if spec.get("windows") else None
+                    ),
+                }
+            )
+        weights = cfg.task_weights or [1.0] * len(tasks)
+        if len(weights) != len(tasks) or min(weights) < 0.0 or sum(weights) <= 0.0:
+            raise ValueError(f"task_weights {weights} do not fit {len(tasks)} tasks")
+        self.task_probability = torch.tensor(weights, device=self.device) / sum(weights)
+        return tasks
+
+    def _task_commands(self, ids: torch.Tensor) -> None:
+        """Commands of the envs in ``ids`` whose task is not the contract's, from its ranges."""
+        for t, task in enumerate(self.tasks[1:], start=1):
+            chosen = ids[self.task[ids] == t]
+            if len(chosen) == 0:
+                continue
+            low, high = task["ranges"]
+            draw = torch.rand(len(chosen), 3, device=self.device)
+            self.vel_command_b[chosen] = low + (high - low) * draw
+            if self.cfg.heading_command:
+                lo, hi = task["heading"]
+                self.heading_target[chosen] = lo + (hi - lo) * torch.rand(
+                    len(chosen), device=self.device
+                )
+
+    def _task_headings(self) -> None:
+        """Heading control clipped to each task's own yaw-rate range, as its teacher's was."""
+        heading = self.is_heading_env & (self.task > 0)
+        for t, task in enumerate(self.tasks[1:], start=1):
+            ids = (heading & (self.task == t)).nonzero().squeeze(-1)
+            if len(ids) == 0:
+                continue
+            low, high = task["ranges"]
+            error = torch.atan2(
+                torch.sin(self.heading_target[ids] - self.robot.data.heading_w[ids]),
+                torch.cos(self.heading_target[ids] - self.robot.data.heading_w[ids]),
+            )
+            self.vel_command_b[ids, 2] = torch.clip(
+                self.cfg.heading_control_stiffness * error, min=low[2], max=high[2]
+            )
+        self.vel_command_b[self.is_standing_env] = 0.0
+
+    def _draw_tasks(
+        self, ids: torch.Tensor, window: torch.Tensor, command: torch.Tensor, space: str
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Each env's plan from its own task's generator, padded to the longest plan.
+
+        Rows past a task's own plan repeat its last row. They are never read: an env's
+        commitment and view lie inside its own plan (checked at load).
+        """
+        length = self.plan.shape[1]
+        rows = torch.zeros(len(ids), length, self.plan.shape[2], device=self.device)
+        integrals = torch.zeros(len(ids), length, 3, device=self.device)
+        for t, task in enumerate(self.tasks):
+            chosen = (self.task[ids] == t).nonzero().squeeze(-1)
+            if len(chosen) == 0:
+                continue
+            generator, matrix = task["generator"], task["plan_matrix"]
+            noise = torch.randn(len(chosen), generator.noise_size, device=self.device)
+            with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
+                plan = generator.sample(window[chosen], command[chosen], noise).float()
+            plan = torch.nan_to_num(plan, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
+            full = torch.cat([window[chosen, -1:], plan], dim=1)
+            own = resample_rows(generator, matrix, full, space)
+            own = apply_plan_contact(own, generator.skill_norm, self.cfg.plan_contact)
+            moved = plan_integrals(generator.skill_norm.inverse(plan), float(generator.grid_step))
+            moved = torch.cat([torch.zeros_like(moved[:, :1]), moved], dim=1)
+            moved = torch.einsum("lk,nkd->nld", matrix, moved)
+            pad = length - own.shape[1]
+            rows[chosen] = torch.cat([own, own[:, -1:].expand(-1, pad, -1)], dim=1)
+            integrals[chosen] = torch.cat([moved, moved[:, -1:].expand(-1, pad, -1)], dim=1)
+        return rows, integrals
 
     def _procedural_tolerance(self, sigma: torch.Tensor, length: int) -> torch.Tensor:
         """``(length, 27)``: the precision tolerance, widened to the biped's model error where
@@ -345,7 +489,7 @@ class ReferenceCommand(UniformVelocityCommand):
             "index": torch.as_tensor(np.stack([t + steps, n], -1), device=self.device),
         }
 
-    def _start_from_contract(self, ids: torch.Tensor) -> None:
+    def _start_from_contract(self, ids: torch.Tensor, windows: dict | None = None) -> None:
         """Start a body with no demonstrations of its own inside the task's motion.
 
         Reference state initialisation needs states of this body, which a second
@@ -356,7 +500,7 @@ class ReferenceCommand(UniformVelocityCommand):
         the default pose, so a body that does not step falls -- the plan asks for
         exactly the steps that catch it.
         """
-        windows = self.windows
+        windows = self.windows if windows is None else windows
         pick = windows["index"][
             torch.randint(len(windows["index"]), (len(ids),), device=self.device)
         ]
@@ -381,7 +525,7 @@ class ReferenceCommand(UniformVelocityCommand):
         self.needs_refill[ids] = False
         self.replan[ids] = True
 
-    def _start_from_demonstrations(self, ids: torch.Tensor) -> None:
+    def _start_from_demonstrations(self, ids: torch.Tensor, starts: dict | None = None) -> None:
         """Reference state initialisation (Peng et al., 2018) on the contract.
 
         The body is put in a state the task's demonstrations visited, the command is
@@ -389,7 +533,7 @@ class ReferenceCommand(UniformVelocityCommand):
         led there -- so the first plan is a plan the generator knows, and the body
         practises following the task's motion, not only starting it.
         """
-        starts = self.starts
+        starts = self.starts if starts is None else starts
         pick = starts["index"][torch.randint(len(starts["index"]), (len(ids),), device=self.device)]
         t, n = pick[:, 0], pick[:, 1]
         quat = starts["base_quat"][t, n]
@@ -613,19 +757,22 @@ class ReferenceCommand(UniformVelocityCommand):
         space = self.resample_space
         window = resample_rows(self.generator, self.interpolation, self.history[ids], space)
         command = self.vel_command_b[ids] * self.command_scale
-        noise = torch.randn(len(ids), self.generator.noise_size, device=self.device)
-        with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
-            plan = self.generator.sample(window, command, noise).float()
-        # A body still learning to stand writes histories no teacher ever did; the
-        # generator's answer to them is meaningless but must stay finite.
-        plan = torch.nan_to_num(plan, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
-        full = torch.cat([window[:, -1:], plan], dim=1)
-        rows = resample_rows(self.generator, self.plan_matrix, full, space)
-        rows = apply_plan_contact(rows, self.generator.skill_norm, self.cfg.plan_contact)
-        step = float(self.generator.grid_step)
-        integrals = plan_integrals(self.generator.skill_norm.inverse(plan), step)
-        integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
-        integrals = torch.einsum("lk,nkd->nld", self.plan_matrix, integrals)
+        if self.tasks is not None:
+            rows, integrals = self._draw_tasks(ids, window, command, space)
+        else:
+            noise = torch.randn(len(ids), self.generator.noise_size, device=self.device)
+            with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
+                plan = self.generator.sample(window, command, noise).float()
+            # A body still learning to stand writes histories no teacher ever did; the
+            # generator's answer to them is meaningless but must stay finite.
+            plan = torch.nan_to_num(plan, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
+            full = torch.cat([window[:, -1:], plan], dim=1)
+            rows = resample_rows(self.generator, self.plan_matrix, full, space)
+            rows = apply_plan_contact(rows, self.generator.skill_norm, self.cfg.plan_contact)
+            step = float(self.generator.grid_step)
+            integrals = plan_integrals(self.generator.skill_norm.inverse(plan), step)
+            integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
+            integrals = torch.einsum("lk,nkd->nld", self.plan_matrix, integrals)
         if self.trust is not None:
             # A second sample from the same history: two plans at the same lead time differ
             # by the generator's sampling noise exactly, over the steps a prior reads.
@@ -713,6 +860,10 @@ class ReferenceCommand(UniformVelocityCommand):
                 sign = torch.where(torch.rand(len(every), 2, device=self.device) < 0.5, -1.0, 1.0)
                 self.sway_amplitude[every] = self.cfg.procedural_sway * amplitude * sign
         task = every[~self.procedural[every]]
+        if self.tasks is not None:
+            self._reset_tasks(every, task)
+            # The starts below are the contract's own, for its task's episodes.
+            task = task[self.task[task] == 0]
         if self.starts is not None and self.cfg.start_fraction > 0.0:
             chosen = task[torch.rand(len(task), device=self.device) < self.cfg.start_fraction]
             if len(chosen) > 0:
@@ -723,8 +874,32 @@ class ReferenceCommand(UniformVelocityCommand):
                 self._start_from_contract(chosen)
         return extras
 
+    def _reset_tasks(self, every: torch.Tensor, task: torch.Tensor) -> None:
+        """Draw the task of each new episode in ``task`` (not procedural), its commitment, its
+        command from its ranges and, for a share of them, a start inside its motion."""
+        self.task[every] = 0
+        if len(task) > 0:
+            self.task[task] = torch.multinomial(self.task_probability, len(task), replacement=True)
+        commits = torch.tensor([t["commit"] for t in self.tasks], device=self.device)
+        self.commit_env[every] = commits[self.task[every]]
+        self._task_commands(task)
+        if self.cfg.start_fraction <= 0.0:
+            return
+        for t, spec in enumerate(self.tasks[1:], start=1):
+            mine = task[self.task[task] == t]
+            chosen = mine[torch.rand(len(mine), device=self.device) < self.cfg.start_fraction]
+            if len(chosen) == 0:
+                continue
+            if spec["starts"] is not None:
+                self._start_from_demonstrations(chosen, spec["starts"])
+            elif spec["windows"] is not None:
+                self._start_from_contract(chosen, spec["windows"])
+
     def _resample_command(self, env_ids: Sequence[int]) -> None:
         super()._resample_command(env_ids)
+        if self.tasks is not None:
+            ids = torch.arange(self.num_envs, device=self.device)[env_ids]
+            self._task_commands(ids[~self.procedural[ids]])
         self.replan[env_ids] = True
 
     def _update_metrics(self) -> None:
@@ -741,6 +916,8 @@ class ReferenceCommand(UniformVelocityCommand):
 
     def _update_command(self) -> None:
         super()._update_command()
+        if self.tasks is not None:
+            self._task_headings()
         self._true_now = self.true_skill()
         self._frame_now = self.frame()
         estimate = self._estimate()
@@ -788,7 +965,7 @@ class ReferenceCommand(UniformVelocityCommand):
             anchor = torch.ones_like(refill)
         self.age = torch.where(carried, self.age + 1, self.age)
         self.anchored = torch.where(carried, self.anchored + 1, self.anchored)
-        draw = refill | (carried & (self.replan | (self.age >= self.commit)))
+        draw = refill | (carried & (self.replan | (self.age >= self.commit_env)))
         ids = draw.nonzero().squeeze(-1)
         if len(ids) > 0:
             self._draw(ids, anchor[ids])
@@ -854,7 +1031,7 @@ class ReferenceCommand(UniformVelocityCommand):
         true = self._true_now
         relative = self.upcoming() - true[:, None]
         relative = torch.where(~self.has_plan[:, None, None], 0.0, relative)
-        age = (self.age.float() / self.commit)[:, None]
+        age = (self.age.float() / self.commit_env)[:, None]
         view = torch.cat([relative.flatten(1), true, age], dim=-1)
         return torch.nan_to_num(view, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
 
@@ -1008,6 +1185,25 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     procedural_sway: float = 0.0
     """Largest trunk sway, pitch and roll, radians, of a procedural episode (uniform per
     episode, either sign). The walk teacher's sways 0.015 and 0.017 rad."""
+
+    tasks: list[dict] | None = None
+    """Further tasks for a decoder trained on several (``transfer/docs/method_revision.md``
+    §6). ``contract`` and ``ranges`` are task 0. Each further entry gives:
+
+    * ``name``;
+    * ``contract``: a ``generator.pt``; only its generator is used, and it must share the
+      contract's grid, history, view and units of ``z*``;
+    * ``ranges``: ``lin_vel_x``, ``lin_vel_y``, ``ang_vel_z`` **dimensionless** (velocities
+      over ``V``, yaw rate times ``T``), and ``heading`` in radians. The same task then
+      reaches every body in its own units;
+    * optionally ``starts`` (a capture of this body's states, as ``start_states``) or
+      ``windows`` (any body's capture, as ``start_windows``) for its share of starts.
+
+    Every episode that is not procedural follows one task, drawn by ``task_weights``. The
+    tracker is not told which."""
+
+    task_weights: list[float] | None = None
+    """Relative weight of each task, task 0 first; uniform by default."""
 
 
 OCTAVES = tuple(2.0**j for j in range(8))

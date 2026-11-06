@@ -43,6 +43,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
 )
 
 from ....transfer.embodiment import G1, NAO
+from ....transfer.latent.task_set import task_specs, task_weights
 from ....transfer.tasks.tracking import (
     OCTAVE_WEIGHTS,
     OCTAVES,
@@ -81,6 +82,10 @@ LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1"
 """Range of the procedural stances' load-profile warp
 (``ReferenceCommandCfg.procedural_load_shape``)."""
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_nao.json"
+TASKS = os.environ.get("HUMANOID_TASKS", "")
+"""A task set (``transfer/scripts/base_task_set.py``): the decoder also trains on these tasks'
+plans (``ReferenceCommandCfg.tasks``, ``method_revision.md`` §6). Empty: the walk alone."""
+TASK_WEIGHTS = task_weights(os.environ.get("HUMANOID_TASK_WEIGHTS", ""))
 SOLE = os.environ.get("HUMANOID_SOLE", "urdf")
 """Where ``z*`` puts each foot (:func:`sole_points`): ``urdf``, the URDF's sole frame, as
 every NAO tracker before W6 had it, or ``contact``, where a flat, loaded foot
@@ -310,6 +315,10 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             plan_contact=PLAN_CONTACT,
             procedural_load_shape=LOAD_SHAPE,
             load_precision=str(LOAD_PRECISION),
+            # The NAO has no states of its experts: each task seeds its history from
+            # its expert's z* windows, as the walk does.
+            tasks=task_specs(TASKS, REPO_ROOT, own_states=False) if TASKS else None,
+            task_weights=TASK_WEIGHTS,
         )
 
         self.observations = NaoTrackObservationsCfg()

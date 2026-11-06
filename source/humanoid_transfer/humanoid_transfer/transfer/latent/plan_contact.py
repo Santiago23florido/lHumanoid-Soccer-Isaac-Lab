@@ -19,6 +19,13 @@ plans hold their loaded feet lower.
 the ground, by its height alone. Its horizontal position, velocity, load and every other
 field are kept. It enforces the contact a load already implies; it does not say how the
 body should move.
+
+**The other half: a loaded foot does not move.** On rigid ground a foot that carries load
+sticks. A loaded teacher foot moves at a median 0.002 ``V``, and the procedural biped's at
+0.000. In the skill plans a loaded foot moves at 0.10--0.12 ``V``, under firm load as well
+(``transfer/scripts/plan_slip.py``, ``transfer/results/plan_slip.json``), and grounding
+leaves that unchanged. :func:`stick_loaded_feet` grounds the loaded feet and sets their
+velocity to zero. Again only what the load already implies changes.
 """
 
 from __future__ import annotations
@@ -27,9 +34,10 @@ import torch
 
 from ...common.skill_state import DEFAULT_CONTACT_THRESHOLD, SKILL_LAYOUT
 
-PLAN_CONTACTS = ("as_drawn", "ground")
+PLAN_CONTACTS = ("as_drawn", "ground", "stick")
 _HEIGHT = SKILL_LAYOUT.slice_of("height").start
 _FEET = SKILL_LAYOUT.slice_of("foot_position").start
+_VELOCITY = SKILL_LAYOUT.slice_of("foot_velocity").start
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
 
 
@@ -55,4 +63,41 @@ def ground_loaded_feet(
     return out
 
 
-__all__ = ["PLAN_CONTACTS", "ground_loaded_feet"]
+def stick_loaded_feet(
+    rows: torch.Tensor, norm, threshold: float = DEFAULT_CONTACT_THRESHOLD
+) -> torch.Tensor:
+    """:func:`ground_loaded_feet`, and each loaded foot's velocity set to zero.
+
+    The velocity is the sole's, in the heading frame (``z*``'s ``foot_velocity``), so zero
+    is a foot that does not move on the ground. Where a foot is not loaded, and in every
+    other field, the entries are those :func:`ground_loaded_feet` returns.
+    """
+    grounded = ground_loaded_feet(rows, norm, threshold)
+    physical = norm.inverse(rows)
+    load = physical[..., _LOAD]
+    still = physical.clone()
+    columns = [_VELOCITY + 3 * side + k for side in range(2) for k in range(3)]
+    still[..., columns] = 0.0
+    normalised = norm(still)
+    out = grounded.clone()
+    for side in range(2):
+        loaded = load[..., side] > threshold
+        for k in range(3):
+            column = _VELOCITY + 3 * side + k
+            out[..., column] = torch.where(loaded, normalised[..., column], grounded[..., column])
+    return out
+
+
+def apply_plan_contact(rows: torch.Tensor, norm, mode: str) -> torch.Tensor:
+    """``rows`` under the plan-contact ``mode`` (:data:`PLAN_CONTACTS`); ``as_drawn``
+    returns ``rows`` itself."""
+    if mode == "as_drawn":
+        return rows
+    if mode == "ground":
+        return ground_loaded_feet(rows, norm)
+    if mode == "stick":
+        return stick_loaded_feet(rows, norm)
+    raise ValueError(f"unknown plan_contact {mode!r}")
+
+
+__all__ = ["PLAN_CONTACTS", "apply_plan_contact", "ground_loaded_feet", "stick_loaded_feet"]

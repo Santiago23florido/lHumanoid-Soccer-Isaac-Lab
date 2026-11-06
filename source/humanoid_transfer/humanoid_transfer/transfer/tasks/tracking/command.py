@@ -50,7 +50,7 @@ from ....common.similarity import UnitSystem
 from ....common.skill_state import SKILL_LAYOUT
 from ...latent.contract import load_contract, plan_integrals
 from ...latent.memory import TimeGrid
-from ...latent.plan_contact import PLAN_CONTACTS, ground_loaded_feet
+from ...latent.plan_contact import PLAN_CONTACTS, apply_plan_contact
 from ...latent.plan_trust import PlanTrust, smooth_noise, sway
 from ...latent.procedural import GaitRanges, PointMassBiped
 from ...latent.resampling import RESAMPLE_SPACES, plan_interpolation, resample_rows
@@ -621,8 +621,7 @@ class ReferenceCommand(UniformVelocityCommand):
         plan = torch.nan_to_num(plan, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
         full = torch.cat([window[:, -1:], plan], dim=1)
         rows = resample_rows(self.generator, self.plan_matrix, full, space)
-        if self.cfg.plan_contact == "ground":
-            rows = ground_loaded_feet(rows, self.generator.skill_norm)
+        rows = apply_plan_contact(rows, self.generator.skill_norm, self.cfg.plan_contact)
         step = float(self.generator.grid_step)
         integrals = plan_integrals(self.generator.skill_norm.inverse(plan), step)
         integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
@@ -636,8 +635,7 @@ class ReferenceCommand(UniformVelocityCommand):
             second = resample_rows(
                 self.generator, self.plan_matrix, torch.cat([window[:, -1:], second], dim=1), space
             )
-            if self.cfg.plan_contact == "ground":
-                second = ground_loaded_feet(second, self.generator.skill_norm)
+            second = apply_plan_contact(second, self.generator.skill_norm, self.cfg.plan_contact)
             task_disagreement = (rows - second).pow(2)
         applied = torch.zeros(rows.shape[1:], device=self.device)
         if self.biped is not None:
@@ -938,9 +936,11 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     """What the task's plans say about a loaded foot's height: ``as_drawn``, as the generator
     drew it, as every run before 2026-11-05; or ``ground`` -- each foot a plan loads above
     the contact threshold put on the ground by its height alone
-    (:func:`~...latent.plan_contact.ground_loaded_feet`). The generator's plans hold loaded
-    feet above the ground where its teachers never did (``skill_space.md`` §10.10). The
-    procedural biped's plans are untouched."""
+    (:func:`~...latent.plan_contact.ground_loaded_feet`); or ``stick`` -- grounded, and each
+    loaded foot's velocity set to zero (:func:`~...latent.plan_contact.stick_loaded_feet`).
+    The generator's plans hold loaded feet above the ground and move them, where its
+    teachers never did (``skill_space.md`` §10.10, §10.11). The procedural biped's plans are
+    untouched."""
 
     tolerance: str = "precision"
     """``precision``: the encoder's error (a plan is a commitment); ``spread``: the

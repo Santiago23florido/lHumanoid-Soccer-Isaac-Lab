@@ -189,7 +189,9 @@ zero-shot at inference.
 **Training sees the base tasks; one task is held out of everything** (the design,
 restated 2026-11-06).
 - *The generator* trains on the base tasks as the G1's experts perform them (experts exist
-  only on the G1). It may also train on the base tasks as the bodies execute them.
+  only on the G1) **and** as each body executes them through its decoder. Several bodies in
+  the generator's data are part of the design, not an option. A G1-only multi-task
+  generator is run beside it as the control, to measure what the other bodies add.
 - *Each body's decoder* trains once on the base tasks' plans, with the procedural family,
   so it generalises across tasks. It is then frozen and is the same for every task,
   including the held-out one.
@@ -198,6 +200,18 @@ restated 2026-11-06).
 
 **At inference on the held-out task:** the decoders as trained once, unchanged, and the
 generator as trained on the base tasks.
+
+**Order** (each step pre-registered before it runs).
+1. The G1's base-task experts (W11).
+2. One generator per base task, from the G1's experts.
+3. Each body's decoder, trained once on those tasks' plans with the procedural family.
+4. Each body executing the base tasks through its decoder.
+5. The multi-task generator on the experts' and the bodies' data, with its latent and the
+   latent's leakage test.
+6. The held-out task on both bodies, against the G1-only generator.
+
+The held-out task is flat (`flat_dagger2`'s task, semi-blind, with L4 already built). The
+base tasks are the walk, rough, backward, sidestep and jog.
 
 *Correction (2026-11-06).* An earlier version of this section, and the discussion around it,
 said a decoder must never see any task and is trained only on the procedural family and the

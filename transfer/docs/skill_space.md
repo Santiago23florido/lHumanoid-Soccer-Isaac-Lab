@@ -2959,6 +2959,69 @@ the theory in [`method_revision.md`](method_revision.md)).
   else is queued.
   *(2026-11-06: W11, 10.12, is now queued after it.)*
 
+**W9 result (2026-11-06, 10:23–15:27: G1 passes, NAO fails).**
+`python transfer/scripts/w9_compare.py --output transfer/results/w9_stick.json`. Each figure
+is the mean over the three commands, on the deployed path.
+
+*G1, `ground` → `stick` (the recorded candidate → the change):*
+
+| Seed | Rough, largest | Rough, gate C passes | Flat, largest | Flat, gate C passes | Falls | Walk speed |
+| --- | --- | --- | --- | --- | --- | --- |
+| `warm_r3_logload_sym` | 0.128 → 0.101 | 0 → 1 of 3 | 0.070 → 0.046 | 3 → 3 | 0 → 0 | 1.067 → 1.090 |
+| `warm_r3_s42_log_sym` | 0.128 → 0.108 | 0 → 1 of 3 | 0.071 → 0.042 | 3 → 3 | 0 → 0 | 1.064 → 1.078 |
+| `warm_r3_s43_log_sym` | 0.120 → 0.096 | 0 → 3 of 3 | 0.065 → 0.041 | 3 → 3 | 0 → 0 | 1.067 → 1.089 |
+
+- **Target met.** Rough's largest deviation falls by 0.024 ± 0.002 (paired, about 11 SE).
+  Flat's falls too, by 0.025 ± 0.001, where the criterion only required it not to rise.
+- **No regression.** No falls, the speed ratio is at least 1.006 at every command, and S0's
+  walk passes. **The G1 passes.**
+- *Against the plans as drawn* (`beside`): rough −0.051 ± 0.002 and flat −0.044 ± 0.002.
+  - Rough's mean largest deviation is 0.102, against 0.153 as drawn and B1's 0.072. B1 is
+    trained on rough's own plans (`transfer/paper/README.md`, B1's note).
+  - Zero-shot closes 63 % of that gap (0.051 of 0.081). Grounding alone closed 34 %.
+  - It is the first zero-shot G1 tracker to pass any rough command at gate C: 5 of 9.
+- *Contact.* Where the plan is light, the body is airborne less often: −0.071 ± 0.004 on
+  rough and −0.103 ± 0.001 on flat. Lift-off lags the plan by 0.009 `T` more. The
+  body's duty factor rises by 0.012 to 0.014, and the gate C duty deviation falls by 0.026
+  (rough) and 0.020 (flat).
+- *The body's own slip* (`body_drag`). On rough it is 0.0056–0.0061 `V` as drawn,
+  0.0047–0.0049 grounded and 0.0046–0.0047 held still. The G1 never followed the slide, so
+  the gain is not a stance that slips less.
+
+*NAO, `as_drawn` → `stick`:*
+
+| Tracker | Rough, largest | Rough, duty deviation | Flat, largest | Flat, duty deviation | Body duty (rough) | Falls |
+| --- | --- | --- | --- | --- | --- | --- |
+| `r1_3498_sym_v3` | 0.154 → 0.206 | 0.090 → 0.115 | 0.174 → 0.192 | 0.158 → 0.180 | 0.585 → 0.599 | 0 → 0 |
+| `warm_nao_r1_s32_sym` | 0.164 → 0.219 | 0.096 → 0.122 | 0.187 → 0.208 | 0.171 → 0.195 | 0.590 → 0.606 | 0 → 0 |
+| `warm_nao_r1_s33_sym` | 0.169 → 0.215 | 0.101 → 0.124 | 0.209 → 0.232 | 0.176 → 0.197 | 0.596 → 0.609 | 0 → 0 |
+
+- **Target missed, the other way.** The duty deviation over both skills rises by
+  0.024 ± 0.001. Rough's largest deviation rises by 0.051 ± 0.003 and flat's by
+  0.021 ± 0.001. Grounding alone (`beside`) raised the duty deviation by 0.013 ± 0.001;
+  holding the feet still adds to it.
+- No falls; speed ratio at least 1.002; the walk passes (0.994–0.997 → 1.081–1.084).
+- *What moved.* The airborne-where-light share falls by 0.083 (rough) and 0.095 (flat), as
+  on the G1. The NAO's stance slip falls from 0.045–0.048 to 0.042–0.044 `V` on rough. Its
+  body duty rises by 0.011 to 0.014, again as on the G1.
+- **Reading.** Holding stance feet still lengthens stance on both bodies. On the G1 that
+  brings the body's contact pattern towards the plan's. On the NAO it moves it away.
+  - *Hypothesis, not measured here:* the NAO already holds stance longer than the plans ask
+    (body duty under `stick` 0.59–0.61 on rough, against the G1's 0.49–0.50). This is the
+    short, low swing of the contact-fidelity study (10.9), and a stricter stance target
+    deepens it.
+  - This is consistent with W7c, where faster drives fixed lift and duty and training on
+    them did not.
+- **Adoption check for the G1** (`incumbents.json`'s rule, run 2026-11-06 at `d7f881a`).
+  - pytest and ruff pass.
+  - The chains of `rough_b3`, `rough_b4` and `flat_b4` are byte-identical to their records
+    (`regression_s0.sh`'s chain loop).
+  - Flat is better on all three seeds, and the walk passes.
+  - The NAO's deployment keeps `as_drawn`.
+- **Recorded.** The G1 candidate `g1_plan_contact_stick` is added to
+  `transfer/results/candidates.json` beside `g1_plan_contact_ground`, as its alternative.
+  It is not adopted: adoption is decided at review. No NAO candidate.
+
 ### 10.12 Base tasks for a multi-task generator; pre-registered (W11)
 
 **Context.** The target design (`method_revision.md` §6):

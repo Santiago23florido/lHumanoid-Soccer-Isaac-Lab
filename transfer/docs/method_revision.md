@@ -143,6 +143,15 @@ body moves: a plan on `M` asks for what a load already implies.
    - *What it does not do.* It leaves the stance drift of the position (§2), which needs
      the plan's positions rewritten.
    - *Prediction.* It improves on W8's height-only grounding on the G1 (W9).
+   - **Validated on the G1, not on the NAO** (W9, `transfer/results/w9_stick.json`;
+     `skill_space.md` §10.11).
+     - *G1, against grounding:* rough's largest deviation −0.024 ± 0.002, flat's
+       −0.025 ± 0.001. Rough passes gate C at 5 of 9 rows, where it passed at none.
+     - *NAO, against as drawn:* the duty deviation over both skills rises by
+       0.024 ± 0.001, so it fails its criterion. Neither body falls.
+     - Holding the loaded feet still lengthens stance on both bodies (body duty +0.011 to
+       +0.014). The G1's stance comes closer to the plan's; the NAO's, already the longer,
+       moves away.
 2. **Constraint-guided sampling** (from DexGraspFlow).
    - *What it does.* Each flow step adds `−λ(t) ∇ ½‖C(z)‖²` to the velocity, where `C`
      holds `h · s(ℓ)`, `v · s(ℓ)` and the stance drift, with `s` a smooth stance indicator.
@@ -168,6 +177,8 @@ body moves: a plan on `M` asks for what a load already implies.
 - *The NAO.* Its stance foot follows part of the slide (0.04 `V`). A plan that holds the
   stance still should reduce the drag. Whether the swing then grows is not predicted: W6
   and W7c say the swing's shortfall is the tracker's objective, not the stance's.
+  - *W9.* The drag falls a little on rough, from 0.045–0.048 to 0.042–0.044 `V`. The
+    swing does not grow: the stance lengthens and the duty deviation rises.
 
 ## 5. On the objective side (recorded, not run)
 
@@ -267,12 +278,16 @@ and checks that each walks its task.
 
 1. **W9** (`skill_space.md` §10.11). Realisation 1 on the frozen trackers of both bodies,
    paired against W8's grounded captures. About 2.5 h of simulator time, no training.
-2. If W9 passes: realisation 2, pre-registered the same way.
+   *Done 2026-11-06: the G1 passes, and `g1_plan_contact_stick` is a candidate, not
+   adopted. The NAO fails.*
+2. If W9 passes: realisation 2, pre-registered the same way. *W9 passed on the G1, so this
+   is open. It needs the simulator, so it queues behind W11.*
 3. If 1 or 2 shows the mechanism: realisation 3, with its own budget and its own
    approval.
 4. **The multi-task generator with a learned latent** (§6), after the consistency work:
    leave-one-task-out first, on the tasks W11 accepts.
-5. **Open, not yet proposed: a multi-source generator.** It would be trained on the task
+5. **Open, not yet proposed: a multi-source generator.** *(Superseded on 2026-11-06 by §6:
+   the generator's training sees several bodies, and that is now required.)* It would be trained on the task
    as several source humanoids perform it, all in `z*`, the target excluded. It stays
    zero-shot. GOTT (72.1 % on unseen variants from three training hands, against 17.2 %
    from one) and XHugWBC suggest diversity of sources helps an unseen body. Two things

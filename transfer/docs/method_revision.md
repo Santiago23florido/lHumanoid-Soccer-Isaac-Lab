@@ -82,8 +82,8 @@ the loop, slide just the same: 0.114 (flat) and 0.124 (rough). Further:
 | SERNF (2026) | Exact-likelihood normalizing-flow policy; a chunk-level critic; best-of-N chunk selection | Best-of-N on the contact residual is body-blind and stays on the generator's manifold. Offline, it barely lowers the slide (§2), so it is weak here. Chunk-level credit supports scoring contact events per committed window | Partly (§5, objective) |
 | GOTT (2026) | Contact acquisition as its own closed-loop primitive with a hysteresis contact predictor; a canonical masked representation; training across several hands transfers zero-shot (72.1 % against an oracle's 72.2 %) | Contact transitions are a first-class mode change, not a by-product of tracking a trajectory | Yes, as the hybrid view (§4) |
 | XHugWBC (ICML 2026) | One policy for 12 simulated and 7 real humanoids; physics-consistent morphological randomization (pseudo-inertia Cholesky); gait phase and stance in the command | An explicit contact schedule in the interface. Randomization over drive parameters is the alternative to identifying the NAO's drives exactly | The first as support; the second deferred |
-| CrossBFM (2026) | A shared latent behavior space distilled from one robot's forward-backward model; PPO trackers with feet-slip and contact-force terms | Its unified encoder needs retargeted motion of every robot, so it is not zero-shot in this project's sense. Unseen-robot transfer recovers 12.8–89 %, best for similar morphologies | No: violates the zero-shot rule |
-| LAD (2025) | Contrastive alignment of embodiment-specific action encoders; diffusion in the shared latent | Needs paired, retargeted actions and demonstrations per embodiment | No |
+| CrossBFM (2026) | A shared latent behavior space distilled from one robot's forward-backward model; PPO trackers with feet-slip and contact-force terms | Its encoder aligns robots through each robot's retargeted motion corpus. A corpus without the transferred gaits would be allowed (correction below), but its latent comes from one source robot's behaviours. Unseen-robot transfer recovers 12.8–89 %, best for similar morphologies | No, as a latent (§3 below); its multi-robot training is noted in §6 |
+| LAD (2025) | Contrastive alignment of embodiment-specific action encoders; diffusion in the shared latent | Its policy learns from demonstrations of the task on every embodiment, the target's included. On the NAO that is the task's data in the target's learner, which the rule forbids | No |
 | LAC-WM (ICML 2026) | Latent actions from an inverse-dynamics model, effect-based, shared across embodiments | Supports defining the interface by effect in a shared space, as `z*` already is | Support only |
 | DexJoCo-X (2026) | Controlled comparison: function-aligned action slots 47.7 %, native 47.0 %, a learned latent 33.1 % | An explicit, function-aligned interface beats a learned latent | Support: keep `z*` explicit |
 | CrossDex (ICLR 2025) | A universal action space from human eigengrasps, retargeted per hand; embodiment randomization helps unseen hands | Our analogue is the dimensionless `z*` with a learned per-body tracker. Nothing new for fidelity on two known bodies | No |
@@ -91,12 +91,36 @@ the loop, slide just the same: 0.114 (flat) and 0.124 (rough). Further:
 | Proprioceptive Transformer (2026) | History Transformer with an auxiliary reconstruction of hidden state; joint-side sensing beats motor-side | A better load and contact estimator, and a reason to measure the NAO's joint response at the joint | Deferred (estimator) |
 | ORCA (IROS 2025) | Hardware; a protocol for joint tracking accuracy and latency (sine and step commands) | A protocol for identifying the real NAO's drives (`research_report.md` §7, item 2) | Deferred (identification) |
 
-**What the learned-latent papers say together.** LAD, LAC-WM and CrossBFM all need data
-from the target body: paired actions, demonstrations or retargeted motion. This project
-transfers zero-shot. DexJoCo-X's controlled comparison favours explicit, function-aligned
-coordinates, and this project's own history agrees: a learned action code leaked the body
-(`skill_space.md` §4–6). The revision therefore keeps `z*` explicit and changes what it
-is allowed to say about contact.
+**What zero-shot excludes here.** The rule is `skill_space.md` §9's: no gradient step of a
+body's encoder or tracker uses a task's data. It does not limit what the generator learns
+from, and it does not forbid data from the target body on other motion. The NAO's tracker
+already trains on the procedural family and the walk, and its loads are learned on its own
+practice.
+- *Allowed.* A generator trained on several source robots' demonstrations of the task,
+  each in `z*`. It stays zero-shot for any robot not among them.
+- *Not allowed.* The task's trajectories reaching the target's encoder or tracker: its own
+  demonstrations, or the teacher's retargeted to it (B1 and B2 in
+  `transfer/paper/README.md`).
+- *Whether an expert exists does not decide it.* What decides it is what the target's
+  learners see.
+
+**What the learned-latent papers say together.**
+- *What they need.* LAD and LAC-WM learn from task data on the target (demonstrations, or
+  fine-tuning on the new robot). CrossBFM aligns robots through each one's retargeted motion
+  corpus.
+- *Why the revision still keeps `z*` explicit.* DexJoCo-X's controlled comparison favours
+  explicit, function-aligned coordinates (47.7 % against 33.1 % for a learned latent). This
+  project's own history agrees: a learned action code leaked the body (`skill_space.md`
+  §4–6). `z*`'s alignment is analytic (dimensional analysis) and needs no correspondence
+  data.
+- *What changes.* What `z*` is allowed to say about contact.
+
+*Correction (2026-11-06).* The first version of this section rejected all three because
+"they need data from the target body, which the zero-shot rule forbids", and CrossBFM's row
+said it "violates the zero-shot rule". That misstated the rule: data from the target is
+allowed except the task's, and the rule says nothing about the generator's sources. It
+affected the reasons given for rejecting LAD, LAC-WM and CrossBFM, here and in the discussion
+that followed, and it omitted multi-source generators from §6. No run or result depended on it.
 
 ## 4. The modification
 
@@ -163,5 +187,14 @@ foot" is then part of what the plan asks.
 2. If W9 passes: realisation 2, pre-registered the same way.
 3. If 1 or 2 shows the mechanism: realisation 3, with its own budget and its own
    approval.
-4. Not proposed: learned shared latents (§3), multi-morphology tracker training (not this
+4. **Open, not yet proposed: a multi-source generator.** It would be trained on the task
+   as several source humanoids perform it, all in `z*`, the target excluded. It stays
+   zero-shot. GOTT (72.1 % on unseen variants from three training hands, against 17.2 %
+   from one) and XHugWBC suggest diversity of sources helps an unseen body. Two things
+   hold it back:
+   - *a second teacher.* `skill_space.md` §9 limits pretrained teachers to Isaac Lab's
+     published G1 policies, so another source needs that rule revisited first;
+   - *what it does not fix.* It does not address the inconsistency of §2, which is how the
+     generator models contact, not which bodies it learned from.
+5. Not proposed: learned shared latents (§3), multi-morphology tracker training (not this
    project's failure mode), and the estimator Transformer (robustness, not fidelity).

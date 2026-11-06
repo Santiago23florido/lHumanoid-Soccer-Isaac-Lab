@@ -206,9 +206,15 @@ generator as trained on the base tasks.
 2. One generator per base task, from the G1's experts.
 3. Each body's decoder, trained once on those tasks' plans with the procedural family.
 4. Each body executing the base tasks through its decoder.
-5. The multi-task generator on the experts' and the bodies' data, with its latent and the
-   latent's leakage test.
-6. The held-out task on both bodies, against the G1-only generator.
+5. The multi-task generator on the experts' and the bodies' data, in two arms:
+   - `z*` only;
+   - `z*` plus a learned part in the latent, which the several bodies in its data make
+     testable. It is checked first by its leakage test.
+6. The held-out task on both bodies, three arms against each other: the G1-only multi-task
+   generator (control), the multi-body generator with `z*` only, and the multi-body
+   generator with the learned latent. The question is whether the learned part solves what
+   `z*` alone does not: the held-out task's gait fidelity, and the contact consistency of
+   §2.
 
 The held-out task is flat (`flat_dagger2`'s task, semi-blind, with L4 already built). The
 base tasks are the walk, rough, backward, sidestep and jog.

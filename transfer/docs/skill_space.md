@@ -2899,6 +2899,56 @@ is the only tracker. As drawn → grounded, mean over three commands, deployed p
   foot. It is not queued: no NAO candidate depends on it, and the G1's candidate does not
   touch the NAO.
 
+### 10.11 The plans slide their stance feet; pre-registered (W9)
+
+**Measured** (`transfer/scripts/plan_slip.py`, `transfer/results/plan_slip.json`; the
+offline check in `transfer/scripts/stick_offline.py`, `transfer/results/stick_offline.json`;
+the theory in [`method_revision.md`](method_revision.md)).
+- *A loaded foot moves in the plans.* Median horizontal speed of a foot above the contact
+  threshold, `V`:
+  - teachers 0.0020 (flat), 0.0022 (rough), 0.0017 (walk);
+  - the procedural plans the trackers practise on 0.0000, the walk contract's plans 0.009
+    (NAO) and 0.014 (G1);
+  - the skill plans 0.10–0.12 on both bodies, 0.088–0.115 under firm load.
+
+  W8's grounding leaves this unchanged.
+- *The bodies.* The G1 does not follow the slide (0.004–0.006). The NAO drags its stance
+  foot at 0.042–0.046 on the skills, against 0.016 on the walk.
+- *It is the generator's own.* Plans drawn offline from the teachers' histories slide at
+  0.114 (flat) and 0.124 (rough). The most consistent of eight draws still slides at
+  0.100 and 0.110.
+
+**Pre-registered (2026-11-06, before any run).**
+- **Hypothesis.** A plan whose loaded foot moves asks for what no body can do, the same
+  inconsistency W8 removed for the height. Holding the loaded feet still as well as
+  grounding them improves on grounding alone on the G1, and on the plans as drawn on the
+  NAO.
+- **Change.** `HUMANOID_PLAN_CONTACT=stick` (`latent/plan_contact.stick_loaded_feet`).
+  Each foot a plan loads above the contact threshold gets its sole on the ground and its
+  sole velocity set to zero. Nothing else changes, nothing is trained, and the default
+  stays `as_drawn`.
+- **Test** (`transfer/scripts/w9_stick.sh`). S's three G1 seeds and the three NAO
+  trackers, frozen, through L4 of `flat_dagger2` and `rough_b4` and S0's walk, under W8's
+  conditions with `stick`.
+- **Criterion** (`transfer/scripts/w9_compare.py` → `transfer/results/w9_stick.json`).
+  - *G1, against its W8 `ground` captures* (the recorded candidate): rough's largest gate C
+    deviation falls by more than 2 SE of the three paired differences; flat's rises by no
+    more than 2 SE.
+  - *NAO, against the plans as drawn* (its deployment; grounding hurt it): the duty
+    deviation over both skills falls by more than 2 SE, which is W8's NAO criterion.
+  - *No regression*, per body: falls at most two more in total, speed ratio at least 0.9 at
+    every command, S0's walk passing.
+  - *Reported beside it:* the other baseline for each body (G1 as drawn, NAO grounded),
+    contact metrics, and the bodies' loaded-foot speed.
+- **Reading.**
+  - *G1 passes:* a second G1 candidate, recorded in `candidates.json` beside
+    `g1_plan_contact_ground`, not adopted.
+  - *Fails:* reported as a fact with a reframing; realisations 2 and 3 of
+    `method_revision.md` wait for review.
+  - *NAO:* reported either way; no NAO candidate without a pass.
+- **Order and budget.** About 2.5 h of simulator time behind the room waiter. Nothing
+  else is queued.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

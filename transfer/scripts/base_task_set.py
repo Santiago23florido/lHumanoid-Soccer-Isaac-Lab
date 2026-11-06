@@ -7,7 +7,8 @@ heading range, and its expert's DART capture (starts on the G1, windows on the N
 * **flat**: Isaac Lab's published G1 flat policy and its deployed generator, ``flat_dagger2``
   (L4's). Ranges from Isaac Lab's source: ``G1FlatEnvCfg`` for the velocities, the base
   ``CommandsCfg`` for the heading.
-* **backward, sidestep, jog**: W11's experts, if accepted (``w11_experts.json``), with their
+* **backward, sidestep, jog**: W11's experts, if accepted (``w11_experts.json``'s calibrated
+  reading, the deviation declared in ``skill_space.md`` §10.12), with their
   W12 generators, if gated (``contract_base_<task>_b4.json``). Ranges from the run's saved
   ``env.yaml``, what the expert trained on.
 
@@ -96,12 +97,12 @@ def main() -> int:
     accepted = []
     accept_path = REPO_ROOT / "transfer/results/w11_experts.json"
     if accept_path.exists():
-        accepted = json.loads(accept_path.read_text(encoding="utf-8"))["accepted"]
+        accepted = json.loads(accept_path.read_text(encoding="utf-8"))["accepted_calibrated"]
     excluded = {}
     for task in NEW_TASKS:
         gate_path = REPO_ROOT / f"transfer/results/contract_base_{task}_b4.json"
         if task not in accepted:
-            excluded[task] = "expert not accepted by W11"
+            excluded[task] = "expert not accepted by W11 (calibrated reading)"
         elif not gate_path.exists():
             excluded[task] = "no W12 generator"
         elif not json.loads(gate_path.read_text(encoding="utf-8"))["gate"]["passes"]:

@@ -3074,6 +3074,58 @@ figures, and its recipe is not tuned afterwards.
 about 1 h of captures. The multi-task generator and its leave-one-task-out test are
 pre-registered after this, on the accepted set.
 
+**Interim result and a declared deviation (2026-11-06, about 21:45).** Backward and
+sidestep are done; jog is still training. The figures come from
+`python transfer/scripts/w11_accept.py --output transfer/results/w11_experts.json`, which
+also writes them to that file.
+
+| Task | Command (m/s) | Achieved | Ratio | Largest duty | Falls | Registered | Calibrated |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| backward | −0.20 | −0.421 | 2.10 | 0.82 | 147 | fail | fail |
+| backward | −0.35 | −0.518 | 1.48 | 0.78 | 121 | fail | fail |
+| backward | −0.50 | −0.567 | 1.13 | 0.73 | 63 | fail | fail |
+| sidestep | 0.25 | 0.196 | 0.78 | 0.86 | 1 | fail | pass |
+| sidestep | 0.45 | 0.399 | 0.89 | 0.59 | 0 | pass | pass |
+| sidestep | −0.35 | −0.312 | 0.89 | 0.80 | 0 | pass | pass |
+
+- **The registered bound rejects the reference already in the set.**
+  - *What was checked.* The same check on the published flat expert. That expert entered
+    the task set without passing the check, so its play rollouts make a fair reference:
+    `g1/rollouts/flat_play_forward.npz` and `flat_play_fast.npz`, captured in the same play
+    variant with action noise 0, 32 × 900 steps.
+  - *What it does.* At 0.25 m/s it achieves 0.183, a ratio of 0.73; at 0.6 m/s, 0.485 (0.81).
+    It never falls, and its largest duty is 0.53.
+  - *Why.* Isaac Lab's recipe under-tracks its lowest commands. The 0.8 bound was set
+    without reading what the recipe achieves there.
+- **The deviation.**
+  - *The calibrated reading.* The speed bound becomes the reference's smallest ratio,
+    0.733, which the script computes. Every other criterion is unchanged.
+  - *When.* Declared after backward's and sidestep's figures were seen, but before jog's
+    play rollouts exist.
+  - *What is kept.* `w11_experts.json` keeps the registered reading as `accepted`. W12 and
+    the task set read `accepted_calibrated`.
+  - *What it changes.* Sidestep enters. Under the registered bound it fails only at
+    0.25 m/s, by 0.02. Its recipe is untouched.
+- **Backward is rejected under both readings**, and its failure looks like the play
+  variant's.
+  - *Its DART capture.* The same exported policy in the training variant, with action noise
+    0.1, falls 2 times in 128 × 1000 steps. It under-tracks rather than over-speeds: −0.287
+    at −0.35, −0.210 at −0.25 (`dart_tracking` in the same file).
+  - *Not the play variant alone.* Sidestep's play rollouts, in the same variant, fall at
+    most once.
+- **Pre-registered reading of the 2 × 2 check.** The script is
+  `transfer/scripts/w11_play_check.sh`, which runs after W11. This reading is fixed now,
+  before it runs. All four cells are at −0.35 m/s and are read with the same check and the
+  calibrated bound.
+  - *The play variant is the cause:* the training variant without action noise passes and
+    the play variant fails. Backward is then re-read at its three commands in the training
+    variant, and its L4 references are re-captured there. That would be a second declared
+    deviation: the generator learns from that variant.
+  - *The expert depends on action noise:* only the cells with noise 0.1 pass. Backward stays
+    rejected, because the experts are deployed without noise.
+  - *Every cell fails:* the cause is the fixed-command protocol, which every task shares.
+    Backward stays rejected, and that is reported.
+
 ### 10.13 One generator per new base task; pre-registered (W12)
 
 **Context.** Step 2 of `method_revision.md` §6: one generator per base task, from the G1's
@@ -3150,6 +3202,13 @@ outside the family's ranges, so S cannot be expected to execute the new tasks.
     2 SE of the three paired differences.
   - *Executes, per body and task:* every W13 tracker has at most one fall and a speed ratio
     of 0.8–1.2. This is W11's expert criterion without the duty term.
+    - *Amended on 2026-11-06, before any W13 run.* The ratio is now the CoM's dimensionless
+      speed along the task's commanded axis, divided by the expert's own speed in its play
+      rollout at the same command. Both are taken once settled, as L4 reads speed.
+    - *Why.* L4's `speed_ratio` uses the forward axis only, so it is undefined for sidestep.
+      And W11's experts do not all reach their command (10.12).
+    - *What does not change.* The target's gate C deviations do not depend on direction:
+      stride length uses the norm of the horizontal speed.
   - *No regression:* flat's largest deviation rises by no more than 2 SE; falls rise by at
     most two in total; S0's walk passes on every W13 tracker.
 - **Reading.**

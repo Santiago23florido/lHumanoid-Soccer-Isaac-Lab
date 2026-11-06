@@ -6,7 +6,11 @@ same incumbent without the tasks), paired by seed, on the deployed path:
 * **target** -- over the new base tasks at their middle command, the largest gate C deviation
   falls by more than 2 SE of the paired differences;
 * **executes** -- per new task, every W13 tracker at its middle command: at most one fall and
-  a speed ratio between 0.8 and 1.2 (W11's expert criterion, without the duty term);
+  a speed ratio between 0.8 and 1.2 (W11's expert criterion, without the duty term). The
+  ratio is the CoM's dimensionless speed along the task's commanded axis over the expert's
+  own in its play rollout at that command, both once settled as L4 reads speed. (Amended
+  before any W13 run: L4's own ``speed_ratio`` is forward-only, undefined for sidestep, and
+  W11's experts do not all reach their command; §10.14.)
 * **no regression** -- flat's L4 largest deviation (three commands) rises by no more than
   2 SE, falls rise by at most two in total, and S0's walk passes on every W13 tracker.
 
@@ -27,7 +31,10 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[1].parent
 RESULTS = REPO_ROOT / "transfer" / "results"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 
+from evaluate_latent import _settled  # noqa: E402
+from humanoid_transfer.common.skill_state import SKILL_LAYOUT  # noqa: E402
 from w8_compare import COMMANDS, condition  # noqa: E402
 
 S = {
@@ -36,6 +43,7 @@ S = {
 }
 SEEDS = {"g1": (41, 42, 43), "nao": (31, 32, 33)}
 MIDDLE = {"backward": "mid", "sidestep": "left", "jog": "mid"}
+AXIS = {"backward": 0, "sidestep": 1, "jog": 0}
 SPEED = (0.8, 1.2)
 MAX_FALLS = 1
 
@@ -43,6 +51,24 @@ MAX_FALLS = 1
 def new_tasks() -> list[str]:
     report = json.loads((RESULTS / "base_tasks.json").read_text(encoding="utf-8"))
     return [t["name"] for t in report["tasks"] if t["name"] != "flat"]
+
+
+def axis_speed(path: str, axis: int) -> float | None:
+    """Mean dimensionless CoM speed along ``axis`` (heading frame), once settled."""
+    data = np.load(REPO_ROOT / path)
+    running = int(data["settle_steps"]) if "settle_steps" in data.files else 0
+    settled = _settled(data["done"], already_running=running)
+    velocity = SKILL_LAYOUT.unpack(data["skill_state"].astype(float))["com_velocity"][..., axis]
+    return float(velocity[settled].mean()) if settled.any() else None
+
+
+def axis_ratio(body: str, tag: str, task: str) -> float:
+    """The tracker's speed along the task's axis over its expert's, at the middle command."""
+    path = RESULTS / f"zero_shot_{body}_{tag}_base_{task}_b4_auto_kin_l4_{MIDDLE[task]}.json"
+    runs = json.loads(path.read_text(encoding="utf-8"))["runs"]
+    run = axis_speed(runs["encoder"]["file"], AXIS[task])
+    expert = axis_speed(runs["teacher"]["file"], AXIS[task])
+    return 0.0 if run is None or not expert else run / expert
 
 
 def walk(body: str, tag: str) -> dict | None:
@@ -58,6 +84,8 @@ def tracker(body: str, tag: str, tasks: list[str]) -> dict | None:
     rows = {t: condition(body, tag, f"base_{t}_b4", MIDDLE[t]) for t in tasks}
     if any(r is None for r in flat) or any(r is None for r in rows.values()):
         return None
+    for t, row in rows.items():
+        row["axis_speed_ratio"] = axis_ratio(body, tag, t)
     return {
         "flat": {
             "largest": float(np.mean([r["largest"] for r in flat])),
@@ -115,7 +143,7 @@ def main() -> int:
             executes = {
                 t: all(
                     p["after"]["tasks"][t]["falls"] <= MAX_FALLS
-                    and SPEED[0] <= p["after"]["tasks"][t]["speed_ratio"] <= SPEED[1]
+                    and SPEED[0] <= p["after"]["tasks"][t]["axis_speed_ratio"] <= SPEED[1]
                     for p in pairs
                 )
                 for t in tasks

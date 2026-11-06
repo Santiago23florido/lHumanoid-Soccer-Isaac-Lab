@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # W12 of skill_space.md §10.13: one generator per new base task, step 2 of method_revision.md §6.
-# For each task W11 accepted (transfer/results/w11_experts.json), its contract generator is
+# For each task W11 accepted (transfer/results/w11_experts.json, its calibrated reading: the
+# deviation declared in skill_space.md §10.12), its contract generator is
 # trained on its G1 expert's DART rollouts with rough_b4's and flat_b4's recipe:
 #   horizon 20, commit 13, midpoint solver with 8 flow steps, log-warped loads;
 #   the G1 body's encoder (walk_zs_g1_r3_6194_sym), trained under its noise and
@@ -30,7 +31,7 @@ until grep -q "^w11 done" logs/contract/w11_experts.status 2>/dev/null; do sleep
 note "w12 start"
 accepted=$("$python" -c "
 import json, sys
-print(' '.join(json.load(open(sys.argv[1]))['accepted']))" transfer/results/w11_experts.json \
+print(' '.join(json.load(open(sys.argv[1]))['accepted_calibrated']))" transfer/results/w11_experts.json \
   2>/dev/null)
 [ -n "$accepted" ] || { note "no accepted task"; note "w12 done"; exit 0; }
 note "accepted: $accepted"

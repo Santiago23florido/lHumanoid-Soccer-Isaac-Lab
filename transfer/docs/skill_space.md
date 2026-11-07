@@ -3420,6 +3420,53 @@ trainings.
   seeds in the task's units. Its verdict, units or learned, decides how this failure is
   read.
 
+**Result (2026-11-07, 15:29): the G1 passes; the NAO fails its target and the flat clause.**
+Read from `python transfer/scripts/w13_compare.py --output transfer/results/w13_decoders.json`,
+which printed "g1 target True executes jog; nao target False executes jog". Jog's L4 is at
+1.25 m/s. The figures are the largest gate C deviation, paired S → W13, as mean ± SE over three.
+
+| Body | Jog, per pair | Jog, paired | Flat, paired | Executes jog | Falls; S0's walk | Passes |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 | 0.082 → 0.031, 0.085 → 0.033, 0.090 → 0.029 | **−0.0546 ± 0.0030** | −0.0217 ± 0.0011 | yes: no falls, axis speed 1.009 | 0 → 0; passes | **yes** |
+| NAO | 0.022 → 0.068, 0.038 → 0.065, 0.037 → 0.072 | **+0.0359 ± 0.0057** | +0.207 ± 0.004 | yes: no falls, axis speed 1.014 | 0 → 0; passes | **no** |
+
+- *The G1.* Training its decoder on jog brings its jog deviation to about a third, with no cost
+  on flat or the walk. Jog is a training task of the W13 trackers, so this is not zero-shot.
+  Their decoders can produce jog's data for step 4.
+- *The NAO.*
+  - It misses the target: jog gets worse, not better.
+  - It fails the no-regression clause on flat.
+  - It still executes jog under the registered rule, so it can produce jog's data for step
+    4. The reading allows that, but the failure has to be read first (below).
+  - S's NAO trackers were already close to the expert on jog (0.022–0.038), well below the
+    G1's S trackers (0.082–0.090). Jog was zero-shot for S.
+- *Where the NAO's jog deviation sits* (instrumentation, seed 32, middle command).
+  - Duty factors, (left, right): the expert executes 0.513, 0.522, and the plans ask
+    0.555, 0.569.
+  - S's body executes 0.532, 0.519; W13's executes 0.547, 0.556.
+  - On jog, W13's NAO moves toward the plan's duty, which sits above the expert's. On flat,
+    it overshoots the plan: 0.658, 0.657 against an asked 0.526, 0.578 and the expert's
+    0.471, 0.528.
+  - Either way, W13's NAO holds stance longer than S's.
+- *The aside, not a criterion* (`g1_gated_out`), on the G1's W13 trackers at the middle
+  command.
+  - **Backward does not execute.** It has 6, 3 and 2 falls (at most one is allowed),
+    although the axis speed is 1.01–1.03 and the largest deviation is 0.063–0.091.
+  - **Sidestep executes.** It has no falls and an axis speed of 1.048–1.049. Its largest
+    deviation is 0.37–0.41, in stride length and period, so it executes the plans with a
+    different stride.
+  - So the precondition for a DAgger round (10.13) holds for sidestep, and not for
+    backward.
+- *Reframing, as the reading requires.* The NAO's failure is not closed here, and its
+  decoder is not retuned. W14 (10.15) was pre-registered before seeds 32 and 33 existed,
+  and asks whether the regression is the units the NAO is shown its plans in, or learned.
+  - **Units:** W13 is re-read with the NAO's pinned figures, and the failure is restated in
+    those terms.
+  - **Learned:** the failure stands as measured. Training the NAO's decoder on the G1's
+    plans then cost what it was meant to gain. The next question becomes the plans: they
+    are drawn from the G1's data and are not its own. Step 5's multi-body generator is
+    where that question goes.
+
 ### 10.15 The tracker's own units on the deployed path; pre-registered (W14)
 
 **Context.** The open finding of 10.14. L4 makes the task's generator the contract.

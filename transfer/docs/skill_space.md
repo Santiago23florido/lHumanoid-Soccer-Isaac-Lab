@@ -3335,6 +3335,31 @@ outside the family's ranges, so S cannot be expected to execute the new tasks.
   so about 11.5 h of training before any slowdown from drawing several tasks' plans. The
   evaluation adds about 6–8 h.
 
+**A script fix, before any criterion was read (2026-11-07, 05:45).**
+- *What was wrong.* `w13_compare.walk()` took the ladder's `verdict["passes"]`, which adds
+  gate C's signature tolerance. S0's walk check, as W1–W9 read it (`w8_compare.py`,
+  `w9_compare.py`), is a speed ratio of at least 0.9 and a fall excess of at most 0.02.
+- *How it showed.* That reading failed the walk on S's three G1 controls too, whose stride
+  and period sit 19.5–22.7 % off on the walk. Those controls passed S0 in W8 and W9.
+- *The fix.* `walk()` now applies S0's check. The registered clause, "S0's walk passes on
+  every W13 tracker", is unchanged. It is the script that now does what the clause says.
+
+**Interim, the G1 (2026-11-07, 05:30): the three W13 trackers trained and laddered.** Read
+with the criterion's own functions. This is not the criterion: jog's L4 runs after the NAO's
+trainings.
+
+| Pair (S → W13) | Flat largest deviation | Flat falls | Flat commands passing | Walk speed | Walk signature, largest (instrumentation) |
+| --- | --- | --- | --- | --- | --- |
+| `warm_r3_logload_sym` → `mt_g1_s41_sym` | 0.0894 → 0.0699 | 0 → 0 | 3 → 3 | 1.009 → 1.007 | 0.208 → 0.176 |
+| `warm_r3_s42_log_sym` → `mt_g1_s42_sym` | 0.0903 → 0.0684 | 0 → 0 | 2 → 3 | 1.007 → 1.009 | 0.227 → 0.160 |
+| `warm_r3_s43_log_sym` → `mt_g1_s43_sym` | 0.0824 → 0.0589 | 0 → 0 | 3 → 3 | 1.004 → 1.006 | 0.209 → 0.206 |
+
+- *Flat:* the paired difference is −0.0217 ± 0.0011. Flat is now one of the decoder's
+  training tasks, so this is no longer a zero-shot reading of flat. The no-regression clause
+  holds on the G1.
+- *The walk:* S0 passes on all three. No fall excess.
+- *Not yet read:* jog (the target and "executes"), the gated-out aside, and the NAO.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

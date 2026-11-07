@@ -12,7 +12,8 @@ same incumbent without the tasks), paired by seed, on the deployed path:
   before any W13 run: L4's own ``speed_ratio`` is forward-only, undefined for sidestep, and
   W11's experts do not all reach their command; §10.14.)
 * **no regression** -- flat's L4 largest deviation (three commands) rises by no more than
-  2 SE, falls rise by at most two in total, and S0's walk passes on every W13 tracker.
+  2 SE, falls rise by at most two in total, and S0's walk passes on every W13 tracker
+  (S0's check: speed ratio at least 0.9 and fall excess at most 0.02, as W1-W9 read it).
 
 Rough is not read here: it is held out until the multi-task generator is evaluated.
 
@@ -50,6 +51,8 @@ MIDDLE = {"backward": "mid", "sidestep": "left", "jog": "mid"}
 AXIS = {"backward": 0, "sidestep": 1, "jog": 0}
 SPEED = (0.8, 1.2)
 MAX_FALLS = 1
+WALK_SPEED_MIN = 0.9  # S0's walk check, as in w8_compare and w9_compare
+WALK_FALL_EXCESS_MAX = 0.02
 
 
 def new_tasks() -> list[str]:
@@ -112,11 +115,24 @@ def aside(tasks: list[str]) -> dict:
 
 
 def walk(body: str, tag: str) -> dict | None:
+    """S0's walk check, as W1-W9 read it: speed ratio and fall excess, not gate C.
+
+    The ladder's own ``verdict["passes"]`` adds the gait signature's tolerance, which S's
+    trackers miss on the walk too (stride and period about 20 % off), so it is not S0's check.
+    """
     path = RESULTS / f"zero_shot_{body}_{tag}_walk_auto_kin.json"
     if not path.exists():
         return None
     verdict = json.loads(path.read_text(encoding="utf-8"))["runs"]["encoder"]["verdict"]
-    return {"passes": bool(verdict["passes"]), "speed_ratio": verdict["speed_ratio"]}
+    return {
+        "passes": bool(
+            verdict["speed_ratio"] >= WALK_SPEED_MIN
+            and verdict["fall_rate_excess"] <= WALK_FALL_EXCESS_MAX
+        ),
+        "speed_ratio": verdict["speed_ratio"],
+        "fall_rate_excess": verdict["fall_rate_excess"],
+        "signature_deviation": verdict["signature_deviation"],
+    }
 
 
 def tracker(body: str, tag: str, tasks: list[str]) -> dict | None:

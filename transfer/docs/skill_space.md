@@ -4069,7 +4069,7 @@ walks speed ratios 0.942 / 1.039 / 0.975, with a mean largest deviation of 0.185
 
 ### 10.19 Leave one task out where no other task defines its commands; pre-registered (W18)
 
-Pre-registered 2026-11-08, 01:20, before any of its runs, on W17's result (10.18), whose
+Pre-registered 2026-11-08, 00:32 (commit 5640154), before any of its runs, on W17's result (10.18), whose
 pre-registered next step this is ("leave-one-task-out among them, to measure how far a style
 generalises").
 

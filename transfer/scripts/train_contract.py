@@ -36,6 +36,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 
 from humanoid_transfer.common.similarity import TIME, UnitSystem  # noqa: E402
+from humanoid_transfer.transfer.latent.body_data import (  # noqa: E402
+    body_pairs,
+    leakage,
+    load_body_streams,
+    train_on_bodies,
+)
 from humanoid_transfer.transfer.latent.contract import (  # noqa: E402
     Contract,
     ContractClock,
@@ -178,6 +184,36 @@ def main() -> int:
     )
     parser.add_argument("--samples", type=int, default=32)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--body-data",
+        type=Path,
+        action="append",
+        help="A body's capture (capture_contract.py) of a base task; repeat. Its histories are "
+        "trained on as --body-targets says (latent/body_data.py). Bodies are told apart by "
+        "leg length, the teacher's first (group 0).",
+    )
+    parser.add_argument("--body-targets", choices=("teacher", "own"), default="teacher")
+    parser.add_argument(
+        "--init-from",
+        type=Path,
+        default=None,
+        help="Start from this generator (generator.pt) trained on the same --data, and skip "
+        "training on the data: arms that differ only in what follows start from one model.",
+    )
+    parser.add_argument("--body-pairs", type=int, default=200000, help="Histories drawn.")
+    parser.add_argument(
+        "--body-epochs",
+        type=int,
+        default=100,
+        help="Epochs on the bodies' pairs; 0 only measures the summary's leakage on them.",
+    )
+    parser.add_argument(
+        "--invariance",
+        type=float,
+        default=0.0,
+        help="Weight of the reversed gradient that trains the history summary to carry no "
+        "body (an adversary on the bodies' and the teacher's windows); 0: none.",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--logdir", type=Path, default=REPO_ROOT / "logs/contract")
     parser.add_argument("--results", type=Path, default=None)
@@ -291,7 +327,11 @@ def main() -> int:
         return float(max(block["calibration_error"]))
 
     started = time.time()
-    history = train_generator(streams, train_steps, generator, args.noise_scale * sigma, config)
+    if args.init_from is None:
+        history = train_generator(streams, train_steps, generator, args.noise_scale * sigma, config)
+    else:
+        generator.load_state_dict(load_contract(args.init_from, args.device).generator.state_dict())
+        history = [{"init_from": _display(args.init_from)}]
     chain = ChainConfig(
         rounds=args.chain_rounds,
         plans=args.chain_plans,
@@ -299,6 +339,62 @@ def main() -> int:
         epochs=args.chain_epochs,
         targets=args.chain_targets,
     )
+    bodies = None
+    if args.body_data:
+        lengths = [float(np.load(p)["leg_length"]) for p in args.body_data]
+        ranked = sorted({units.length, *lengths}, reverse=True)
+        body, capture = load_body_streams(args.body_data)
+        body = body.to(args.device)
+        groups = torch.as_tensor([ranked.index(x) for x in lengths], device=args.device)
+        groups = groups[capture.to(args.device)]
+        pairs = body_pairs(
+            generator,
+            body,
+            groups,
+            streams,
+            train_steps,
+            args.body_targets,
+            args.body_pairs,
+            seed=args.seed,
+        )
+        body_log = []
+        if args.body_epochs > 0:
+            body_log = train_on_bodies(
+                streams,
+                train_steps,
+                val_steps,
+                generator,
+                args.noise_scale * sigma,
+                config,
+                pairs,
+                args.body_epochs,
+                args.invariance,
+                args.seed,
+            )
+            print(f"[bodies] {body_log[-1]}")
+        probe_pairs = body_pairs(
+            generator,
+            body,
+            groups,
+            streams,
+            train_steps,
+            "own",
+            min(args.body_pairs, 50000),
+            seed=args.seed + 1,
+        )
+        leak = leakage(generator, probe_pairs, sigma, seed=args.seed)
+        print(f"[leakage] {leak}")
+        bodies = {
+            "captures": [_display(p) for p in args.body_data],
+            "groups": [ranked.index(x) for x in lengths],
+            "leg_lengths": lengths,
+            "targets": args.body_targets,
+            "pairs": len(pairs),
+            "epochs": args.body_epochs,
+            "invariance": args.invariance,
+            "log": body_log,
+            "leakage": leak,
+        }
     chain_log = []
     if chain.rounds and args.chain_objective == "rhythm":
         chain_log = train_on_rhythm(
@@ -441,6 +537,7 @@ def main() -> int:
             "passes": passes,
         },
         "chain_fidelity": chain_measured,
+        "bodies": bodies,
         "artifact": _display(path),
     }
     results.parent.mkdir(parents=True, exist_ok=True)

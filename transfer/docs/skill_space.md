@@ -3677,6 +3677,129 @@ family's share?
 about 30 min of evaluation. It waits for `w14_paper.sh`'s "done". One Isaac process at a
 time.
 
+### 10.17 The multi-task generator, with the bodies' executions; rough held out; pre-registered (W16)
+
+Steps 4–6 of `method_revision.md` §6. Pre-registered 2026-11-07, before any of its runs. Each
+choice below is stated with its reason.
+
+**What the generator does with a body's history** (`python transfer/scripts/w16_compare.py
+--asked`). The same generator asks each body for a different gait. On S's three trackers per
+body, at the three L4 commands, task units, the duty factor is:
+
+| Generator | Teacher | Asked of the G1 | G1 executes | Asked of the NAO | NAO executes |
+| --- | --- | --- | --- | --- | --- |
+| `flat_dagger2` | 0.496 | 0.515 | 0.468 | 0.550 | 0.580 |
+| `rough_b4` | 0.544 | 0.542 | 0.469 | 0.571 | 0.590 |
+
+- *What this shows.* A generator reads the history of the body executing its plans, and it
+  has only ever seen its teacher's. On the NAO's history it continues what it reads: longer
+  stance. The NAO then holds stance longer than it is asked. The deviation goes round a loop:
+  body → history → plan → body.
+- *Why it matters for the NAO.* Every intervention that lengthened stance (W8, W9) or showed
+  it the G1's faster plans (W13) made the NAO worse. The loop is a mechanism, read here and
+  not yet tested, by which its deviation feeds itself.
+
+**Step 4: the bodies execute the base tasks.**
+- *Which decoders.* W13's: trained once on the base tasks and frozen, as the design says.
+  The NAO's W13 decoder fails W13's criterion (10.14), but its failure is learned (10.15). It
+  is the decoder the design deploys, so its execution is the NAO's data. S's decoder never
+  saw the tasks, and using it would leave the design.
+- *Which captures.* One tracker per body (G1 `mt_g1_s41_sym`, NAO `mt_nao_s31_sym`), on walk,
+  flat and jog: the tasks with a generator and a decoder that executes them (10.14).
+  - Three commands per task, in the G1's units and scaled to the NAO's:
+    - walk: 0.1, 0.18 and 0.25 m/s, inside its expert's range;
+    - flat: L4's forward, fast and turning;
+    - jog: 1.0, 1.25 and 1.5 m/s.
+  - 64 environments, 900 steps, the deployed path, observing in each tracker's own units.
+  - 18 captures (`{g1,nao}/rollouts/w16_<tag>_<task>_<command>.npz`).
+- *What is excluded.* No rough. Backward and sidestep stay in the G1 set only: no generator
+  of theirs passed its gate (10.13), so no body executes their plans.
+
+**Step 5: the generators.** Each is trained on the G1 experts' DART captures of the five base
+tasks (walk, flat, backward, sidestep, jog), with the per-task recipe of W12: the G1 body's
+encoder and its noise, horizon 20, commit 13, midpoint with 8 flow steps, log-warped loads,
+noise-conditional.
+- *Training length.* 200 epochs, the number of steps a per-task generator took (1000 epochs
+  on one capture), on five captures.
+- *The arms.*
+  - `mt16_c`: the experts only. This is the control, the G1-only multi-task generator.
+  - `mt16_m`: `mt16_c`, then the bodies' histories, each paired with the future its teacher
+    went on to from the window most like it, in phase and command. This is DAgger in `z*`
+    without an expert on the body (`latent/body_data.py`, `phase_targets`).
+  - `mt16_d`: `mt16_c`, then the bodies' histories paired with their own futures, the
+    bodies' executions as demonstrations.
+  - `mt16_l`: as `mt16_m`, with the learned part trained to carry no body (below).
+- *How the body stage trains.* It is a constrained problem, as the chains are: it minimises
+  the loss on the bodies' pairs while the teacher's held-out loss stays within 2 SE of its
+  value before. It runs 100 epochs on up to 200 000 pairs. The arms differ only in that
+  stage, because all start from `mt16_c` (`--init-from`).
+- *Why `mt16_m` is the main arm and `mt16_d` its contrast.*
+  - The design says the generator "trains on the base tasks as each body executes them".
+    Read literally, that is `mt16_d`.
+  - The loop above predicts it fails. The generator would learn to continue each body's
+    deviation, and the body would enter the plans.
+  - `mt16_m` uses the same executions for what they are evidence of: the states each body
+    reaches. It learns where the teacher goes from them.
+- *The learned part beside `z*`* (the design's "parte aprendida en el latente").
+  - *What it is.* The generator conditions on `z*` itself (the latest state), the command,
+    the noise level, and a learned 64-dimensional summary of the history. That summary is
+    the learned part.
+  - *What it carries.* In the `z*`-only arms it is free to carry the body, which is the
+    loop's path into the plans.
+  - *What `mt16_l` changes.* An adversary is trained to tell the bodies apart from the
+    summary, counting the teacher's windows as the G1's. Through a reversed gradient
+    (weight 1.0), the summary is trained to make that impossible.
+  - *Why only multi-body data make it testable.* With one body there is nothing to be
+    invariant to.
+  - *The decoders are untouched.* They still read `z*` alone, so "trained once" holds.
+- *Leakage test, for every arm* (`body_data.leakage`). A fresh probe reads the summary on
+  50 000 held histories of both bodies, trained on 70 % and scored on 30 %, by balanced
+  accuracy, against the same probe on shuffled labels.
+  - **Gate for `mt16_l`.** It is evaluated in the simulator only if the probe beats its
+    control by at most 3 SE.
+  - For the other arms the leakage is reported, and the prediction is that it is there.
+
+**Step 6: rough, held out of everything.**
+- *Where.* On the six W13 trackers (G1 s41–s43, NAO s31–s33), frozen, with each arm's
+  generator moved to each tracker's encoder.
+- *How.* Rough's L4 at its three commands, on the deployed path, in each tracker's own units
+  (W14's pinned path, for both bodies).
+- *Reference.* `rough_b4`, a generator that saw rough, gives what zero-shot costs.
+- *Zero-shot status.* No rough capture, generator or plan enters steps 4–5, so this is the
+  zero-shot test of the design.
+
+**Readings** (`transfer/scripts/w16_compare.py` → `transfer/results/w16_multibody.json`). Per
+body, paired by tracker, as mean ± SE over three, on rough's largest gate C deviation (the
+mean over the commands):
+1. **What the bodies' data add:** `mt16_m − mt16_c`. "Help" below −2 SE, "hurt" above +2 SE,
+   "none" otherwise.
+2. **The theory.**
+   - `mt16_d − mt16_m` above +2 SE: "demonstrations worse", as predicted.
+   - The asked duty's distance from the teacher's, `mt16_m` against `mt16_c`: "closer"
+     below −2 SE, as predicted for the NAO.
+3. **The learned part:** `mt16_l − mt16_m`, read as 1.
+4. **What zero-shot costs:** each arm minus `rough_b4`, reported.
+5. **No regression,** per arm against `mt16_c`: at most two more falls over the three
+   trackers, and every command's speed ratio at least 0.9.
+
+Also reported: each generator's own calibration gate and chain fidelity, as W12 reports them.
+- *A generator that fails its own gate is still evaluated, and marked.* This is a
+  multi-task model checked on held-out walking, and the step-6 comparison is the question.
+
+**What each outcome leads to.**
+- *The bodies' data help the NAO* (`mt16_m`). The loop is the NAO's problem, and step 5 is
+  the method. Then the third body's question, body zero-shot, is next.
+- *Neither helps, and `mt16_d` is worse.* The loop is real, but its cure is not in the
+  data. Realisation 2's guidance or the hybrid `z*` of `method_revision.md` §4 are next.
+- *`mt16_l` helps beyond `mt16_m`.* The learned part does what `z*` alone does not, and is
+  the candidate.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the
+  reading.
+
+**Budget.** About 45 min of captures, about 45 min of generator training (four arms), and
+about 3 h of rough L4 (five arms × six trackers × three commands). It waits for W15's
+"done". One Isaac process at a time.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

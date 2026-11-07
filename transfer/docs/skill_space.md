@@ -3360,6 +3360,91 @@ trainings.
 - *The walk:* S0 passes on all three. No fall excess.
 - *Not yet read:* jog (the target and "executes"), the gated-out aside, and the NAO.
 
+**Interim, the NAO's seed 31 (2026-11-07, 08:27).** One seed, against the incumbent.
+
+| Tracker | Flat largest deviation | Body duty on flat, forward (left, right) | Walk signature, largest |
+| --- | --- | --- | --- |
+| `r1_3498_sym_v3` (incumbent) | 0.174 | 0.536, 0.625 | 0.221 |
+| `warm_nao_r1_s32_sym` (S) | 0.187 | 0.553, 0.623 | 0.186 |
+| `warm_nao_r1_s33_sym` (S) | 0.209 | 0.545, 0.636 | 0.213 |
+| `mt_nao_s31_sym` (W13) | 0.376 | 0.656, 0.685 | 0.244 |
+
+- *Where it comes from.* Duty: the deviation is 0.323 against S's 0.158–0.176, while stride
+  and period stay within 0.075. The liftoff lag goes from about 0 to 0.065.
+- *Not the plans.* All four trackers are asked the same duty (0.526, 0.578 at forward). It
+  is the execution that changed.
+- *No falls; speed 1.04–1.06; S0's walk passes.*
+- *Two explanations, which this seed cannot separate.*
+  - **Units:** W13 trained the NAO on flat's plans in its own units (the fix of the smoke
+    run), and L4 shows them to it in the G1's.
+  - **Learned:** training on the tasks changed how the NAO executes any plan. The walk,
+    which L4 shows in the NAO's own units, drifts a little too.
+  - Hence W14 (10.15), pre-registered before seeds 32 and 33 exist.
+
+### 10.15 The tracker's own units on the deployed path; pre-registered (W14)
+
+**Context.** The open finding of 10.14. L4 makes the task's generator the contract.
+- *What is exact.* The body's encoder is moved into it exactly (`body_encoder.py` folds the
+  affine change into its last layer and checks it to 1e-4).
+- *What is not.* Every `z*` handed to the tracker as an observation is normalised with the
+  task generator's statistics, not with those the tracker trained under.
+- *Who is affected.*
+  - The G1's contracts share one set of statistics, so the G1 is not affected.
+  - The NAO's walk contract (`walk_dagger2e`) has its own. Every NAO reading on a
+    G1-derived generator is affected: flat and rough in the paper, W8 and W9's NAO arms,
+    W13's NAO rows.
+- *Which reading is right.* A tracker reads its observations in the units it trained in, so
+  that reading is the correct one by construction. What is unknown is how far the published
+  NAO figures move.
+
+**The change** (a units option for the command term; off by default).
+- With it, each `z*` the command term writes into the tracker's observation is mapped into
+  the tracker's own contract's units, `x ↦ N_own(N_task⁻¹(x))`. The map is affine and exact.
+- The generator still samples, and the encoder still estimates, in the task's units, exactly
+  as now. Only what the tracker reads changes.
+- *Tests.*
+  - Off, the path is byte-identical.
+  - With equal statistics (the G1), the map is the identity.
+  - The map composed with its inverse returns its input.
+- It is written after W13's last simulator process, so W13 runs on an unchanged tree.
+
+**Pre-registered (2026-11-07, 08:45, before W13's NAO seeds 32 and 33 exist).**
+- **Runs**, all on frozen trackers, symmetrized, on the deployed path as L4 runs them, with
+  the units option on (`transfer/scripts/w14_units.sh`, after W13's "done"). The current
+  path's captures are the pairs; they are already on disk.
+  - *S's three NAO trackers:* `flat_dagger2` and `rough_b4`, at the three commands. These
+    are the paper's NAO figures.
+  - *W13's three NAO trackers:* `flat_dagger2` at the three commands, and jog's L4 at its
+    middle command.
+  - *S's three NAO trackers:* jog's L4 at its middle command, so that W13's jog reading has
+    its control in the same units.
+  - *Not run:* rough on W13's trackers (it waits for step 6), and the G1 (the map is the
+    identity there).
+  - Only the encoder run is captured. The truth run is instrumentation and is not read.
+- **Readings** (`transfer/scripts/w14_compare.py` → `transfer/results/w14_units.json`),
+  pinned minus current, paired by tracker, as mean ± SE over three:
+  1. *The published NAO figures.* On S's trackers, the change in the largest deviation and
+     in the duty deviation, per skill.
+     - If either moves by more than 2 SE, the paper's NAO figures for that skill are
+       corrected to the pinned reading. The correction says what the wrong figure
+       affected (the paper's tables, the NAO arms of W8 and W9).
+     - Otherwise they are reported as unchanged within 2 SE.
+     - Either way, the pinned reading is the NAO's evaluation path from W14 on.
+  2. *What W13's NAO flat regression is.* This reading applies only if the regression holds
+     on all three seeds under the current path (W13 − S paired, flat's largest deviation,
+     above 2 SE).
+     - **Units** if, pinned, that paired difference is no longer above 2 SE and W13's
+       body duty on flat falls by more than 2 SE.
+     - **Learned** if, pinned, the difference stays above 2 SE.
+     - Neither, otherwise. That outcome is reported with its figures.
+  3. *W13's NAO "executes" on jog,* re-read pinned with W13's rule.
+- **What W14 does not change.**
+  - W13's verdict is read as registered, on the current path.
+  - If reading 1 or 2 shows the units move the NAO's readings, step 4 of
+    `method_revision.md` §6 uses the NAO's pinned readings, and says so.
+- **Budget.** 33 deployed captures at about 2 min each (W13 seed 31's ladder:
+  3.8 min per L4 command, half of it the truth run), so about 1.5 h.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

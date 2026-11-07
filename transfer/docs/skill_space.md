@@ -3969,6 +3969,104 @@ chain fidelity and leakage, and the per-command figures.
 **Budget.** About 20 min of training (three arms), 5 min of pre-check, and about 2 h of rough
 L4 (three arms × six trackers). One Isaac process at a time.
 
+**Result (2026-11-07, 22:27 – 2026-11-08, 00:07): relabelling fixes the speed and hurts the
+deviation on both bodies. The pre-check passed a generator the deployed path then failed.**
+`bash transfer/scripts/w17_relabel.sh` ran with no failure. Its compare (`python
+transfer/scripts/w17_compare.py --output transfer/results/w17_relabel.json`) printed "g1: relabel
+hurt, closed -0.90, bodies help; nao: relabel hurt, closed -1.12, bodies help".
+
+*The generators* (`contract_mt17_*.json`):
+
+| Arm | Calibration error | Own gate | Chain fidelity | Leakage (control 0.50) |
+| --- | --- | --- | --- | --- |
+| `mt17_c` | 0.055 / 0.040 | fails (marked, evaluated) | 0.226 | 0.998 |
+| `mt17_m` | 0.067 / 0.051 | fails (marked, evaluated) | 0.284 | 0.999 |
+| `mt17_l` | 0.056 / 0.047 | fails | 0.399 | 0.996 |
+
+*The pre-check passed* (`held_out_chains_w17_pre.json`): `mt17_c` chained from rough's histories
+walks speed ratios 0.942 / 1.039 / 0.975, with a mean largest deviation of 0.185 against `mt16_c`'s
+0.302.
+
+*The readings* (paired over three trackers, rough's largest deviation):
+
+| Reading | G1 | NAO | Verdict |
+| --- | --- | --- | --- |
+| 1. Relabelling, `mt17_c − mt16_c` | +0.125 ± 0.006 | +0.068 ± 0.007 | hurt, hurt |
+| 2. Zero-shot cost, `mt17_c − rough_b4` | +0.265 ± 0.026 | +0.128 ± 0.008 | reported |
+| 2. Share of W16's cost closed | −0.90 | −1.12 | reported |
+| 3. Bodies' data, `mt17_m − mt17_c` | −0.156 ± 0.063 | −0.011 ± 0.005 | help, help |
+| 4. Learned part, `mt17_l − mt17_m` | not evaluated | not evaluated | leakage gate fails |
+
+5. **No regression.**
+   - `mt17_c` passes on both bodies: no falls, and its lowest speed ratio is 0.915 (G1) and
+     0.925 (NAO). It is the first multi-task arm to clear 0.9; W16's were all at 0.79–0.84.
+   - `mt17_m` fails on falls: 21 on the G1 (15 on s41, 6 on s42) and 11 on the NAO, against
+     none for `mt17_c`.
+
+- *The branch that applies.* Literally, "it helps neither". Its premise, "the speed is not the
+  cost; the style is", holds: the closed-loop speed went from 0.82 to 0.92 while the deviation
+  grew.
+- *The learned part failed as realised, a second time.* The MMD constraint was not met at the
+  end: MMD² was 0.0011 against a reference of −0.0001, and its multiplier was still rising, at
+  8.8. The probe still told the bodies apart (0.996), and chain fidelity fell to 0.399. It was
+  not evaluated.
+
+**Where the deviation came from** (read after the result; instrumentation, not pre-registered).
+`python transfer/scripts/w17_mechanism.py --output transfer/results/w17_mechanism.json`.
+
+- *Rough's forward command is the walk task's.* Within 0.02 of it in the dimensionless command
+  space, 100 % of the base experts' steps are the walk expert's under the given command, and
+  84 % under the relabelled one (flat 5 %, jog 11 %).
+  - The walk expert walks tall and almost always loaded: height 0.943 L and loaded share 0.934,
+    against the rough teacher's 0.843 and 0.571.
+  - At 0.25 m/s the base tasks therefore define a gait that is not rough's, and a generator that
+    reproduces them is scored against rough's teacher.
+- *Relabelling moved the walk expert into turning.* Near rough's turning command the given
+  commands are flat's alone. The relabelled ones are 20 % walk.
+  - The G1's `mt17_c` asks a height of 0.934 and a loaded share of 0.80 there, where `mt16_c`
+    asked 0.877 and 0.60.
+  - Per command, the G1's largest deviation at turning went from 0.140 (`mt16_c`) to 0.420
+    (`mt17_c`); at forward from 0.370 to 0.456; at fast it held, at 0.134 against 0.144.
+- *The posture at the start chooses the style.*
+  - `python transfer/scripts/held_out_chains.py --start body --start-capture
+    "g1/rollouts/zs_mt_g1_s41_sym_rough_b4_own_auto_kin_{command}_encoder.npz" --generators
+    mt16_c mt17_c mt17_m --output transfer/results/held_out_chains_w17_crouched_start.json`.
+    From the crouched state `rough_b4`'s plans leave the G1 in (height 0.85), `mt17_c` walks
+    rough's style: mean largest 0.176, loaded share 0.565 at turning.
+  - `--start-capture "<body>/rollouts/zs_<tag>_{arm}_own_auto_kin_{command}_encoder.npz"`
+    (`held_out_chains_w17_own_start_{g1,nao}.json`) starts each arm from the state its own
+    deployed run reached. There, `mt17_c` stays tall (0.93) and walks the walk expert's style:
+    mean largest 0.468 (G1) and 0.526 (NAO).
+  - The same generator gives 0.176 or 0.468 according to the start alone. From that start, the
+    chain orders the four arms as L4 does on each body:
+    - G1, chain: `rough_b4` 0.097 < `mt17_m` 0.269 < `mt16_c` 0.291 < `mt17_c` 0.468.
+    - G1, L4: 0.075 < 0.184 < 0.215 < 0.340.
+    - NAO, chain: `mt16_c` 0.398 < `mt17_m` 0.458 < `mt17_c` 0.526, with `rough_b4` 0.098.
+    - NAO, L4: 0.337 < 0.394 < 0.405, with `rough_b4` 0.277. The NAO's `rough_b4` gap is its
+      body: it executes a loaded share of 0.69 where the plans ask 0.60.
+- *Why the pre-check was blind.* It started from rough's teacher histories, which already show
+  rough's gait (height 0.84), and a multi-task generator continues a gait it is shown. The
+  deployed path starts from the body's state after a reset and chooses there. The ladder's 100
+  settle steps run under the deployed generator, so they are not recorded and its first
+  recorded state is already that choice. The state after a reset has not been captured yet.
+- *The bodies' data* moved the G1's `mt17_m` into the crouched mode: it asks 0.85–0.86 at every
+  command. That is its −0.156. They did not move the NAO's (0.92–0.94).
+
+**Reframed.**
+- The method did what the base tasks define. At rough's forward command they define the walk
+  expert's gait, and the deployed path keeps whichever mode the start selects.
+- So the rough test, as scored, measures two things together:
+  - how a generator generalises to a command it has not seen;
+  - which of two experts' styles it picks at a command both define.
+
+  Zero-shot, the second has no right answer, because nothing in the command or the start says
+  which style rough wants.
+- The next step tests the first alone: a held-out task whose commands no base task covers
+  (10.19).
+- Relabelling is not adopted; the pre-registered criterion was not met. W18 keeps it as the
+  command's definition for its arms, because its speed effect is measured in closed loop and its
+  harm was the turning mode above, which a task with its own commands does not have.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

@@ -111,6 +111,8 @@ assets_online() {
   done
 }
 
+# ZS_STEPS / ZS_SETTLE: recorded and unrecorded steps of every capture (900 and 100). With
+# ZS_SETTLE=0 a capture holds the body's state after a reset (skill_space.md §10.19).
 capture() {
   local name="$1" attempt log
   shift
@@ -118,7 +120,7 @@ capture() {
   for attempt in 1 2 3; do
     until assets_online; do sleep 60; done
     "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task_id" \
-      --driver-policy "$policy" --steps 900 --settle-steps 100 "$@" \
+      --driver-policy "$policy" --steps "${ZS_STEPS:-900}" --settle-steps "${ZS_SETTLE:-100}" "$@" \
       --output "$rollouts/zs_${tag}_${name}.npz" > "$log" 2>&1
     grep -aqE "Unable to open the usd file at path: https|USD file not found at path at: 'https" "$log" || break
     echo "capture $name: an asset could not be opened (attempt $attempt); retrying"

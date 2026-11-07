@@ -4067,6 +4067,89 @@ walks speed ratios 0.942 / 1.039 / 0.975, with a mean largest deviation of 0.185
   command's definition for its arms, because its speed effect is measured in closed loop and its
   harm was the turning mode above, which a task with its own commands does not have.
 
+### 10.19 Leave one task out where no other task defines its commands; pre-registered (W18)
+
+Pre-registered 2026-11-08, 01:20, before any of its runs, on W17's result (10.18), whose
+pre-registered next step this is ("leave-one-task-out among them, to measure how far a style
+generalises").
+
+**Hypothesis.**
+- A generator trained on the base tasks generalises to a held-out task as far as its commands
+  lie between theirs.
+- Sidestep's three commands are its own: 98–100 % of the base experts' steps near each are the
+  sidestep expert's (`w17_mechanism.json`).
+- Leaving sidestep out therefore tests generalisation to unseen commands, with no other expert's
+  style at the same command.
+- It is also a task neither body's W13 decoder ever trained on (their tasks were walk, flat and
+  jog, 10.14), so it is held out of every gradient step.
+
+**Steps** (`transfer/scripts/w18_loto.sh`, status `logs/contract/w18_loto.status`).
+1. **The state after a reset.**
+   - 40 recorded steps with no settle steps, on G1 s41 and NAO s31, at rough's forward command,
+     under `mt17_c`. They are copied as `w18_reset` so that no W17 capture is overwritten
+     (`ZS_SETTLE=0 ZS_STEPS=40` in `zero_shot_ladder.sh`).
+   - Then the proxy is calibrated: `held_out_chains.py --start body` from those states, for
+     `mt16_c`, `mt17_c`, `mt17_m` and `rough_b4` on rough, against their L4.
+2. **The generators**, W17's recipe with relabelling (span 50), 200 epochs.
+   - `mt18_no_sidestep`: the walk, flat, backward and jog experts.
+   - `mt18_no_sidestep_m`: from it, plus the bodies' histories (W16's 18 captures of walk, flat
+     and jog) with the teacher's phase-matched futures and their achieved commands. This is the
+     design's multi-body generator.
+   - The references saw sidestep: `mt17_c` and `mt17_m`.
+3. **Sidestep L4,** on the six W13 trackers, in each tracker's own units, on the deployed path.
+   - Commands: `left` (0, 0.25, 0), `left_fast` (0, 0.45, 0) and `right` (0, −0.35, 0) m/s in G1
+     units, Froude-scaled for the NAO, read against `base_sidestep_play_<command>.npz`.
+   - Four arms.
+4. **Offline leave-one-task-out,** for the other four base tasks (`mt18_no_walk`, `_no_flat`,
+   `_no_backward`, `_no_jog`, the same recipe).
+   - Each is chained on its held-out task's teacher captures: flat's, backward's training-variant,
+     jog's, and sidestep's, from the teacher's history and from the state after a reset.
+   - `mt17_c` is chained on the same.
+   - The walk task has no per-command teacher capture, so its generator is trained and reported
+     on its gate only.
+5. **Compare:** `transfer/scripts/w18_compare.py` → `transfer/results/w18_loto.json`.
+
+**Readings.** Per body, paired over W13's three trackers, sidestep's largest gate C deviation (the
+mean over its three commands):
+1. **Proxy calibration** (from step 1).
+   - "Calibrated" if, on each body, the reset-start chain orders the four arms as L4 does.
+   - On the G1 only, the chain's duty factor must also be within 0.05 of the one L4's plans asked
+     for in at least 10 of the 12 arm × command cells. The NAO's plans pass through its body's
+     resyncs.
+   - If calibrated, this start replaces the teacher's history as every later pre-check's.
+2. **What leaving sidestep out costs:** `mt18_no_sidestep − mt17_c`. "Costs" above +2 SE, "no
+   detectable cost" otherwise.
+3. **The open objective on the held-out task,** per arm. It passes if:
+   - every command's directed speed ratio is at least 0.9: the CoM velocity along the commanded
+     direction, body over teacher, after the 100 settle steps, from the captures;
+   - the arm has at most two more falls than `mt17_c` over the three trackers.
+4. **The bodies' data on the held-out task:** `mt18_no_sidestep_m − mt18_no_sidestep`. "Help"
+   below −2 SE, "hurt" above +2 SE. Reading 3 applies to it as well.
+5. **Offline, per base task:** the leave-one-out generator's chain deviation minus `mt17_c`'s, on
+   that task, from both starts. Reported: how far each style generalises.
+
+Each generator's own gate, chain fidelity and leakage are also reported. A generator that fails
+its own gate is still evaluated, and marked.
+
+**What each outcome leads to.**
+- *No detectable cost on both bodies, or the open objective passes on both.* Task zero-shot
+  holds where the task is defined by its own commands. Rough's cost is the walk task's claim on
+  its forward command. Which held-out task the program scores is left open, with this
+  evidence. Body zero-shot (a third body) is next.
+- *It costs, and the directed speed fails.* The generator does not compose a gait for commands it
+  has not seen. Zero-shot claims are then bounded by the base tasks' command coverage, and that
+  coverage is the next question.
+- *The bodies' data help on the held-out task.* The multi-body generator is the method, and its
+  falls (10.18) are the next fix.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the reading.
+
+**Budget.**
+- About 10 min of reset captures and calibration.
+- About 50 min of generator training (six generators).
+- About 2.6 h of sidestep L4 (four arms × six trackers).
+- About 20 min of offline chains.
+- One Isaac process at a time.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

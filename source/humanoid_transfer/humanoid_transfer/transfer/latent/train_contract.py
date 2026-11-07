@@ -237,7 +237,8 @@ def phase_targets(
     commands: torch.Tensor,
     recent: int = 8,
     chunk: int = 2048,
-) -> torch.Tensor:
+    return_index: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """For each history the generator wrote, a future in phase with it.
 
     A chain that drifted in cadence is, at a given instant, at another phase of
@@ -246,7 +247,8 @@ def phase_targets(
     teacher went on to from the window of the data most like the history -- its
     last ``recent`` samples and its command, in normalised units -- moved to
     begin where the history ends: the same phase, not the same instant (the
-    retrieval motion matching does). Returns ``(N, horizon, skill)`` normalised.
+    retrieval motion matching does). Returns ``(N, horizon, skill)`` normalised,
+    and with ``return_index`` also the stream step each future was taken from.
     """
     bank_window = windows(generator, streams, bank, None)
     bank_future = futures(generator, streams, bank)
@@ -256,7 +258,7 @@ def phase_targets(
         return torch.cat([window[:, -recent:].flatten(1), scaled], dim=1)
 
     keys = features(bank_window, streams.command[bank])
-    out = []
+    out, index = [], []
     for start in range(0, len(histories), chunk):
         history = histories[start : start + chunk]
         query = features(history, commands[start : start + chunk])
@@ -265,6 +267,9 @@ def phase_targets(
         future = generator.warp(bank_future[nearest])
         moved = generator.warp(history)[:, -1:] + (future - window[:, -1:])
         out.append(generator.unwarp(moved))
+        index.append(bank[nearest])
+    if return_index:
+        return torch.cat(out), torch.cat(index)
     return torch.cat(out)
 
 

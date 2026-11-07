@@ -18,6 +18,7 @@ from humanoid_transfer.transfer.latent.body_data import (  # noqa: E402
     body_pairs,
     leakage,
     load_body_streams,
+    mmd2,
     train_on_bodies,
 )
 from humanoid_transfer.transfer.latent.contract import ContractClock, ContractDims  # noqa: E402
@@ -158,3 +159,49 @@ def test_the_probe_finds_a_body_the_summary_carries_and_not_one_it_does_not(teac
     seen = leakage(generator, apart, sigma)
     assert blind["balanced_accuracy"] < 0.65 and blind["chance"] == 0.5
     assert seen["balanced_accuracy"] > 0.9 and seen["control"] < 0.65
+
+
+def test_mmd_is_near_zero_within_a_distribution_and_large_between_two():
+    torch.manual_seed(2)
+    a, b = torch.randn(300, 4), torch.randn(300, 4)
+    assert abs(float(mmd2(a, b))) < 0.05
+    assert float(mmd2(a, b + 2.0)) > 0.5
+    # Scale-free: shrinking both samples alike does not change it.
+    small = float(mmd2(0.1 * a, 0.1 * (b + 2.0)))
+    assert math.isclose(float(mmd2(a, b + 2.0)), small, rel_tol=1e-4)
+
+
+def test_target_commands_are_the_teachers_at_each_target_and_need_teacher_targets(teacher):
+    streams, steps, generator, _ = teacher
+    marked = replace(streams, command=torch.arange(len(streams)).float()[:, None].repeat(1, 3))
+    groups = torch.zeros(len(streams), dtype=torch.long)
+    pairs = body_pairs(
+        generator, marked, groups, marked, steps, "teacher", 40, bank=len(steps),
+        command_from="target",
+    )  # fmt: skip
+    # Retrieval finds each of the teacher's own histories in the bank, at its own (marked)
+    # command, so the target's step is the history's own, and its marked command names it.
+    assert torch.equal(pairs.command[:, 0].long(), pairs.steps)
+    with pytest.raises(ValueError):
+        body_pairs(generator, streams, groups, streams, steps, "own", 4, command_from="target")
+    with pytest.raises(ValueError):
+        body_pairs(generator, streams, groups, streams, steps, "teacher", 4, command_from="x")
+
+
+def test_the_mmd_constraint_trains_logs_its_two_sides_and_moves_its_multiplier(teacher):
+    streams, steps, generator, config = teacher
+    groups = (torch.arange(len(streams)) >= len(streams) // 2).long()
+    pairs = body_pairs(generator, streams, groups, streams, steps, "teacher", 128, bank=256)
+    sigma = torch.full((SIZE,), 0.01)
+    log = train_on_bodies(
+        streams, steps, steps[:64], generator, sigma, config, pairs, 2, 1.0,
+        invariance_kind="mmd",
+    )  # fmt: skip
+    assert "adversary_loss" not in log[-1]
+    assert {"mmd", "mmd_reference", "mmd_multiplier"} <= set(log[-1])
+    assert log[-1]["mmd_multiplier"] >= 0.0
+    with pytest.raises(ValueError):
+        train_on_bodies(
+            streams, steps, steps[:64], generator, sigma, config, pairs, 1, 1.0,
+            invariance_kind="probe",
+        )  # fmt: skip

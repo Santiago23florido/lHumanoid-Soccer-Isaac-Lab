@@ -50,6 +50,7 @@ from humanoid_transfer.transfer.latent.contract import (  # noqa: E402
     save_contract,
 )
 from humanoid_transfer.transfer.latent.events import contact_events  # noqa: E402
+from humanoid_transfer.transfer.latent.hindsight import relabel  # noqa: E402
 from humanoid_transfer.transfer.latent.model import G1_OBSERVATION  # noqa: E402
 from humanoid_transfer.transfer.latent.sequences import load_streams  # noqa: E402
 from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
@@ -194,6 +195,20 @@ def main() -> int:
     )
     parser.add_argument("--body-targets", choices=("teacher", "own"), default="teacher")
     parser.add_argument(
+        "--pair-command",
+        choices=("body", "target"),
+        default="body",
+        help="The command a body pair is trained with: the body's given one, or (teacher "
+        "targets) the teacher's at the step its target future came from.",
+    )
+    parser.add_argument(
+        "--relabel-span",
+        type=int,
+        default=0,
+        help="Train on the command each future achieved, its mean over this many samples "
+        "(latent/hindsight.py; the data and the gait); 0: the command the expert was given.",
+    )
+    parser.add_argument(
         "--init-from",
         type=Path,
         default=None,
@@ -212,7 +227,14 @@ def main() -> int:
         type=float,
         default=0.0,
         help="Weight of the reversed gradient that trains the history summary to carry no "
-        "body (an adversary on the bodies' and the teacher's windows); 0: none.",
+        "body (an adversary on the bodies' and the teacher's windows); 0: none. With "
+        "--invariance-kind mmd, the initial multiplier of the MMD constraint.",
+    )
+    parser.add_argument(
+        "--invariance-kind",
+        choices=("adversary", "mmd"),
+        default="adversary",
+        help="How the summary is trained to carry no body (latent/body_data.py).",
     )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--logdir", type=Path, default=REPO_ROOT / "logs/contract")
@@ -230,6 +252,9 @@ def main() -> int:
 
     streams = load_streams(paths).to(args.device)
     gait = load_streams([args.gait]).to(args.device)
+    if args.relabel_span > 0:
+        streams = relabel(streams, args.relabel_span)
+        gait = relabel(gait, args.relabel_span)
     envs = int(archive["done"].shape[1])
     held_out = (streams.capture == 0) & (streams.env >= envs - args.val_envs)
 
@@ -356,6 +381,7 @@ def main() -> int:
             args.body_targets,
             args.body_pairs,
             seed=args.seed,
+            command_from=args.pair_command,
         )
         body_log = []
         if args.body_epochs > 0:
@@ -370,6 +396,7 @@ def main() -> int:
                 args.body_epochs,
                 args.invariance,
                 args.seed,
+                args.invariance_kind,
             )
             print(f"[bodies] {body_log[-1]}")
         probe_pairs = body_pairs(
@@ -392,6 +419,8 @@ def main() -> int:
             "pairs": len(pairs),
             "epochs": args.body_epochs,
             "invariance": args.invariance,
+            "invariance_kind": args.invariance_kind,
+            "pair_command": args.pair_command,
             "log": body_log,
             "leakage": leak,
         }
@@ -466,6 +495,7 @@ def main() -> int:
         "control_dt": float(archive["control_dt"]),
         "captures": [_display(p) for p in paths],
         "teacher_sha256": str(archive["teacher_sha256"]),
+        "relabel_span": args.relabel_span,
     }
     save_contract(
         path,
@@ -487,6 +517,7 @@ def main() -> int:
             "validation_envs": args.val_envs,
             "teacher_sha256": meta["teacher_sha256"],
             "dt_star": dt_star,
+            "relabel_span": args.relabel_span,
         },
         "clock": {
             "step": clock.step,

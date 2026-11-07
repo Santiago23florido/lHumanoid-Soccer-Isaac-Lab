@@ -3898,7 +3898,76 @@ worse; nao: bodies none, demonstrations demonstrations worse".
 
 **Reframed.** The loop body → history → plan → body exists and is measured, but on the
 held-out task it is an order smaller than the task term, and the task term is in the command,
-not the body.
+not the body. W17 (10.18) tests that before anything else.
+
+### 10.18 The command a future achieved; rough held out; pre-registered (W17)
+
+Pre-registered 2026-11-07, 22:25, before any of its runs, on W16's result (10.17).
+
+**Hypothesis.** W16's zero-shot cost is mainly the base experts' tracking error, which the
+generator inherits through the command they were given. Relabelling every training command
+with the velocity its future achieved removes it (`latent/hindsight.py`).
+- *The relabel.* Each step's command becomes the mean, over its next 50 samples inside the
+  episode, of the CoM velocity in the heading frame and the base's yaw rate, in the command's
+  own dimensionless units. 50 samples is 1.0 s on the G1, one stride of every expert (0.93–1.29
+  s), so it does not follow the oscillation within a stride. It applies to the data and to the
+  gait the calibration chain starts from.
+- *What it defines and what it does not.* A command then means what the plan does: the task
+  is "track the command", so this states the task. It says nothing about how to walk.
+- *What stays.* The decoders, encoders and trackers are W13's, frozen. At inference the
+  generator is given the task's command, as before. Nothing of rough enters training: the
+  rough captures are read only by the offline pre-check and by L4.
+- *Hindsight relabelling* is the goal-conditioned idea of Andrychowicz et al. (2017), applied
+  here to the command of a generative model of plans.
+
+**The arms** (W16's recipe, 200 epochs, plus `--relabel-span 50`).
+- `mt17_c`: the experts only.
+- `mt17_m`: `mt17_c`, then the bodies' histories (W16's 18 step-4 captures) with the teacher's
+  phase-matched futures, each trained with the command its target achieved
+  (`--pair-command target`). The design's multi-body generator.
+- `mt17_l`: as `mt17_m`, with the history summary trained to carry no body by a constraint
+  instead of an adversary (`--invariance-kind mmd --invariance 1.0`).
+  - *The constraint.* MMD²(NAO's summaries, G1's and teacher's) ≤ MMD²(two halves of the
+    G1's and teacher's), on each batch: the bodies may differ no more than one body differs
+    from itself. It has its own dual ascent, starting at 1.0 (`latent/body_data.py`, `mmd2`).
+  - *Why.* The MMD is bounded and is zero exactly when the two distributions agree, which is
+    what the leakage probe tests. The adversary of W16 had nothing to settle at and broke the
+    generator.
+  - *Gate,* as W16's: evaluated in the simulator only if the leakage probe beats its control by
+    at most 3 SE.
+
+**Offline pre-check, a gate before any Isaac run** (`held_out_chains.py --generators mt17_c`).
+`mt17_c`, chained on its own plans from rough's histories, must walk a speed ratio within
+0.9–1.1 at all three commands, and its mean largest deviation must be below `mt16_c`'s 0.302.
+If it fails, no L4 is run and the result is reported.
+
+**Readings** (`transfer/scripts/w17_compare.py` → `transfer/results/w17_relabel.json`). Per body,
+paired over W13's three trackers, rough's largest deviation (mean over the commands), on the
+same deployed path and pinned units as W16. W16's `mt16_c` and `rough_b4` captures are reused.
+1. **Relabelling:** `mt17_c − mt16_c`. "Help" below −2 SE, "hurt" above +2 SE.
+2. **What zero-shot still costs:** `mt17_c − rough_b4`, and the share of W16's cost closed,
+   `1 − (mt17_c − rough_b4) / (mt16_c − rough_b4)` on the means. Reported.
+3. **The bodies' data:** `mt17_m − mt17_c`, read as 1.
+4. **The learned part:** `mt17_l − mt17_m`, read as 1, if the gate lets it in.
+5. **No regression,** per arm against `mt17_c`: at most two more falls over the three trackers,
+   and every command's speed ratio at least 0.9.
+
+Also reported: the chains of every arm (`held_out_chains.py`), each generator's own gate,
+chain fidelity and leakage, and the per-command figures.
+
+**What each outcome leads to.**
+- *Relabelling helps both bodies.* It is adopted as the definition of the command for every
+  multi-task generator; no tracker changes. What remains is the held-out gait's style, and on
+  the NAO its own W13 regression (10.14–10.15).
+- *It helps the G1 only.* The NAO's cost is its body. Its decoder is next (W15's question, or
+  realisation 2).
+- *It helps neither.* The speed is not the cost; the style is. Then the base tasks themselves
+  are the question: leave-one-task-out among them, to measure how far a style generalises.
+- *`mt17_l` helps beyond `mt17_m`.* The learned part is the candidate.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the reading.
+
+**Budget.** About 20 min of training (three arms), 5 min of pre-check, and about 2 h of rough
+L4 (three arms × six trackers). One Isaac process at a time.
 
 ## What this stage hands to the next
 

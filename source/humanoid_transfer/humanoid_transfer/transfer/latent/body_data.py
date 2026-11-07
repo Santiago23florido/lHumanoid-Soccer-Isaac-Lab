@@ -123,15 +123,25 @@ def body_pairs(
     pairs: int,
     bank: int = 32768,
     seed: int = 0,
+    command_from: str = "body",
 ) -> BodyPairs:
     """Up to ``pairs`` of the body's histories, each with its ``targets`` future.
 
     ``groups`` gives, per body step, the body that wrote it (one number per body). The
     histories come from steps whose whole future lies in the episode and away from a fall, as
     the teacher's do (:func:`.train_contract.contract_steps`).
+
+    ``command_from``: the command each pair is trained with. ``body``, the one the body was
+    given (it also keys the retrieval). ``target``, with ``teacher`` targets only: the
+    teacher's command at the step its future was taken from. Under relabelled teacher
+    streams (:mod:`.hindsight`), that is the command the target achieved.
     """
     if targets not in TARGETS:
         raise ValueError(f"targets must be one of {TARGETS}, not {targets!r}")
+    if command_from not in ("body", "target"):
+        raise ValueError(f"command_from must be 'body' or 'target', not {command_from!r}")
+    if command_from == "target" and targets != "teacher":
+        raise ValueError("command_from='target' needs teacher targets")
     order = torch.Generator(device="cpu").manual_seed(seed)
     steps = contract_steps(body, generator.horizon)
     steps = steps[torch.randperm(len(steps), generator=order)[:pairs].to(steps.device)]
@@ -141,9 +151,16 @@ def body_pairs(
         future = futures(generator, body, steps)
     else:
         picked = torch.randperm(len(teacher_steps), generator=order)[:bank]
-        future = phase_targets(
-            generator, teacher, teacher_steps[picked.to(teacher_steps.device)], window, command
+        future, source = phase_targets(
+            generator,
+            teacher,
+            teacher_steps[picked.to(teacher_steps.device)],
+            window,
+            command,
+            return_index=True,
         )
+        if command_from == "target":
+            command = teacher.command[source]
     return BodyPairs(window, command, future, groups[steps], steps)
 
 
@@ -170,6 +187,24 @@ def summary(generator: ContractGenerator, window: torch.Tensor) -> torch.Tensor:
     return generator.memory(generator.warp(window))
 
 
+def mmd2(a: torch.Tensor, b: torch.Tensor, scales: tuple[float, ...] = (0.5, 1.0, 2.0)):
+    """Unbiased squared MMD between samples ``a`` ``(n, d)`` and ``b`` ``(m, d)`` (Gretton et
+    al., 2012), with a sum of Gaussian kernels whose bandwidths are ``scales`` times the median
+    pairwise distance of the pooled samples (held fixed, not differentiated): scale-free, so
+    the summary cannot shrink its way to a small value. Zero in expectation when ``a`` and
+    ``b`` come from one distribution."""
+    pooled = torch.cat([a, b])
+    distance = torch.cdist(pooled, pooled).pow(2)
+    with torch.no_grad():
+        median = distance[distance > 0].median().clamp_min(1e-12)
+    kernel = sum(torch.exp(-distance / (2.0 * s * s * median)) for s in scales)
+    n, m = len(a), len(b)
+    kaa, kbb, kab = kernel[:n, :n], kernel[n:, n:], kernel[:n, n:]
+    within_a = (kaa.sum() - kaa.diagonal().sum()) / (n * (n - 1))
+    within_b = (kbb.sum() - kbb.diagonal().sum()) / (m * (m - 1))
+    return within_a + within_b - 2.0 * kab.mean()
+
+
 def _balanced_ce(logits: torch.Tensor, labels: torch.Tensor, classes: int) -> torch.Tensor:
     counts = torch.bincount(labels, minlength=classes).clamp_min(1).float()
     weight = counts.sum() / (classes * counts)
@@ -187,17 +222,32 @@ def train_on_bodies(
     epochs: int,
     invariance: float = 0.0,
     seed: int = 0,
+    invariance_kind: str = "adversary",
 ) -> list[dict[str, float]]:
     """Train on the bodies' pairs as a constrained problem, as the chains are trained.
 
         min  L_bodies(θ)   s.t.  L_data(θ) <= L_data(θ₀) + 2 SE
 
     on the teacher's held-out steps (:func:`.train_contract.train_on_chains` explains the
-    bound and the dual ascent on its multiplier). With ``invariance`` > 0 an adversary reads
-    the generator's history summary (:func:`summary`) and is trained to tell the bodies
-    apart -- the teacher's windows count as the G1's, group 0 -- while the summary is trained,
-    through a reversed gradient of weight ``invariance``, to make that impossible.
+    bound and the dual ascent on its multiplier). With ``invariance`` > 0 the generator's
+    history summary (:func:`summary`) is trained to carry no body, the teacher's windows
+    counting as the G1's (group 0), in one of two ways (``invariance_kind``):
+
+    ``adversary``
+        An adversary is trained to tell the bodies apart, and the summary, through a
+        reversed gradient of weight ``invariance``, to make that impossible (W16).
+    ``mmd``
+        A second constraint, with its own dual ascent, starting at ``invariance``:
+
+            MMD²(other bodies, group 0)  <=  MMD²(group 0, group 0)
+
+        the right side being the same estimate between two random halves of group 0 in the
+        batch: the bodies may differ in the summary no more than group 0 differs from itself
+        (:func:`mmd2`, at most ``MMD_SAMPLES`` per side). No adversary, so nothing to
+        maximise (W17).
     """
+    if invariance_kind not in ("adversary", "mmd"):
+        raise ValueError(f"invariance_kind must be 'adversary' or 'mmd', not {invariance_kind!r}")
     from .contract import contract_loss
     from .train_contract import data_loss
 
@@ -209,8 +259,10 @@ def train_on_bodies(
     multiplier = 1.0
     classes = int(pairs.group.max()) + 1
     adversary = None
+    use_mmd = invariance > 0.0 and invariance_kind == "mmd"
+    mmd_multiplier, mmd_scale = invariance, None
     parameters = list(generator.parameters())
-    if invariance > 0.0:
+    if invariance > 0.0 and invariance_kind == "adversary":
         width = summary(generator, pairs.window[:2]).shape[-1]
         adversary = torch.nn.Sequential(
             torch.nn.Linear(width, 128), torch.nn.ELU(), torch.nn.Linear(128, classes)
@@ -223,6 +275,7 @@ def train_on_bodies(
     for epoch in range(epochs):
         generator.train()
         shuffled = torch.randperm(len(pairs), generator=order).to(device)
+        gaps, references = [], []
         for start in range(0, len(shuffled), config.batch_size):
             batch = shuffled[start : start + config.batch_size]
             real = steps[torch.randint(len(steps), (len(batch),), generator=order).to(device)]
@@ -247,6 +300,15 @@ def train_on_bodies(
                 labels = torch.cat([pairs.group[batch], torch.zeros_like(real)])
                 logits = adversary(_Reverse.apply(features, invariance))
                 total = total + _balanced_ce(logits, labels, classes)
+            if use_mmd:
+                gap, reference = _invariance_terms(
+                    summary(generator, noisy), pairs.group[batch],
+                    summary(generator, teacher_window), order,
+                )  # fmt: skip
+                if gap is not None:
+                    total = total + mmd_multiplier * gap
+                    gaps.append(float(gap))
+                    references.append(reference)
             optimiser.zero_grad(set_to_none=True)
             total.backward()
             optimiser.step()
@@ -262,9 +324,39 @@ def train_on_bodies(
         }
         if adversary is not None:
             entry["adversary_loss"] = float(_balanced_ce(logits.detach(), labels, classes))
+        if use_mmd and gaps:
+            gap, reference = float(np.mean(gaps)), float(np.mean(references))
+            mmd_scale = mmd_scale or max(abs(gap), 1e-6)
+            mmd_multiplier = max(0.0, mmd_multiplier + (gap - reference) / mmd_scale)
+            entry.update(mmd=gap, mmd_reference=reference, mmd_multiplier=mmd_multiplier)
         log.append(entry)
     generator.eval()
     return log
+
+
+MMD_SAMPLES = 1024
+
+
+def _invariance_terms(
+    body: torch.Tensor, group: torch.Tensor, teacher: torch.Tensor, order: torch.Generator
+) -> tuple[torch.Tensor | None, float]:
+    """The MMD constraint's two sides on one batch: other bodies against group 0, and group
+    0's two halves against each other (detached)."""
+    other = body[group != 0]
+    zero = torch.cat([body[group == 0], teacher])
+    if len(other) < 2 or len(zero) < 4:
+        return None, 0.0
+
+    def take(x: torch.Tensor, count: int) -> torch.Tensor:
+        pick = torch.randperm(len(x), generator=order)[:count].to(x.device)
+        return x[pick]
+
+    other = take(other, MMD_SAMPLES)
+    zero = take(zero, 2 * MMD_SAMPLES)
+    half = len(zero) // 2
+    with torch.no_grad():
+        reference = float(mmd2(zero[:half], zero[half : 2 * half]))
+    return mmd2(other, zero[:half]), reference
 
 
 @torch.no_grad()
@@ -326,11 +418,13 @@ def leakage(
 
 
 __all__ = [
+    "MMD_SAMPLES",
     "TARGETS",
     "BodyPairs",
     "body_pairs",
     "leakage",
     "load_body_streams",
+    "mmd2",
     "summary",
     "train_on_bodies",
 ]

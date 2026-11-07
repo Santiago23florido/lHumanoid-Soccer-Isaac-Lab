@@ -3381,6 +3381,25 @@ trainings.
     which L4 shows in the NAO's own units, drifts a little too.
   - Hence W14 (10.15), pre-registered before seeds 32 and 33 exist.
 
+**Interim, the NAO's seed 32 (2026-11-07, 11:23).** The regression repeats.
+
+| Tracker | Flat largest deviation | Duty deviation on flat | Body duty on flat, forward (left, right) | Walk signature, largest |
+| --- | --- | --- | --- | --- |
+| `warm_nao_r1_s32_sym` (S) | 0.187 | 0.171 | 0.553, 0.623 | 0.186 |
+| `mt_nao_s32_sym` (W13) | 0.401 | 0.313 | 0.658, 0.657 | 0.261 |
+
+- *Paired by seed, two pairs:* W13 − S on flat's largest deviation is +0.208 ± 0.006
+  (+0.202 on seed 31, +0.214 on seed 32).
+- *Same place.* The largest field is a duty factor at every command, and is largest on the
+  left foot (0.365–0.439). Stride period moves by at most 0.068.
+- *Same asked duty* (0.526, 0.578 at forward). No falls; the minimum speed ratio is 1.035;
+  S0's walk passes (speed 0.997).
+- Units or learned is still W14's question. Its reading 2 applies only with three seeds.
+- *How it was read.* With the criterion's own functions: `w8_compare.condition` over
+  `COMMANDS`, and `w13_compare.walk`. The duties are `runs.encoder.asked.signature` and
+  `runs.encoder.signature` of the forward capture. The registered reading is
+  `w13_compare.py`'s, after jog.
+
 ### 10.15 The tracker's own units on the deployed path; pre-registered (W14)
 
 **Context.** The open finding of 10.14. L4 makes the task's generator the contract.

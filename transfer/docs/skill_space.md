@@ -3590,8 +3590,22 @@ over the three commands and both feet, from `runs.<path>.asked.signature` and
   execution of the G1's faster task plans in training, and how W13's tracker uses the
   estimate.
 
-**The paper's NAO figures, corrected (in progress).**
-- *What else the correction needs.*
+**The paper's NAO figures, corrected (2026-11-07, 18:20).** `bash
+transfer/scripts/w14_paper.sh`, then `python transfer/scripts/paper_decomposition.py --output
+transfer/paper/data/decomposition.json`, `python transfer/scripts/paper_bootstrap.py` and
+`python transfer/scripts/paper_tables.py`.
+
+| NAO, largest deviation | Rough, as published → pinned | Flat, as published → pinned |
+| --- | --- | --- |
+| Zero-shot, adopted | 0.154 → 0.144 | 0.174 → 0.164 |
+| Zero-shot, S's seeds | 0.149 ± 0.017 → 0.141 ± 0.016 | 0.186 ± 0.014 → 0.185 ± 0.012 |
+| B1 minus zero-shot | +0.197 ± 0.020 → +0.205 ± 0.019 | +0.488 ± 0.022 → +0.489 ± 0.021 |
+| B3 copy minus zero-shot | +0.045 ± 0.031 → +0.053 ± 0.030 | +0.122 ± 0.016 → +0.123 ± 0.015 |
+
+- S's seed 31 moves on rough from 0.115 to 0.110, and on flat from 0.162 to 0.164.
+- The paper's prose quoting these figures is corrected, and so is its note on the corrections
+  (`transfer/paper/README.md`).
+- *What the correction needed.*
   - The paper's "S's seeds" rows hold S's seed 31 (`warm_nao_r1_s31_sym`), which W13 had
     replaced with the incumbent.
   - Its decomposition reads the adopted model's true-state runs.
@@ -3605,8 +3619,9 @@ over the three commands and both feet, from `runs.<path>.asked.signature` and
     - B1, B2 and B3 themselves are not affected. B1 trained in the task's units and is
       read in them, and B2 and B3 have no contract.
     - So every NAO baseline's distance from the zero-shot model widens by the zero-shot
-      model's correction: about 0.010 on rough and 0.005 on flat. No comparison changes
-      sign.
+      model's correction: 0.008 on rough and 0.001 on flat over S's seeds. No comparison
+      changes sign.
+    - The NAO rows of A (the ablations) are not re-read, and the table says so.
   - **The NAO arms of W8 and W9, and W13's NAO rows.** Both arms of each pair were read on
     the current path, so their differences carry the bias on both sides. W14 measures how
     much a paired difference moves for W13 (+0.207 → +0.212). W8 and W9 were not re-read.
@@ -3676,6 +3691,15 @@ family's share?
 **Budget.** About 2.5 h of training (W13's NAO trainings took 2 h 33 min each) and
 about 30 min of evaluation. It waits for `w14_paper.sh`'s "done". One Isaac process at a
 time.
+
+**Stopped before its reading (2026-11-07, 18:19).** W15's training was stopped at about 100 of
+its 1000 iterations, by PID, and its status file says so.
+- *Why.* The plan's next steps are not held for a step whose working depends
+  on them. W15 asks why the NAO's decoder regresses, and the theory of 10.17 puts the
+  likely cure in the next step's generator.
+- *What happens next.* W16 runs now instead of after W15.
+- *No verdict is read.* The partial run `fam05_nao_s31` is kept. A resumption removes it
+  first, because `w15_family.sh` skips training when the run exists.
 
 ### 10.17 The multi-task generator, with the bodies' executions; rough held out; pre-registered (W16)
 

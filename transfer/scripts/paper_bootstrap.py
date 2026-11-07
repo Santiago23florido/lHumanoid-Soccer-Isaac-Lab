@@ -11,7 +11,7 @@ method to it, so a difference between two methods is paired on the teacher.
 
 What that measures is the sampling error of 32 environments, and it is small: the play
 captures are deterministic and their environments nearly alike. Between training seeds a
-method varies far more (the zero-shot model's own seeds, ``S``, span 0.115–0.169 in the
+method varies far more (the zero-shot model's own seeds, ``S``, span 0.110–0.159 in the
 largest deviation on rough, against an environment SE of 0.002). So the comparison the
 paper can make is between seeds: for each method trained with two seeds or more, the
 mean over its seeds and its standard error, the seeds' standard deviation over the root
@@ -59,7 +59,7 @@ from paper_tables import (  # noqa: E402
     nao_method_files,
     read,
     task_tracker_files,
-    zero_shot_pattern,
+    zero_shot,
 )
 
 BASELINE = "zero-shot"
@@ -88,10 +88,10 @@ def method_files(body: str, skill: str) -> dict[str, tuple[str, str]]:
     if body == "nao":
         files = nao_method_files(skill)
     else:
-        files = {"zero-shot": (zero_shot_pattern(body, MODEL[body], generator), "encoder")}
+        files = {"zero-shot": (zero_shot(body, MODEL[body], generator), "encoder")}
         files |= task_tracker_files(body, skill)
     seeds = {
-        f"zero-shot, seed {s}": (zero_shot_pattern(body, tag, generator), "encoder")
+        f"zero-shot, seed {s}": (zero_shot(body, tag, generator), "encoder")
         for s, tag in SEEDS[body]
     }
     return files | seeds

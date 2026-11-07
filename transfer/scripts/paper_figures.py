@@ -37,6 +37,7 @@ from paper_tables import (  # noqa: E402
     PAPER,
     nao_methods,
     read,
+    zero_shot,
 )
 
 OUT = PAPER / "figures"
@@ -118,7 +119,7 @@ def signature() -> None:
     cases = [(body, skill) for body in MODEL for skill in GENERATOR]
     reports = {}
     for body, skill in cases:
-        pattern = f"zero_shot_{body}_{MODEL[body]}_{GENERATOR[skill]}_auto_kin_l4_{{}}.json"
+        pattern = zero_shot(body, MODEL[body], GENERATOR[skill])
         runs = [read(pattern.format(c)) for c in COMMANDS]
         if all(r is not None for r in runs):
             reports[(body, skill)] = [r["runs"]["encoder"]["verdict"] for r in runs]

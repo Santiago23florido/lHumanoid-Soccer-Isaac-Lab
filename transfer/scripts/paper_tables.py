@@ -25,6 +25,13 @@ COMMANDS = ("forward", "fast", "turning")
 GENERATOR = {"rough": "rough_b4", "flat": "flat_dagger2"}
 MODEL = {"g1": "warm_r3_logload_sym", "nao": "r1_3498_sym_v3"}
 """The adopted model's tags (``incumbents.json``), deployed symmetrized."""
+OBSERVED = {"g1": "", "nao": "_own"}
+"""How each body's zero-shot captures name the units its tracker observes its plans in.
+
+The NAO's are read in its walk contract's units (``_own``; ``skill_space.md`` §10.15, W14).
+Read in the G1 generator's units, as first published, its figures were 1-7 % pessimistic.
+The G1's contracts share one normalisation, so its captures need no suffix. The ablations
+(``ABLATIONS``) are not re-read; their NAO rows stay in the task's units."""
 SEEDS = {
     "g1": [("41", MODEL["g1"]), ("42", "warm_r3_s42_log_sym"), ("43", "warm_r3_s43_log_sym")],
     "nao": [(s, f"warm_nao_r1_s{s}_sym") for s in ("31", "32", "33")],
@@ -98,15 +105,27 @@ def finite(value):
     return value
 
 
-def zero_shot_pattern(body: str, tag: str, generator: str, kinematic: bool = True) -> str:
+def zero_shot_pattern(
+    body: str, tag: str, generator: str, kinematic: bool = True, observed: str = ""
+) -> str:
     """The deployed path's L4 reports, ``{}`` standing for the command."""
     est = "_kin" if kinematic else ""
-    return f"zero_shot_{body}_{tag}_{generator}_auto{est}_l4_{{}}.json"
+    return f"zero_shot_{body}_{tag}_{generator}{observed}_auto{est}_l4_{{}}.json"
+
+
+def zero_shot(body: str, tag: str, generator: str) -> str:
+    """The zero-shot model's (or one of S's seeds') L4 reports, in its tracker's units."""
+    return zero_shot_pattern(body, tag, generator, observed=OBSERVED[body])
 
 
 def l4(body: str, tag: str, generator: str, kinematic: bool = True) -> dict | None:
     """The deployed path's L4 over the three commands, or None until all three exist."""
     return l4_files(zero_shot_pattern(body, tag, generator, kinematic), "encoder")
+
+
+def zero_shot_l4(body: str, tag: str, generator: str) -> dict | None:
+    """:func:`l4` of the zero-shot model or one of S's seeds, in its tracker's units."""
+    return l4_files(zero_shot(body, tag, generator), "encoder")
 
 
 def l4_files(pattern: str, name: str) -> dict | None:
@@ -167,7 +186,7 @@ def nao_method_files(skill: str) -> dict[str, tuple[str, str]]:
 
     Zero-shot, B1's, B2's and B2b's seeds, B3's maps and the copy map's other seeds.
     """
-    files = {"zero-shot": (zero_shot_pattern("nao", MODEL["nao"], GENERATOR[skill]), "encoder")}
+    files = {"zero-shot": (zero_shot("nao", MODEL["nao"], GENERATOR[skill]), "encoder")}
     files |= task_tracker_files("nao", skill)
     for seed in ORACLE_SEEDS:
         files[f"B2, oracle, seed {seed}"] = (oracle_pattern(skill, seed), "oracle")
@@ -230,7 +249,7 @@ def build() -> tuple[str, dict]:
     rows = []
     for body, tag in MODEL.items():
         for skill, generator in GENERATOR.items():
-            r = data["M"][f"{body}/{skill}"] = l4(body, tag, generator)
+            r = data["M"][f"{body}/{skill}"] = zero_shot_l4(body, tag, generator)
             rows.append([body.upper(), skill, cell_l4(r)])
     sections.append(
         section(
@@ -238,7 +257,8 @@ def build() -> tuple[str, dict]:
             "Falls over the episodes of 3 commands × 64, commands that pass the teacher's gait "
             "signature, and speed over the teacher's. Source: "
             f"`zero_shot_<body>_<tag>_<generator>_auto_kin_l4_*.json`, tags `{MODEL['g1']}`, "
-            f"`{MODEL['nao']}`.",
+            f"`{MODEL['nao']}`. The NAO's are read in its tracker's own units, "
+            "`<generator>_own` (`OBSERVED`; `skill_space.md` §10.15).",
             ["Body", "Skill", "L4"],
             rows,
         )
@@ -247,7 +267,8 @@ def build() -> tuple[str, dict]:
     rows = []
     for body, entries in SEEDS.items():
         for seed, tag in entries:
-            r = {s: l4(body, tag, g) for s, g in GENERATOR.items()} | {"walk": walk(body, tag)}
+            r = {s: zero_shot_l4(body, tag, g) for s, g in GENERATOR.items()}
+            r |= {"walk": walk(body, tag)}
             if all(v is None for v in r.values()):
                 continue
             data["S"][f"{body}/{seed}"] = r
@@ -270,7 +291,7 @@ def build() -> tuple[str, dict]:
             tasks = [l4(body, task_tag(body, skill, s), generator) for s in TASK_SEEDS[body]]
             if tasks[0] is None:
                 continue
-            zero = l4(body, tag, generator)
+            zero = zero_shot_l4(body, tag, generator)
             data["B1"][f"{body}/{skill}"] = {"zero_shot": zero, "task_specific": tasks[0]} | {
                 f"task_specific_seed_{s}": r
                 for s, r in zip(TASK_SEEDS[body][1:], tasks[1:], strict=True)
@@ -303,7 +324,7 @@ def build() -> tuple[str, dict]:
         }
         if all(r is None for r in runs.values()):
             continue
-        zero = l4("nao", MODEL["nao"], generator)
+        zero = zero_shot_l4("nao", MODEL["nao"], generator)
         data["B2"][f"nao/{skill}"] = {"zero_shot": zero} | runs
         rows.append(["NAO", skill, cell_l4(zero), *(cell_l4(r) for r in runs.values())])
     if rows:
@@ -332,7 +353,7 @@ def build() -> tuple[str, dict]:
         maps = {m: l4_files(f"retarget_nao_{skill}_{m}_l4_{{}}.json", "imitate") for m in RETARGET}
         if all(r is None for r in maps.values()):
             continue
-        zero = l4("nao", MODEL["nao"], generator)
+        zero = zero_shot_l4("nao", MODEL["nao"], generator)
         data["B3"][f"nao/{skill}"] = {"zero_shot": zero, **maps}
         rows.append(["NAO", skill, cell_l4(zero), *(cell_l4(maps[m]) for m in RETARGET)])
     if rows:
@@ -434,7 +455,8 @@ def build() -> tuple[str, dict]:
                 "T — the gait's deviation from the teacher, decomposed",
                 "Mean over the three commands of the |signed relative deviation|. Signed, "
                 "total = generator + tracker exactly; estimation = deployed path − true-state "
-                "path. Source: `paper_decomposition.py`, `transfer/paper/data/decomposition.json`.",
+                "path. The NAO's rows are read in its tracker's own units (`OBSERVED`). Source: "
+                "`paper_decomposition.py`, `transfer/paper/data/decomposition.json`.",
                 ["Body/skill", "Term", *report["features"]],
                 rows,
             )
@@ -472,7 +494,9 @@ def build() -> tuple[str, dict]:
             section(
                 "A — ablations",
                 "Rough L4 on the deployed path, one change at a time, unless the row says "
-                "otherwise. The tags are in `paper_tables.py`'s `ABLATIONS`.",
+                "otherwise. The tags are in `paper_tables.py`'s `ABLATIONS`. The NAO's rows are "
+                "read in the task generator's units, as first published: W14 did not re-read them "
+                "(`skill_space.md` §10.15), and its falls and speeds did not move with the units.",
                 ["Body", "Change", "Before", "After"],
                 rows,
             )

@@ -24,9 +24,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paper_tables import OBSERVED  # noqa: E402
 
 RESULTS = Path(__file__).resolve().parents[2] / "transfer" / "results"
 MODEL = {"g1": "warm_r3_logload_sym", "nao": "r1_3498_sym_v3"}
@@ -77,7 +81,8 @@ def main() -> int:
         for skill, generator in SKILLS.items():
             rows = []
             for command in COMMANDS:
-                path = RESULTS / f"zero_shot_{body}_{tag}_{generator}_auto_kin_l4_{command}.json"
+                name = f"{generator}{OBSERVED[body]}"  # in the tracker's units (§10.15)
+                path = RESULTS / f"zero_shot_{body}_{tag}_{name}_auto_kin_l4_{command}.json"
                 if not path.exists():
                     continue
                 case = decompose(path)

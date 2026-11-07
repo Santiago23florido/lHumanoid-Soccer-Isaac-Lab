@@ -70,6 +70,8 @@ LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
 RESAMPLE_SPACE = os.environ.get("HUMANOID_RESAMPLE", "linear")
 PLAN_CONTACT = os.environ.get("HUMANOID_PLAN_CONTACT", "as_drawn")
 """Whether a plan's loaded feet are put on the ground (``ReferenceCommandCfg.plan_contact``)."""
+OBSERVE_UNITS = os.environ.get("HUMANOID_OBSERVE_UNITS") or None
+"""The contract whose units the tracker observes in (``ReferenceCommandCfg.observe_units``)."""
 """How plans and histories are read between the generator's grid and this body's steps
 (``ReferenceCommandCfg.resample_space``)."""
 LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
@@ -216,6 +218,7 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             load_space=LOAD_SPACE,
             resample_space=RESAMPLE_SPACE,
             plan_contact=PLAN_CONTACT,
+            observe_units=OBSERVE_UNITS,
             procedural_load_shape=LOAD_SHAPE,
             load_precision=str(LOAD_PRECISION),
             # The G1 starts each task inside its own expert's states.

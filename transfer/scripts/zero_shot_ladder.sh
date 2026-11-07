@@ -60,6 +60,12 @@ fi
 # captured elsewhere (backward's in its training variant, skill_space.md §10.12).
 commands="${ZS_COMMANDS:-$commands}"
 teacher_rollout="${ZS_TEACHER_ROLLOUT:-play}"
+# ZS_OBSERVE=own: in L4 the tracker observes each z* in the units of the walk contract it
+# trained under, not the task's (HUMANOID_OBSERVE_UNITS, skill_space.md §10.15). Its captures
+# and results carry "_own" after the generator's name, and only the deployed run is captured.
+observe="${ZS_OBSERVE:-task}"
+own=""
+if [ "$observe" = own ]; then own="_own"; fi
 if [ "$body" = g1 ]; then
   # ZS_TASK_ID: another tracking task of the same body (the physics tracker's, say).
   task_id="${ZS_TASK_ID:-G1Track-Play-v0}"
@@ -188,6 +194,23 @@ if want l3; then
 fi
 if want l4; then
   export HUMANOID_CONTRACT="$root/$task_zs"
+  if [ -n "$own" ]; then
+    export HUMANOID_OBSERVE_UNITS="$root/$walk"
+    while read -r name vx vy wz; do
+      vx=$("$python" -c "print($vx * $speed_scale)")
+      vy=$("$python" -c "print($vy * $speed_scale)")
+      wz=$("$python" -c "print($wz * $turn_scale)")
+      capture "${generator_name}${own}${mode}${est}_${name}_encoder" --num-envs 32 \
+        --reference "$reference" --estimator "$estimator" --command "$vx" "$vy" "$wz"
+      "$python" transfer/scripts/evaluate_contract.py \
+        --run "teacher=g1/rollouts/${task}_${teacher_rollout}_${name}.npz" \
+        --run "encoder=$rollouts/zs_${tag}_${generator_name}${own}${mode}${est}_${name}_encoder.npz" \
+        --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${own}${mode}${est}_l4_${name}.json" \
+        | grep -v "^  [^a]"
+    done <<< "$commands"
+    unset HUMANOID_OBSERVE_UNITS
+    exit 0  # l4 is the ladder's last stage
+  fi
   while read -r name vx vy wz; do
     vx=$("$python" -c "print($vx * $speed_scale)")
     vy=$("$python" -c "print($vy * $speed_scale)")

@@ -55,6 +55,7 @@ from ...latent.plan_trust import PlanTrust, smooth_noise, sway
 from ...latent.procedural import GaitRanges, PointMassBiped
 from ...latent.resampling import RESAMPLE_SPACES, plan_interpolation, resample_rows
 from ...latent.skill_torch import BodyConstants, proprioceptive_skill_state, skill_state
+from ...latent.units import change_of_units, tracker_view
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -86,6 +87,12 @@ class ReferenceCommand(UniformVelocityCommand):
         self.encoder = contract.encoder if cfg.use_encoder else None
         if cfg.use_encoder and self.encoder is None:
             raise ValueError(f"{cfg.contract} carries no encoder")
+        self.observed_units = None
+        """``(scale, shift)`` from the contract's units to the tracker's (``observe_units``);
+        ``None`` observes in the contract's."""
+        if cfg.observe_units is not None:
+            own = load_contract(cfg.observe_units, self.device).generator.skill_norm
+            self.observed_units = change_of_units(self.generator.skill_norm, own)
         self.sigma = contract.sigma.to(self.device) * cfg.noise_scale
         self.precision = contract.sigma.to(self.device)
         """The body estimator's measured error per dimension (normalised): the unit of
@@ -261,7 +268,9 @@ class ReferenceCommand(UniformVelocityCommand):
         return (
             f"ReferenceCommand: contract {self.cfg.contract}, dt* {self.dt_star:.4f}, "
             f"commit {self.commit}, view {self.view}, encoder {self.encoder is not None}, "
-            f"resample {self.resample_space}, plan contact {self.cfg.plan_contact}\n"
+            f"resample {self.resample_space}, plan contact {self.cfg.plan_contact}, "
+            f"observed in {self.cfg.observe_units or 'the contract'}"
+            f" ({'mapped' if self.observed_units is not None else 'identity'})\n"
             + super().__str__()
         )
 
@@ -1001,11 +1010,11 @@ class ReferenceCommand(UniformVelocityCommand):
     # -- what the tracker and its critic read --------------------------------
 
     def observation(self) -> torch.Tensor:
-        """``(N, view * 27 + 27)``: the held plan relative to ``ẑ*``, then ``ẑ*``."""
-        relative = self.upcoming() - self.estimate[:, None]
-        relative = torch.where(~self.has_plan[:, None, None], 0.0, relative)
-        view = torch.cat([relative.flatten(1), self.estimate], dim=-1)
-        return torch.nan_to_num(view, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
+        """``(N, view * 27 + 27)``: the held plan relative to ``ẑ*``, then ``ẑ*``, in the
+        tracker's own units when ``observe_units`` is set (``latent/units.py``)."""
+        return tracker_view(
+            self.upcoming(), self.estimate, self.has_plan, _PLAN_LIMIT, self.observed_units
+        )
 
     def path(self) -> torch.Tensor:
         """``(N, view * 3)``: where the reference will be over the view, seen from the body.
@@ -1134,6 +1143,14 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     The generator's plans hold loaded feet above the ground and move them, where its
     teachers never did (``skill_space.md`` §10.10, §10.11). The procedural biped's plans are
     untouched."""
+
+    observe_units: str | None = None
+    """A contract whose statistics the tracker's view (:meth:`ReferenceCommand.observation`)
+    is normalised with: the one the tracker trained under. ``None``, as every run before
+    2026-11-07, observes in ``contract``'s. L4 makes a task's generator the contract, and the
+    NAO's walk contract normalises ``z*`` differently from the G1's (``latent/units.py``,
+    ``skill_space.md`` §10.15). Only the view changes; the generator and the encoder keep
+    the contract's units."""
 
     tolerance: str = "precision"
     """``precision``: the encoder's error (a plan is a commitment); ``spread``: the

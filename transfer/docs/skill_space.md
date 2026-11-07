@@ -3613,6 +3613,70 @@ over the three commands and both feet, from `runs.<path>.asked.signature` and
     Their NAO arms were screens (W8 failed, W9 failed), and their verdicts are not revisited
     on this basis.
 
+### 10.16 The family's share alone, on the NAO; pre-registered (W15)
+
+**Context.** W13's NAO decoder regresses on flat by +0.212 ± 0.004 on the pinned path, and
+W14 shows the regression is learned (10.15). Against S, W13 made two changes:
+- it added the base tasks' plans (flat and jog, beside the walk contract);
+- it lowered the procedural family's share from 0.7 to 0.5 to make room for them.
+
+The training logs (instrumentation; `python transfer/scripts/training_errors.py nao
+mt_nao_s31 warm_nao_r1 mt_nao_s32 warm_nao_r1_s32 mt_nao_s33 warm_nao_r1_s33 --output
+transfer/results/training_errors_w13_nao.json`). These are the means over the last 50
+iterations, at the same episode length (972–979 steps; the errors are summed over an
+episode).
+
+| Error over the episode | W13's NAO (s31, s32, s33) | S's NAO (s31, s32, s33) |
+| --- | --- | --- |
+| On its task plans | 15.3, 15.6, 15.6 (walk, flat and jog) | 3.4, 3.9, 4.3 (walk only) |
+| On the procedural family | 13.6, 13.5, 14.1 | 18.0, 18.6, 20.2 |
+
+- On the G1 (`training_errors_w13_g1.json`), W13's error on its task plans is 1.0–3.1 times
+  S's, and S's own moves from 7 to 38 within one run. The G1 gives no clean contrast.
+- *Read, not tested.* The NAO tracks the mixture that includes the G1's task plans about
+  four times worse than its own walk plans, and the family slightly better.
+
+**The question.** Which of W13's two changes is the regression: the task plans, or the
+family's share?
+
+**The arm** (`transfer/scripts/w15_family.sh`, `fam05_nao_s31`).
+- S's NAO recipe (`paper_queue.sh`: the incumbent `model_3498` continued 1000 iterations,
+  seed 31), with the family's share at 0.5 and no task plans (`HUMANOID_TASKS` unset).
+- Against S's seed 31 (`warm_nao_r1_s31_sym`), it changes only the family's share.
+- Against W13's seed 31 (`mt_nao_s31_sym`), it lacks only the task plans. The walk's share
+  is therefore 0.5 here against W13's 0.18.
+
+**Evaluation.**
+- As W13's `ladder()`: the encoder refit and S0's walk.
+- Then on the NAO's pinned path (W14): flat's L4 at the three commands, with the true-state
+  run, and jog's at its middle command.
+
+**Reading** (`transfer/scripts/w15_compare.py` → `transfer/results/w15_family.json`).
+- *A screen on one seed.* W13 − S on flat is 0.21, about fifteen times the SE of S's three
+  seeds, so one seed separates thirds of it.
+- *The quantities.* `d` is the arm's pinned flat largest deviation, the mean over the three
+  commands. `s` is S's seed 31, pinned (`w14_paper.sh`). `w` is W13's seed 31, pinned
+  (0.375). The gap is `g = w − s`.
+- **Task plans** if `d ≤ s + g/3`: the family's share does not regress the NAO.
+- **Family share** if `d ≥ w − g/3`.
+- **Both** otherwise.
+- *Reported beside it, not read:* falls, S0's walk, the body's duty on flat on both paths,
+  and jog's largest deviation.
+
+**What each outcome leads to.**
+- **Task plans.** As they are, the G1's task plans cost the NAO's decoder the fidelity they
+  were meant to give it. Step 5's multi-body generator is meant to address exactly this:
+  plans that hold each body's own execution. But step 4 needs the NAO executing the base
+  tasks first, through some decoder. Which decoder, W13's or S's, departs from the agreed
+  design either way. It is reframed at review, not settled here.
+- **Family share.** W13 is rerun for the NAO with the family at 0.7 and the task plans,
+  three seeds, pre-registered then.
+- **Both.** Reported with its figures and reframed at review.
+
+**Budget.** About 2.5 h of training (W13's NAO trainings took 2 h 33 min each) and
+about 30 min of evaluation. It waits for `w14_paper.sh`'s "done". One Isaac process at a
+time.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

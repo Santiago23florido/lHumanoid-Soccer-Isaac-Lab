@@ -3400,6 +3400,26 @@ trainings.
   `runs.encoder.signature` of the forward capture. The registered reading is
   `w13_compare.py`'s, after jog.
 
+**Interim, the NAO's seed 33 (2026-11-07, 14:19): three seeds, read the same way.**
+
+| Tracker | Flat largest deviation | Duty deviation on flat | Body duty on flat, forward (left, right) | Walk signature, largest |
+| --- | --- | --- | --- | --- |
+| `warm_nao_r1_s33_sym` (S) | 0.209 | 0.176 | 0.545, 0.636 | 0.213 |
+| `mt_nao_s33_sym` (W13) | 0.413 | 0.326 | 0.691, 0.668 | 0.257 |
+
+- *Paired by seed, three pairs:* W13 − S on flat's largest deviation is **+0.207 ± 0.004**
+  (+0.202, +0.214, +0.204).
+  - Read as registered, in the task's units, the NAO fails W13's no-regression clause.
+  - The registered verdict stays `w13_compare.py`'s, after jog.
+- *Same place on all three.*
+  - The largest field is the left foot's duty factor (0.366–0.468), at every command.
+  - Stride period moves by at most 0.065.
+  - Asked duty is 0.526, 0.577.
+- *No falls.* The minimum speed ratio is 1.040, and S0's walk passes.
+- *What it triggers.* W14's reading 2 now applies: the regression is above 2 SE on three
+  seeds in the task's units. Its verdict, units or learned, decides how this failure is
+  read.
+
 ### 10.15 The tracker's own units on the deployed path; pre-registered (W14)
 
 **Context.** The open finding of 10.14. L4 makes the task's generator the contract.

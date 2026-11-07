@@ -3531,6 +3531,88 @@ which printed "g1 target True executes jog; nao target False executes jog". Jog'
 - **Budget.** 33 deployed captures at about 2 min each (W13 seed 31's ladder:
   3.8 min per L4 command, half of it the truth run), so about 1.5 h.
 
+**Result (2026-11-07, 17:12).** `bash transfer/scripts/w14_units.sh`, then `python
+transfer/scripts/w14_compare.py --output transfer/results/w14_units.json`, which printed
+"flat_dagger2 corrected; rough_b4 corrected; regression learned; jog executes True". The run
+took 1 h 11 min.
+
+1. **The published NAO figures move. Both skills are corrected.** Pinned minus current, on
+   S's three NAO trackers:
+
+   | Skill | Largest deviation, paired | Duty deviation, paired | Per tracker (current → pinned) |
+   | --- | --- | --- | --- |
+   | `flat_dagger2` | −0.0049 ± 0.0024 | −0.0042 ± 0.0008 | 0.174 → 0.164, 0.187 → 0.184, 0.209 → 0.207 |
+   | `rough_b4` | −0.0099 ± 0.0004 | −0.0056 ± 0.0003 | 0.154 → 0.144, 0.164 → 0.155, 0.169 → 0.159 |
+
+   - *What crosses the threshold.* On rough, both the largest and the duty deviation move by
+     more than 2 SE. On flat, the duty deviation does; the largest deviation is just at 2 SE.
+   - *Direction and size.* The tracker in its own units is closer to the teacher, by 1–7 % of
+     the figure: rough 6–7 %, flat 1–6 %.
+   - *What does not move.* There are no falls either way, and the minimum speed ratio moves
+     by at most 0.001.
+   - *Consequence.* The published figures were pessimistic for the NAO. The paper's NAO
+     figures are corrected to the pinned reading; how, and what the wrong ones affected, is
+     below.
+2. **W13's NAO regression is learned.** The reading applies: on the current path, W13 − S on
+   flat's largest deviation is +0.207 ± 0.004.
+   - Pinned, it is **+0.212 ± 0.004**, still above 2 SE.
+   - W13's body duty on flat does not move with the units: pinned minus current is
+     +0.0000 ± 0.0004.
+   - W13's trackers barely move at all: 0.376 → 0.375, 0.401 → 0.403, 0.413 → 0.412. S's
+     move by 0.002–0.010.
+   - So the units explain none of the regression.
+3. **Jog, pinned.** W13's NAO still executes jog, with no falls and an axis speed of
+   1.014–1.015. W13 − S on jog's largest deviation is +0.0374 ± 0.0054 (+0.0359 ± 0.0057 on
+   the current path).
+
+**What follows, as registered.**
+- W13's NAO verdict stands: it fails its target and the flat clause. That is a property of
+  the trained decoder, not of the evaluation's units.
+- Step 4 of `method_revision.md` §6 reads the NAO on the pinned path, because reading 1
+  moved its figures. From W14 on, the pinned path is the NAO's evaluation path.
+
+**Instrumentation: where the learned regression sits** (the W13 ladder's flat captures, mean
+over the three commands and both feet, from `runs.<path>.asked.signature` and
+`runs.<path>.signature`).
+
+| Trackers | Teacher's duty | Asked | Body, true state | Body, deployed |
+| --- | --- | --- | --- | --- |
+| S (incumbent, s32, s33) | 0.496 | 0.550 | 0.617, 0.619, 0.623 | 0.575, 0.580, 0.584 |
+| W13 (s31, s32, s33) | 0.496 | 0.549–0.550 | 0.642, 0.660, 0.652 | 0.655, 0.649, 0.655 |
+
+- *Every NAO tracker holds stance longer than it is asked,* on the true-state path too. This
+  is the NAO's slow swing of the contact-fidelity study (W7: faster leg drives fixed lift and
+  duty).
+- *W13 adds to that by 0.02–0.04 on the true-state path.*
+- *The deployed path widens the gap.* S's deployed duty is lower than its true-state duty;
+  W13's is not.
+- This is read, not tested. It points to two places for the next question: the NAO's
+  execution of the G1's faster task plans in training, and how W13's tracker uses the
+  estimate.
+
+**The paper's NAO figures, corrected (in progress).**
+- *What else the correction needs.*
+  - The paper's "S's seeds" rows hold S's seed 31 (`warm_nao_r1_s31_sym`), which W13 had
+    replaced with the incumbent.
+  - Its decomposition reads the adopted model's true-state runs.
+  - `transfer/scripts/w14_paper.sh` captures both on the pinned path:
+    `ZS_OWN_TRUTH=1` in `zero_shot_ladder.sh` adds the true-state run and keeps the deployed
+    capture already on disk.
+  - Added after W14's reading. It enters no W14 reading.
+- *What the wrong figures affected.*
+  - **The paper's tables:** the NAO's zero-shot rows of M, S, B1–B3, B and SE, the "minus
+    zero-shot" column of SE on the NAO, the NAO rows of T, and the NAO rows of A.
+    - B1, B2 and B3 themselves are not affected. B1 trained in the task's units and is
+      read in them, and B2 and B3 have no contract.
+    - So every NAO baseline's distance from the zero-shot model widens by the zero-shot
+      model's correction: about 0.010 on rough and 0.005 on flat. No comparison changes
+      sign.
+  - **The NAO arms of W8 and W9, and W13's NAO rows.** Both arms of each pair were read on
+    the current path, so their differences carry the bias on both sides. W14 measures how
+    much a paired difference moves for W13 (+0.207 → +0.212). W8 and W9 were not re-read.
+    Their NAO arms were screens (W8 failed, W9 failed), and their verdicts are not revisited
+    on this basis.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

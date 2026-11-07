@@ -62,7 +62,8 @@ commands="${ZS_COMMANDS:-$commands}"
 teacher_rollout="${ZS_TEACHER_ROLLOUT:-play}"
 # ZS_OBSERVE=own: in L4 the tracker observes each z* in the units of the walk contract it
 # trained under, not the task's (HUMANOID_OBSERVE_UNITS, skill_space.md §10.15). Its captures
-# and results carry "_own" after the generator's name, and only the deployed run is captured.
+# and results carry "_own" after the generator's name, and only the deployed run is captured
+# unless ZS_OWN_TRUTH=1.
 observe="${ZS_OBSERVE:-task}"
 own=""
 if [ "$observe" = own ]; then own="_own"; fi
@@ -200,11 +201,23 @@ if want l4; then
       vx=$("$python" -c "print($vx * $speed_scale)")
       vy=$("$python" -c "print($vy * $speed_scale)")
       wz=$("$python" -c "print($wz * $turn_scale)")
-      capture "${generator_name}${own}${mode}${est}_${name}_encoder" --num-envs 32 \
-        --reference "$reference" --estimator "$estimator" --command "$vx" "$vy" "$wz"
+      encoder="$rollouts/zs_${tag}_${generator_name}${own}${mode}${est}_${name}_encoder.npz"
+      # ZS_OWN_TRUTH=1 adds the true-state run (the paper's decomposition reads it), and keeps a
+      # deployed capture already on disk, so a reading taken from it is scored again unchanged.
+      if [ "${ZS_OWN_TRUTH:-0}" != 1 ] || [ ! -f "$encoder" ]; then
+        capture "${generator_name}${own}${mode}${est}_${name}_encoder" --num-envs 32 \
+          --reference "$reference" --estimator "$estimator" --command "$vx" "$vy" "$wz"
+      fi
+      truth_run=()
+      if [ "${ZS_OWN_TRUTH:-0}" = 1 ]; then
+        truth="$rollouts/zs_${tag}_${generator_name}${own}${mode}_${name}_truth.npz"
+        [ -f "$truth" ] || capture "${generator_name}${own}${mode}_${name}_truth" --num-envs 32 \
+          --reference "$reference" --contract-from-truth --command "$vx" "$vy" "$wz"
+        truth_run=(--run "truth=$truth")
+      fi
       "$python" transfer/scripts/evaluate_contract.py \
         --run "teacher=g1/rollouts/${task}_${teacher_rollout}_${name}.npz" \
-        --run "encoder=$rollouts/zs_${tag}_${generator_name}${own}${mode}${est}_${name}_encoder.npz" \
+        --run "encoder=$encoder" "${truth_run[@]}" \
         --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${own}${mode}${est}_l4_${name}.json" \
         | grep -v "^  [^a]"
     done <<< "$commands"

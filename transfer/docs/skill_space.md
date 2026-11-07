@@ -3824,6 +3824,82 @@ Also reported: each generator's own calibration gate and chain fidelity, as W12 
 about 3 h of rough L4 (five arms × six trackers × three commands). It waits for W15's
 "done". One Isaac process at a time.
 
+**Result (2026-11-07, 18:21–21:58): neither the bodies' data nor demonstrations help; the
+cost of zero-shot is the task's, and an order larger.** `bash transfer/scripts/w16_multibody.sh`
+ran with no failure. Its compare (`python transfer/scripts/w16_compare.py --output
+transfer/results/w16_multibody.json`) printed "g1: bodies none, demonstrations demonstrations
+worse; nao: bodies none, demonstrations demonstrations worse".
+
+*The generators* (`contract_mt16_*.json`):
+
+| Arm | Calibration error | Own gate | Chain fidelity | Leakage (control 0.50) |
+| --- | --- | --- | --- | --- |
+| `mt16_c` | 0.046 / 0.043 | passes | 0.239 | 0.998 |
+| `mt16_m` | 0.056 / 0.047 | fails (marked, evaluated) | 0.343 | 0.999 |
+| `mt16_d` | 0.022 / 0.011 | passes | 0.374 | 1.000 |
+| `mt16_l` | 0.420 / 0.388 | fails | 0.718 | 0.943 |
+
+*The readings* (paired over three trackers, rough's largest deviation):
+
+| Reading | G1 | NAO | Verdict |
+| --- | --- | --- | --- |
+| 1. Bodies' data, `m − c` | −0.0037 ± 0.0047 | −0.0135 ± 0.0071 | none, none |
+| 2. Demonstrations, `d − m` | +0.0071 ± 0.0024 | +0.0343 ± 0.0079 | worse, worse (predicted) |
+| 2. Asked duty's distance, `m − c` | −0.0087 ± 0.0026 | −0.0282 ± 0.0090 | closer, closer (predicted) |
+| 3. Learned part, `l − m` | not evaluated | not evaluated | leakage gate fails |
+| 4. Zero-shot cost, `c − rough_b4` | +0.140 ± 0.031 | +0.061 ± 0.013 | reported |
+| 4. Zero-shot cost, `m − rough_b4` | +0.136 ± 0.032 | +0.047 ± 0.013 | reported |
+| 4. Zero-shot cost, `d − rough_b4` | +0.143 ± 0.031 | +0.082 ± 0.011 | reported |
+
+5. **No regression fails for every arm.** The lowest speed ratio over the trackers and commands
+   is `c` 0.820 / 0.820, `m` 0.794 / 0.818 and `d` 0.793 / 0.841 (G1 / NAO), all below 0.9.
+   `m` also falls 8 times on the G1 and 9 on the NAO, against none for `c`. `rough_b4` passes
+   (1.005 / 0.999, no falls).
+
+- *The branch that applies.* "Neither helps, and `mt16_d` is worse": the loop is real, both of
+  its predictions hold, and its cure is not in the data. `mt16_m` moves what the generator
+  asks toward the teacher's duty, but not enough to move the deviation, and it adds falls.
+- *The learned part failed as realised, not as an idea.* The reversed gradient broke the
+  generator: its data-loss multiplier reached 305, its held-out data loss rose from 0.452 to
+  1.557, and its calibration error is eight times the gate's 0.05.
+  The summary still told the bodies apart (0.943), so it is not evaluated. A reversed gradient
+  has no bounded objective to settle at. W17 realises the same part differently.
+
+**Where the cost is** (read after the result; instrumentation, not pre-registered).
+- *Per command* (`python transfer/scripts/w16_compare.py --per-command`). Most of it is at
+  rough's forward command, 0.25 m/s:
+  - G1, `mt16_c`: largest 0.370, asked duty 0.817 and stride period 1.28, against `rough_b4`'s
+    0.079, 0.575 and 0.93.
+  - NAO, `mt16_c`: largest 0.495, asked duty 0.919 and period 2.34, against 0.258, 0.604 and
+    1.07.
+  - Speed ratios at forward and turning are 0.81–0.87 for every multi-task arm on both bodies.
+- *The generator alone* (`python transfer/scripts/held_out_chains.py --output
+  transfer/results/held_out_chains_w16.json`). Each generator is chained on its own plans from
+  the rough teacher's histories, at rough's commands: what a perfect tracker would walk. Rough's
+  captures are read there and trained on nowhere.
+  - `mt16_c`: mean largest 0.302, speed 0.83–0.88 of the teacher's.
+  - `flat_dagger2`, a generator of a seen base task: 0.247, speed 0.82–0.88.
+  - `rough_b4`: 0.097, speed 1.00–1.05.
+  - So the multi-task generator misses rough before any body, by a speed deficit the size of
+    flat's. In that chain its duty is 0.538 at forward, near the teacher's 0.571; the
+    closed loop through a body takes it to 0.82.
+- *Why the speed* (`python transfer/scripts/w16_task_region.py --output
+  transfer/results/w16_task_region.json`; one plan per window of the teachers' own histories,
+  open loop).
+  - The base experts do not walk their commands. Flat's expert walks 0.73 of the forward command
+    and 0.81 of fast and turning. The walk expert, at 0.22–0.25 m/s, walks 0.88 of it, with a
+    duty factor of 0.88.
+  - The rough expert walks its commands (1.01, 0.97, 0.98).
+  - On rough's histories, `mt16_c` plans 0.63–0.77 of the command and `rough_b4` 0.96–1.01.
+  - So a generator trained on the command its expert was *given* learns the expert's tracking
+    error as part of what the command means. At rough's commands, the base experts' meaning
+    is a slower gait. Closed through a body, the slower history moves the plans toward the walk
+    expert's long stance at 0.25 m/s.
+
+**Reframed.** The loop body → history → plan → body exists and is measured, but on the
+held-out task it is an order smaller than the task term, and the task term is in the command,
+not the body.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

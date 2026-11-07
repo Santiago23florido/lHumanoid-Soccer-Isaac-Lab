@@ -25,9 +25,11 @@ deviation (the mean over the three commands):
     python transfer/scripts/w16_compare.py --output transfer/results/w16_multibody.json
     python transfer/scripts/w16_compare.py --leakage-gate
     python transfer/scripts/w16_compare.py --asked
+    python transfer/scripts/w16_compare.py --per-command
 
-``--asked`` prints the context of §10.17: the duty factor the same generator asks of each body,
-and what the body does, on S's trackers' published captures (the task's units).
+``--per-command`` prints each arm's figures per command, averaged over the trackers.
+``--asked`` prints the context of §10.17: the duty factor the same generator asks of each
+body, and what the body does, on S's trackers' published captures (the task's units).
 """
 
 from __future__ import annotations
@@ -161,14 +163,60 @@ def asked_context() -> None:
             )
 
 
+def per_command(arms=ARMS, trackers=TRACKERS) -> dict:
+    """Per body, arm and command, the mean over the trackers of what the reading averages."""
+    out: dict = {}
+    for body, tags in trackers.items():
+        for arm in arms:
+            for command in COMMANDS:
+                rows = []
+                for tag in tags:
+                    path = RESULTS / f"zero_shot_{body}_{tag}_{arm}_own_auto_kin_l4_{command}.json"
+                    if not path.exists():
+                        break
+                    run = json.loads(path.read_text(encoding="utf-8"))["runs"]["encoder"]
+                    dev = run["verdict"]["signature_deviation"]
+                    rows.append(
+                        {
+                            "largest": max(dev.values()),
+                            "asked_duty": float(np.mean(run["asked"]["signature"]["duty_factor"])),
+                            "body_duty": float(np.mean(run["signature"]["duty_factor"])),
+                            "asked_period": run["asked"]["signature"]["stride_period"],
+                            "speed_ratio": run["verdict"]["speed_ratio"],
+                            "falls": run["falls"],
+                        }
+                    )
+                if len(rows) != len(tags):
+                    continue
+                entry = {k: float(np.mean([r[k] for r in rows])) for k in rows[0] if k != "falls"}
+                entry["falls"] = int(sum(r["falls"] for r in rows))
+                out.setdefault(body, {}).setdefault(arm, {})[command] = entry
+    return out
+
+
+def print_per_command(table: dict) -> None:
+    for body, arms in table.items():
+        for arm, commands in arms.items():
+            for command, e in commands.items():
+                print(
+                    f"{body:4s} {arm:9s} {command:8s} largest {e['largest']:.3f}  duty asked "
+                    f"{e['asked_duty']:.3f} body {e['body_duty']:.3f}  period asked "
+                    f"{e['asked_period']:.2f}  speed {e['speed_ratio']:.3f}  falls {e['falls']}"
+                )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--output", type=Path)
     parser.add_argument("--leakage-gate", action="store_true")
     parser.add_argument("--asked", action="store_true")
+    parser.add_argument("--per-command", action="store_true")
     args = parser.parse_args()
     if args.asked:
         asked_context()
+        return 0
+    if args.per_command:
+        print_per_command(per_command())
         return 0
     if args.leakage_gate:
         passes, line = leakage_gate()

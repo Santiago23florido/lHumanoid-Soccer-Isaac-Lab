@@ -4150,6 +4150,111 @@ its own gate is still evaluated, and marked.
 - About 20 min of offline chains.
 - One Isaac process at a time.
 
+### 10.20 Decoders that practise cross-fitted plans; sidestep held out; pre-registered (W19)
+
+Pre-registered 2026-11-08, 04:40, before any of its runs, on W18's result (10.19).
+
+**Why** (W18's figures, `transfer/results/w18_loto.json`; the plan and body measures below are
+instrumentation read after W18, from its captures).
+- *The gait generalises.* Leaving sidestep out costs +0.019 ± 0.002 (G1) and +0.013 ± 0.005
+  (NAO) on sidestep's largest deviation. The bodies move along the commanded direction faster
+  than the teacher does (directed ratio at least 1.09 on the G1).
+- *The bodies fall.* Over three trackers, 265 falls on the G1 and 394 on the NAO under
+  `mt18_no_sidestep`, against 24 and 0 under `mt17_c`.
+- *The plans do not cross the feet; the bodies do.*
+  - At `right`, the G1's 5th-percentile lateral foot separation is 0.19 `L` under the held-out
+    generator's plans, which ask for 0.36. Under `mt17_c`'s plans it is 0.33, asked 0.35.
+  - The NAO's is 0.15 at `right`, asked 0.32.
+- *The held-out plans have another style.*
+  - On the G1 they ask for less double support (0.08–0.14 of the time against 0.15–0.28), more
+    flight (0.06–0.07 against 0.03–0.05), and a lower CoM (0.86–0.88 `L` against 0.90–0.91).
+  - At the NAO's `right` they ask for a narrower stance (median 0.42 `L` against 0.47).
+- *Two checks of the plans' physics separated nothing.* The lateral DCM beyond the leading foot
+  and the CoP implied by the CoM's acceleration are outside the support as often in the teacher's
+  own sidestep as in either generator's plans.
+
+**Hypothesis.**
+- Each W13 decoder trained on base-task plans drawn by generators that had seen those tasks.
+- Deployed on a held-out task, it receives plans that a generator composes for commands it has
+  not seen, and those are the plans it falls under.
+- Cross-fitting brings that condition into training without any held-out data. Each base task is
+  also drawn by a generator trained without it, so the decoder practises composed plans on tasks
+  it may train on.
+- The falls under the held-out generator should then drop.
+
+**What stays out.**
+- Sidestep and rough are in no generator and no decoder.
+- The cross-fitted generators are `mt19_xf_flat`, trained on the walk, backward and jog experts,
+  and `mt19_xf_jog`, trained on the walk, flat and backward ones.
+- `transfer/scripts/crossfit_task_set.py` refuses a task set in which a cross-fitted generator's
+  report lists its own task's capture or a held-out one.
+
+**Steps** (`transfer/scripts/w19_crossfit.sh`, status `logs/contract/w19_crossfit.status`).
+1. **Generators.**
+   - The two cross-fitted generators, trained with W18's recipe (relabelled, 200 epochs, no
+     bodies' data).
+   - Then `transfer/results/base_tasks_xf.json`: W13's task set with `flat_xf` and `jog_xf` beside
+     flat and jog (same ranges and starts). The five tasks have uniform weights.
+2. **Signal** (instrumentation, not a gate).
+   - W13's G1 s41 tracker deployed under `mt19_xf_flat` at flat's three commands and under
+     `mt19_xf_jog` at jog's.
+   - Its falls are read beside its falls under the in-distribution generators (W16's captures).
+   - If it does not fall more there, cross-fitting carries no fall signal on these tasks, and the
+     prediction becomes "no effect". The run still goes on.
+3. **Screen.**
+   - W13's G1 s41 and NAO s31 trackers are each continued 300 iterations in W13's training
+     conditions (family 0.5, the checkpoint's learning rate, same seed), in two arms:
+     - `xf`, with `base_tasks_xf.json`;
+     - `ctl`, with W13's `base_tasks.json`.
+   - Both arms deploy with their W13 tracker's refitted encoder, copied, so the estimator is the
+     same and only the tracker differs.
+   - Sidestep L4 (W18's commands, pinned units, the deployed path) is run under
+     `mt18_no_sidestep` and `mt18_no_sidestep_m`.
+4. **Full.** If the screen's rule holds: seeds 42 and 43 (G1) and 32 and 33 (NAO), the same.
+5. **Regression.** Rough L4 under `rough_b4` on every new tracker.
+6. **Compare:** `transfer/scripts/w19_compare.py` → `transfer/results/w19_crossfit.json`.
+
+**Screen rule.**
+- The run continues to step 4 if, on either body, under `mt18_no_sidestep`:
+  - `ctl` falls more than twice on sidestep, and
+  - `xf` falls at most half as often.
+- Otherwise it stops after the screen and the regression check. The readings are then reported
+  on one seed per body, without SE.
+
+**Readings,** per body, over the seeds run:
+1. **Signal**, as in step 2.
+2. **Falls** on sidestep under `mt18_no_sidestep`: `xf` against `ctl`, summed and paired per seed.
+3. **Open objective**, W18's reading 3, per arm and held-out generator:
+   - every command's directed speed ratio is at least 0.9;
+   - falls are at most two more than `mt17_c`'s on W13's trackers of the same seeds (W18's runs).
+4. **Deviation:** sidestep's largest, `xf − ctl` paired. "Help" below −2 SE, "hurt" above +2 SE.
+5. **No regression** on rough under `rough_b4`:
+   - `xf − ctl` paired, "regresses" above +2 SE;
+   - `xf`'s falls at most two more than `ctl`'s.
+
+**What each outcome leads to.**
+- *`xf` fixes the falls* (reading 3 passes for `mt18_no_sidestep`) on both bodies, with no
+  regression.
+  - Cross-fitted plans become the decoder's recipe.
+  - Which held-out task the program scores is left open, with W17's and W18's evidence.
+  - Body zero-shot (a third body) is next.
+- *It reduces the falls* (paired, below −2 SE) without fixing them.
+  - Coverage is the mechanism.
+  - The next question is the share and the length: a W13-length training from S with the
+    cross-fitted plans.
+- *No effect.*
+  - The falls are not a coverage gap the base tasks can expose.
+  - The next question is on the generator's side: whether its composed plans are executable at
+    all.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the reading.
+
+**Budget.**
+- About 15 min of generators and 15 min of signal.
+- The screen: about 3 h of training and 1 h of L4.
+- The full run: about 6 h of training and 1.7 h of L4.
+- About 1.5 h of rough L4.
+- One Isaac process at a time.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

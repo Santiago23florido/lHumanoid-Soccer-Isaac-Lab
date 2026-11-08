@@ -262,6 +262,12 @@ ranges (forward −0.10 to 0.45 `V`, lateral ±0.15 `V`). No run had used it.
 - *Body zero-shot on an unseen body.* Leave one body out of the generator's training. It
   needs a third body and is not yet possible here.
 
+*Correction (2026-11-08, `skill_space.md` §10.22).* The leakage test below compared a latent
+with a shuffled control. A latent computed from the `z*` history cannot carry more body than
+that history, and the bodies' `z*` history alone already tells them apart (0.998). The test's
+reference is now the `z*` history itself. Under the old test, W16's and W17's learned latents
+were not evaluated; `mt17_l` passes the corrected one.
+
 **The latent's condition.** A latent beside `z*` must carry no identity of the body. Its
 leakage test is pre-registered with it: how well a classifier, or a regression onto the
 body's joints, recovers the body from the latent, against a shuffled control. That is the

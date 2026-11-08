@@ -361,8 +361,13 @@ def _invariance_terms(
 
 @torch.no_grad()
 def _features(generator: ContractGenerator, pairs: BodyPairs, sigma: torch.Tensor):
+    """The summary of each noisy history, and the noisy history itself."""
     window = pairs.window + sigma * torch.randn_like(pairs.window)
-    return summary(generator, window)
+    return summary(generator, window), window
+
+
+def _standardise(x: torch.Tensor) -> torch.Tensor:
+    return (x - x.mean(0)) / x.std(0).clamp_min(1e-6)
 
 
 def leakage(
@@ -375,30 +380,38 @@ def leakage(
     """How well a fresh probe tells the bodies apart from the generator's history summary.
 
     A two-layer probe is trained on 70 % of the pairs and scored on the rest, by balanced
-    accuracy; the control is the same probe on labels shuffled among the pairs. The summary
-    leaks the body when the probe beats its control. Chance is ``1 / bodies``; ``se`` is the
-    binomial standard error of the balanced accuracy on the test pairs.
+    accuracy; the control is the same probe on labels shuffled among the pairs. Chance is
+    ``1 / bodies``; ``se`` is the binomial standard error of the balanced accuracy on the
+    test pairs.
+
+    **The reference is the history itself** (``window_*``): the same probe on the same noisy
+    ``z*`` windows the summary was computed from. The summary is a function of the window, so
+    it cannot tell the bodies apart better than the window does, and the bodies' ``z*`` history
+    alone already tells them apart: 0.998 on W18's bodies (``w21_leakage.py``,
+    ``skill_space.md`` §10.22). A summary leaks the body *beyond* the contract when it beats the
+    window, not when it beats the shuffled control, which every informative summary of these
+    bodies does.
     """
     torch.manual_seed(seed)
-    features = _features(generator, pairs, sigma)
-    features = (features - features.mean(0)) / features.std(0).clamp_min(1e-6)
+    features, window = _features(generator, pairs, sigma)
+    features = _standardise(features)
     labels = pairs.group
     classes = int(labels.max()) + 1
     order = torch.randperm(len(labels), device=labels.device)
     cut = int(0.7 * len(labels))
     train, test = order[:cut], order[cut:]
 
-    def probe(target: torch.Tensor) -> float:
+    def probe(target: torch.Tensor, inputs: torch.Tensor) -> float:
         model = torch.nn.Sequential(
-            torch.nn.Linear(features.shape[1], 64), torch.nn.ELU(), torch.nn.Linear(64, classes)
-        ).to(features.device)
+            torch.nn.Linear(inputs.shape[1], 64), torch.nn.ELU(), torch.nn.Linear(64, classes)
+        ).to(inputs.device)
         optimiser = torch.optim.Adam(model.parameters(), lr=1e-2)
         with torch.enable_grad():
             for _ in range(epochs):
                 optimiser.zero_grad(set_to_none=True)
-                _balanced_ce(model(features[train]), target[train], classes).backward()
+                _balanced_ce(model(inputs[train]), target[train], classes).backward()
                 optimiser.step()
-        predicted = model(features[test]).argmax(dim=1)
+        predicted = model(inputs[test]).argmax(dim=1)
         recalls = [
             float((predicted[target[test] == c] == c).float().mean())
             for c in range(classes)
@@ -406,14 +419,23 @@ def leakage(
         ]
         return float(np.mean(recalls))
 
+    def se(accuracy: float) -> float:
+        return math.sqrt(max(accuracy * (1 - accuracy), 1e-6) / len(test))
+
     shuffled = labels[torch.randperm(len(labels), device=labels.device)]
-    accuracy = probe(labels)
+    accuracy = probe(labels, features)
+    control = probe(shuffled, features)
+    # After the two probes above, so their figures are as before the reference existed.
+    reference = probe(labels, _standardise(window.flatten(1)))
     return {
         "balanced_accuracy": accuracy,
-        "control": probe(shuffled),
+        "control": control,
         "chance": 1 / classes,
         "test_pairs": len(test),
-        "se": math.sqrt(max(accuracy * (1 - accuracy), 1e-6) / len(test)),
+        "se": se(accuracy),
+        "window_balanced_accuracy": reference,
+        "window_se": se(reference),
+        "beyond_window": accuracy - reference,
     }
 
 

@@ -4536,6 +4536,115 @@ clock from its status file).
 - The screen takes about 6.5 h, the full run about 13 h more.
 - One Isaac process at a time.
 
+### 10.22 The learned latent, from free to collapsed, on the best decoders; pre-registered (W21)
+
+Pre-registered 2026-11-08, 19:15, before any of its runs, while W20 runs: the best decoders so far with the
+learned latent, and a bottleneck in its loss.
+
+**A correction first: the leakage gate of W16 and W17 was mis-specified.**
+- *What the gate read.* A probe told the bodies apart from the generator's history summary,
+  and the gate compared it with the same probe on shuffled labels.
+- *What it missed.* The summary is a function of the `z*` history, so it cannot tell the
+  bodies apart better than the history does. And the history already tells them apart.
+  `python transfer/scripts/w21_leakage.py --generators mt18_no_sidestep mt18_no_sidestep_m
+  mt17_l mt16_l --output transfer/results/w21_leakage_existing.json` gives, on one set of
+  probe pairs:
+
+  | Generator | Summary | `z*` window (reference) | Beyond the window |
+  | --- | --- | --- | --- |
+  | `mt18_no_sidestep` | 0.9985 | 0.9981 | +0.0004 |
+  | `mt18_no_sidestep_m` (free summary) | 0.9991 | 0.9981 | +0.0010 |
+  | `mt17_l` (MMD) | 0.9961 | 0.9981 | −0.0021 |
+  | `mt16_l` (adversary) | 0.9545 | 0.9981 | −0.0436 |
+
+- *What it means.* The bodies execute the tasks differently in `z*` itself. To pass the old
+  gate, a summary had to erase gait state the contract carries. That is why the adversary broke
+  its generator (W16) and the MMD constraint was never met (W17).
+- *The corrected gate* (`latent/body_data.leakage`, reference `window_*`). A summary leaks the
+  body beyond the contract when it beats the `z*` window by more than 3 SE of the difference.
+  Every generator above passes it.
+- *What the wrong gate affected.*
+  - W16's and W17's reading "learned part: not evaluated, leakage gate fails".
+  - Under the corrected gate, `mt17_l` would have been deployed. `mt16_l` passes it too, but its
+    generator was broken (calibration error 0.42 against the gate's 0.05) and is not deployed.
+- *Also corrected.* In W16 and W17 the arms called "`z*` only" still had a free learned summary
+  of the history, so they were learned latents too. A generator without one is arm `z` below.
+
+**Hypothesis.**
+- In the autonomous loop the generator follows the body's history, and on the held-out task
+  that loop compounds a decoder's error (W19: closed feet, then a standing gait asked).
+- The history summary is where the body's deviations enter the plans.
+- A bottleneck on it (a Gaussian information bottleneck, `ContractDims.summary_beta`) keeps only
+  what is worth its cost in predicting the plan. With the bodies' data paired to the teacher's
+  phase-matched futures, that is phase and command, not how a body deviates.
+- The plans should then follow the body less where it deviates, and the held-out task should
+  fall less, at some cost in deviation.
+- At the extreme (beta 1.0) the summary collapses: `z*` and the command alone. That is the
+  design's `z*`-only arm, now realised.
+
+**Steps** (`transfer/scripts/w21_latent.sh`, status `logs/contract/w21_latent.status`; it starts
+when W20 is done).
+0. **The correction.** `mt17_l` on rough's L4 on W13's six trackers, beside `mt17_m`'s rows.
+   This is W17's reading 4 as the corrected gate would have let it run.
+1. **Generators.**
+   - W18's recipe on the walk, flat, backward and jog experts; no sidestep, no rough.
+   - For each beta, the experts first (`mt21_<arm>_c`), then W16's bodies' histories, as for
+     `mt18_no_sidestep_m` (`mt21_<arm>`).
+   - The arms are `b1` (beta 0.001), `b2` (0.01) and `z` (1.0).
+   - The betas were set before training from the free summary's scale (mean squared norm
+     230–300 on 64 dimensions, against a data loss of about 0.45): about a quarter, three times,
+     and three hundred times the loss.
+   - The references, on the same data, are `c` (`mt18_no_sidestep`) and `m`
+     (`mt18_no_sidestep_m`, beta 0).
+2. **Leakage** (`w21_leakage.py` → `transfer/results/w21_leakage.json`), with the corrected gate.
+   An arm that fails is reported and not deployed.
+3. **Decoders,** per body (`w21_compare.py --decoders`).
+   - W20's `xs` if all three of its seeds are read, it regresses neither on rough nor on the
+     base tasks, and it falls less on sidestep under `mt18_no_sidestep` than W19's `xf`.
+   - Otherwise W19's `xf`.
+   - This reads sidestep, so the chosen decoders' absolute sidestep figures are not a clean
+     zero-shot estimate. The contrasts below compare generators on the same decoders, which
+     this choice does not favour.
+4. **L4** on the chosen decoders (deployed path, own units):
+   - sidestep under each deployed new arm (`c`'s and `m`'s rows exist from W19 and W20);
+   - rough under `c`, `m` and each deployed new arm. Rough is held out of every generator here.
+5. **Compare** (`w21_compare.py` → `transfer/results/w21_latent.json`).
+
+**Readings,** per body, paired over the three decoders. Each contrast is read on sidestep
+(falls summed and paired, largest deviation paired) and on rough (largest deviation paired,
+falls). "Help" is below −2 SE, "hurt" above +2 SE.
+0. **The correction:** `mt17_l − mt17_m` on rough, on W13's trackers.
+1. **Leakage** beyond the `z*` history, per arm.
+2. **The learned latent:** `m − z`, the free summary against `z*` alone.
+3. **The bottleneck:** `b1 − m` and `b2 − m`.
+4. **The bodies' data:** `m − c`, the design's control.
+5. **Open objective** on sidestep per arm: W18's reading 3, with `mt17_c`'s falls on W13's
+   trackers as the bar.
+
+**What each outcome leads to.**
+- *A bottleneck helps over `m`* on the held-out falls or deviation, passes the leakage gate and
+  hurts neither task.
+  - The multi-body generator with that bottlenecked latent becomes the design's generator.
+  - Body zero-shot is next, and needs a third body; that is left open.
+- *The learned latent helps over `z*` alone* (`m − z`), and no bottleneck helps beyond it.
+  - The free summary stays. Under the corrected gate it carries no more body than the contract.
+- *Neither helps.*
+  - `z*` and the command suffice, and the learned latent is dropped as unneeded.
+  - The held-out falls are then not in the generator's history pathway, and the next question
+    returns to the decoders.
+- *If W17's `mt17_l` helps on rough* where `mt17_m` did not, the MMD summary is a candidate
+  beside the bottleneck, read on the same footing.
+- *Any failure,* including a generator that breaks, is reported with its figures and reframed.
+  Nothing is tuned after the reading.
+
+**Budget.**
+- About 40 min of generator training (six trainings).
+- L4 runs, about 7 min each, roughly 6.3 h in all:
+  - 6 for the correction;
+  - 18 on sidestep (three arms, six decoders);
+  - 30 on rough (five arms, six decoders).
+- One Isaac process at a time.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

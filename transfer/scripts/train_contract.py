@@ -130,6 +130,13 @@ def main() -> int:
         help="Model foot loads as log(load + 0.01): forces are never negative.",
     )
     parser.add_argument("--memory", type=int, default=64, help="Width of the history summary.")
+    parser.add_argument(
+        "--summary-beta",
+        type=float,
+        default=0.0,
+        help="Weight of a Gaussian bottleneck on the history summary (latent/contract.py, "
+        "ContractDims.summary_beta); 0: none.",
+    )
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--flow-hidden", type=int, default=1024)
     parser.add_argument(
@@ -269,6 +276,7 @@ def main() -> int:
             warp_loads=args.warp_loads,
             noise_conditional=args.noise_conditional,
             memory=args.memory,
+            summary_beta=args.summary_beta,
             channels=args.channels,
             flow_hidden=args.flow_hidden,
         ),
@@ -534,6 +542,7 @@ def main() -> int:
             "free_bits": config.free_bits,
             "intent": config.dims.intent,
             "kind": config.dims.kind,
+            "summary_beta": config.dims.summary_beta,
             "noise_scale": args.noise_scale,
             "memory": config.dims.memory,
             "channels": config.dims.channels,

@@ -161,6 +161,26 @@ def test_the_probe_finds_a_body_the_summary_carries_and_not_one_it_does_not(teac
     assert seen["balanced_accuracy"] > 0.9 and seen["control"] < 0.65
 
 
+def test_the_probe_reads_the_history_itself_as_the_reference(teacher):
+    """A summary cannot carry more body than the history it summarises: the reference."""
+    _, _, generator, _ = teacher
+    torch.manual_seed(1)
+    window = torch.randn(400, CLOCK.history, SIZE)
+    group = (torch.arange(400) % 2).long()
+    pairs = BodyPairs(
+        window, torch.zeros(400, 3), torch.zeros(400, CLOCK.horizon, SIZE), group, torch.arange(400)
+    )
+    same = leakage(generator, pairs, torch.zeros(SIZE))
+    apart = leakage(
+        generator, replace(pairs, window=window + 3.0 * group[:, None, None]), torch.zeros(SIZE)
+    )
+    assert same["window_balanced_accuracy"] < 0.65
+    assert apart["window_balanced_accuracy"] > 0.9
+    for out in (same, apart):
+        assert out["beyond_window"] == out["balanced_accuracy"] - out["window_balanced_accuracy"]
+        assert 0.0 < out["window_se"] < 0.1
+
+
 def test_mmd_is_near_zero_within_a_distribution_and_large_between_two():
     torch.manual_seed(2)
     a, b = torch.randn(300, 4), torch.randn(300, 4)

@@ -4394,6 +4394,56 @@ What one seed shows (no verdict; that needs the three seeds):
   - Under `ctl` at `right`, the held-out generator, continuing the body's history, asks for a
     duty factor of 0.87 (0.60 under `xf`). The body's directed ratio drops to 0.81.
 
+**Result** (2026-11-08, 18:19). The reading comes from
+`python transfer/scripts/w19_compare.py --output transfer/results/w19_crossfit.json`. The
+instrumentation comes from `python transfer/scripts/w18_mechanism.py --prefix <arm> --arms
+mt18_no_sidestep mt18_no_sidestep_m --output transfer/results/w19_mechanism_<arm>.json`, with
+W13's rows from W18's run of the same script.
+
+Sidestep under `mt18_no_sidestep`, three seeds per body. The W13 column is W18's run of the
+trackers both arms continue.
+
+| Body | W13 falls | `ctl` falls | `xf` falls | Falls, `xf − ctl` paired | Bar (`mt17_c` + 2) | `xf` directed, min | Deviation, `xf − ctl` | Reading |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| G1 | 265 | 252 | 67 | −61.7 ± 26.3 | 26 | 1.09 | +0.024 ± 0.009, hurt | reduces the falls |
+| NAO | 394 | 662 | **1** | −220.3 ± 7.2 | 2 | 1.09 | −0.008 ± 0.011, none | **fixes the falls** |
+
+- *Under `mt18_no_sidestep_m`:*
+  - G1: `xf` 147 falls, `ctl` 436.
+  - NAO: `xf` 14, `ctl` 468. The NAO's `xf` misses the bar under this generator.
+- *Rough under `rough_b4` holds on both bodies.* `xf − ctl` is −0.0039 ± 0.0041 (G1) and
+  +0.0025 ± 0.0174 (NAO), with no falls in either arm.
+- *The branch that applies.* The G1 reduces and the NAO fixes, so "fixes on both bodies" does
+  not apply. W20 (§10.21), pre-registered at 11:40 on the G1's three seeds, applies. It has been
+  running since 18:21.
+
+What the plans asked and the bodies did at `right` (instrumentation; means over the three
+trackers):
+
+| Body | Tracker | Falls | Separation p05, asked / body (`L`) | Double support asked | Height asked |
+| --- | --- | --- | --- | --- | --- |
+| G1 | W13 | 148 | 0.362 / 0.191 | 0.142 | 0.878 |
+| G1 | `ctl` | 156 | 0.370 / 0.270 | 0.135 | 0.877 |
+| G1 | `xf` | 52 | 0.379 / 0.365 | 0.084 | 0.871 |
+| NAO | W13 | 394 | 0.319 / 0.153 | 0.348 | 0.895 |
+| NAO | `ctl` | 661 | 0.308 / 0.025 | 0.549 | 0.916 |
+| NAO | `xf` | 1 | 0.395 / 0.370 | 0.074 | 0.866 |
+
+What it shows:
+- *The cross-fitted decoders keep the feet apart on the held-out task.* Their bodies' separation
+  is within 0.014 `L` (G1) and 0.025 `L` (NAO) of the asked one, where W13's and `ctl`'s close.
+- *In the autonomous loop the plans follow the body.*
+  - Where the NAO's feet close under `ctl`, the generator, reading that history, asks for more
+    double support (0.55) and a taller CoM (0.916). That is a standing gait.
+  - The body then slows (directed ratio 0.81–0.83) and falls.
+  - The decoder's error compounds through the plans.
+- *Training longer on the base tasks alone does not bring the held-out task along.* The NAO's
+  `ctl` falls more than W13 did (662 against 394).
+- *The G1's remaining falls have another cause.* 52 of `xf`'s 67 are at `right`, with the feet
+  apart. That cause is not measured.
+- *Against the generator that saw sidestep,* `xf`'s falls are 67 against `mt17_c`'s 24 on the G1,
+  and 1 against 0 on the NAO.
+
 ### 10.21 Cross-fitted decoders trained once from S; pre-registered (W20)
 
 Pre-registered 2026-11-08, 11:40, before any of its runs, while W19's NAO seeds 32 and 33 run.

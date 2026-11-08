@@ -4353,6 +4353,47 @@ instrumentation read after W18, from its captures).
 - About 1.5 h of rough L4.
 - One Isaac process at a time.
 
+**Screen** (2026-11-08, 08:38; `python transfer/scripts/w19_compare.py` with only the screen
+seeds on disk, beside W13's rows in `transfer/results/w18_loto.json`).
+
+- *Generators.* Both cross-fitted generators fail the generators' calibration gate (chain
+  fidelity 0.161 and 0.195). The pre-registration does not gate on it, since they only draw
+  training plans.
+- *Signal* (step 2).
+  - Under `mt19_xf_flat`'s plans, W13's G1 s41 tracker falls at forward (12 of 64 episodes)
+    and turning (118 of 150), not at fast.
+  - Under the in-distribution plans it fell at none of the three.
+  - Under `mt19_xf_jog`'s plans it falls at no command.
+  - The signal exists on flat, not on jog.
+
+Sidestep falls under `mt18_no_sidestep`, seeds 41 (G1) and 31 (NAO). The W13 rows are W18's
+runs of the trackers both arms continue.
+
+| Body | Tracker | left | left_fast | right | Total | Directed ratio, min |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 | W13 | 8 | 21 | 32 | 61 | 1.10 |
+| G1 | `ctl` | 25 | 4 | 10 | 39 | 1.11 |
+| G1 | `xf` | 7 | 0 | 6 | **13** | 1.10 |
+| NAO | W13 | 0 | 0 | 63 | 63 | 1.00 |
+| NAO | `ctl` | 0 | 0 | 229 | 229 | 0.81 |
+| NAO | `xf` | 0 | 0 | 1 | **1** | 1.10 |
+
+Under `mt18_no_sidestep_m` the totals are:
+- G1: W13 265, `ctl` 39, `xf` 16;
+- NAO: W13 94, `ctl` 158, `xf` 6.
+
+The rule holds on both bodies, and the full run started at 08:38.
+
+What one seed shows (no verdict; that needs the three seeds):
+- *The continuation alone moves the falls, in both directions.* From W13 to `ctl`, the G1 goes
+  from 61 to 39 and the NAO from 63 to 229. `xf` falls less than both, on both bodies.
+- *G1.* `xf`'s 13 falls are above `mt17_c`'s 4 + 2 on this seed, so the open objective is still
+  missed. Its largest deviation is 0.010 above `ctl`'s.
+- *NAO.*
+  - `xf`'s one fall is within `mt17_c`'s 0 + 2. Its largest deviation is 0.026 below `ctl`'s.
+  - Under `ctl` at `right`, the held-out generator, continuing the body's history, asks for a
+    duty factor of 0.87 (0.60 under `xf`). The body's directed ratio drops to 0.81.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

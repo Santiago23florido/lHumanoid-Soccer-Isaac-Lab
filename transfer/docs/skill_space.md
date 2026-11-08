@@ -4150,6 +4150,104 @@ its own gate is still evaluated, and marked.
 - About 20 min of offline chains.
 - One Isaac process at a time.
 
+**Result** (2026-11-08, 04:25).
+`python transfer/scripts/w18_compare.py --output transfer/results/w18_loto.json`.
+
+*The generators.* Each was trained, then evaluated whatever its gate said, as pre-registered.
+
+| Generator | Experts | Gate (calibration error, per foot) | Chain fidelity |
+| --- | --- | --- | --- |
+| `mt18_no_sidestep` | walk, flat, backward, jog | fails (0.070, 0.046) | 0.222 |
+| `mt18_no_sidestep_m` | the same, plus the bodies | fails (0.075, 0.051) | 0.325 |
+| `mt18_no_walk` | flat, backward, sidestep, jog | passes (0.009, 0.006) | 0.563 |
+| `mt18_no_flat` | walk, backward, sidestep, jog | fails (0.068, 0.049) | 0.171 |
+| `mt18_no_backward` | walk, flat, sidestep, jog | passes (0.038, 0.043) | 0.228 |
+| `mt18_no_jog` | walk, flat, backward, sidestep | passes (0.046, 0.038) | 0.238 |
+
+The reference `mt17_c` fails the same gate (0.055, 0.040).
+
+*The readings* (paired over three trackers, sidestep's largest deviation):
+
+| Reading | G1 | NAO | Verdict |
+| --- | --- | --- | --- |
+| 1. Proxy, order of the four arms | as L4's | as L4's | calibrated, calibrated |
+| 1. Proxy, duty cells within 0.05 | 12 of 12 | (12 of 12, not required) | |
+| 2. Cost, `mt18_no_sidestep − mt17_c` | +0.0186 ± 0.0021 | +0.0129 ± 0.0046 | costs, costs |
+| 3. Objective, `mt18_no_sidestep`: falls (`mt17_c`'s) | 265 (24) | 394 (0) | fails, fails |
+| 3. Objective, `mt18_no_sidestep`: lowest directed ratio | 1.09 | 0.82 | |
+| 3. Objective, `mt18_no_sidestep_m`: falls, lowest ratio | 711, 1.10 | 367, 0.89 | fails, fails |
+| 4. Bodies' data, `m − c` | +0.0132 ± 0.0006 | −0.0275 ± 0.0010 | hurt, help |
+
+- `mt17_c` and `mt17_m` pass reading 3 on both bodies.
+- *Where the falls are.*
+  - On the G1, under `mt18_no_sidestep`: 148 at `right`, 74 at `left_fast` and 43 at `left`.
+  - On the NAO, every fall is at `right` (63, 97 and 234 on s31–s33). The NAO's 0.82 is s33's
+    `right`.
+- *The level is shared.*
+  - `mt17_c`, which saw sidestep, scores 0.34–0.35 (G1) and 0.40–0.42 (NAO). On s41 and s31, at
+    `left` and `right`, its stride period and length differ from the teacher's by 0.29–0.53; at
+    `left_fast` by 0.03–0.08.
+  - Under `mt17_c` the bodies sidestep faster than the teacher (directed ratio 1.10–1.26). The
+    teacher reaches only 0.79–0.89 of its command. Relabelled commands ask for the command (10.18).
+  - That part is common to every arm, and the pairing removes it.
+
+*5. Offline,* each leave-one-out generator minus `mt17_c` on its held-out task's teacher captures.
+`held_out_chains_w18_<task>_{teacher,reset}.json`.
+
+| Held out | From the teacher's history | From the reset | Held-out speed ratio, from the reset |
+| --- | --- | --- | --- |
+| sidestep | +0.014 (0.410 against 0.396) | +0.019 (0.411 against 0.392) | 1.04–1.09 |
+| jog | +0.207 (0.347 against 0.140) | +0.208 (0.353 against 0.145) | 0.95–1.00 |
+| backward | +0.308 (0.468 against 0.161) | +0.242 (0.415 against 0.173) | 0.55–0.66 |
+| flat | +5.31: the chain diverges (forward speed 0.42) | +0.158 (0.615 against 0.457) | 1.06–1.20 |
+
+The walk has no per-command teacher capture, so `mt18_no_walk` is reported by its gate alone.
+
+*The branch that applies.* None literally.
+- It costs on both bodies.
+- The directed speed holds on the G1 (1.09). It fails on the NAO only at s33's `right`, where
+  that tracker falls 234 times.
+- What fails is the falls, which no branch names.
+- The bodies' data help on the NAO alone. On the G1 they hurt and nearly triple the falls.
+
+**What the plans asked** (read after the result; instrumentation, not a criterion).
+`python transfer/scripts/w18_mechanism.py --output transfer/results/w18_mechanism.json`, from the
+L4 captures after the settle steps, averaged over three trackers.
+- *The plans never ask the feet to cross. The bodies cross them.*
+  - G1 at `right`: the 5th percentile of the lateral foot separation is 0.19 `L` in the body,
+    0.36 asked. Under `mt17_c` it is 0.33, asked 0.35.
+  - With the bodies' data, the G1's body reaches −0.05: the feet cross.
+  - NAO at `right`: 0.15, asked 0.32. Under `mt17_c`: 0.33, asked 0.35.
+- *The style differs.*
+  - The G1's held-out plans ask for less double support (0.08–0.14 of the time against
+    0.15–0.28), more flight (0.06–0.07 against 0.03–0.05) and a lower CoM (0.86–0.88 `L`
+    against 0.90–0.91).
+  - The NAO's plans at `right` ask for a narrower stance: median 0.42 `L` against 0.47.
+- *Two checks of the plans' physics separated nothing.* The teacher's own sidestep fails them as
+  often as either generator's plans:
+  - the lateral DCM beyond the leading foot in single support: teacher 0.10–0.67 of the time,
+    plans 0.05–0.51;
+  - the CoP implied by the CoM's acceleration, outside the loaded feet: teacher 0.36–0.80, plans
+    0.57–0.76.
+
+**Reframed.**
+- *The gait generalises to commands the task owns.* The generator that never saw sidestep moves
+  the body along the commanded direction at the commanded speed. Its signature costs
+  0.013–0.019 against the generator that did see it. The offline proxy predicted that cost
+  (+0.014 and +0.019).
+- *That cost is measured against a reference that misses sidestep's style too* (0.39–0.40
+  offline). Where the reference reproduces a task (jog 0.14, backward 0.16), leaving the task
+  out costs +0.21 to +0.31 offline.
+- *Backward's speed falls to 0.55–0.66 when it is left out.* A negative forward command is the
+  one no other expert approaches. That is the coverage bound the second branch names, seen
+  offline.
+- *What fails at the held-out task is execution.* Each decoder trained on base-task plans drawn
+  by generators that had seen those tasks, so it never executed a plan composed for unseen
+  commands. Deployed zero-shot, those are the only plans it gets. The next step (10.20) puts
+  that condition into the decoder's training without any held-out data.
+- *The proxy is calibrated on both bodies.* The state after a reset replaces the teacher's
+  history as every later pre-check's start.
+
 ### 10.20 Decoders that practise cross-fitted plans; sidestep held out; pre-registered (W19)
 
 Pre-registered 2026-11-08, 04:40, before any of its runs, on W18's result (10.19).

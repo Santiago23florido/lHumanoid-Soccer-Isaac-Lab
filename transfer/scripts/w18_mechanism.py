@@ -15,6 +15,11 @@ over the three trackers; and for sidestep's teacher:
     and 0.10 ``L`` lengthwise.
 
     python transfer/scripts/w18_mechanism.py --output transfer/results/w18_mechanism.json
+
+The same measures on other trackers (W19's arms, say), with ``--prefix`` naming the trackers
+``<prefix>_<body>_s<seed>_sym``:
+
+    python transfer/scripts/w18_mechanism.py --prefix xf --arms mt18_no_sidestep mt18_no_sidestep_m
 """
 
 from __future__ import annotations
@@ -31,10 +36,7 @@ sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 
 from humanoid_transfer.common.skill_state import dcm_offset  # noqa: E402
 
-TRACKERS = {
-    "g1": ("mt_g1_s41_sym", "mt_g1_s42_sym", "mt_g1_s43_sym"),
-    "nao": ("mt_nao_s31_sym", "mt_nao_s32_sym", "mt_nao_s33_sym"),
-}
+SEEDS = {"g1": (41, 42, 43), "nao": (31, 32, 33)}
 ARMS = ("mt17_c", "mt18_no_sidestep", "mt18_no_sidestep_m", "mt17_m")
 DIRECTION = {"left": 1, "left_fast": 1, "right": -1}
 SETTLE = 100
@@ -92,7 +94,10 @@ def mean(rows: list[dict]) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--prefix", default="mt", help="trackers <prefix>_<body>_s<seed>_sym")
+    parser.add_argument("--arms", nargs="+", default=list(ARMS))
     args = parser.parse_args()
+    trackers = {b: [f"{args.prefix}_{b}_s{s}_sym" for s in seeds] for b, seeds in SEEDS.items()}
     report: dict = {"teacher": {}, "bodies": {}}
     for command, sign in DIRECTION.items():
         data = np.load(REPO_ROOT / f"g1/rollouts/base_sidestep_play_{command}.npz")
@@ -100,11 +105,11 @@ def main() -> int:
         report["teacher"][command] = measures(
             data["skill_state"][SETTLE:], alive, sign, dt_star(data)
         )
-    for body, tags in TRACKERS.items():
+    for body, tags in trackers.items():
         report["bodies"][body] = {}
         for command, sign in DIRECTION.items():
             entry = {}
-            for arm in ARMS:
+            for arm in args.arms:
                 asked, executed, falls = [], [], 0
                 for tag in tags:
                     path = (
@@ -113,13 +118,22 @@ def main() -> int:
                         / "rollouts"
                         / f"zs_{tag}_{arm}_own_auto_kin_{command}_encoder.npz"
                     )
+                    if not path.exists():  # a tracker not run (yet)
+                        continue
                     data = np.load(path)
                     alive = ~data["done"][SETTLE:]
                     dt = dt_star(data)
                     asked.append(measures(data["contract_due"][SETTLE:], alive, sign, dt))
                     executed.append(measures(data["skill_state"][SETTLE:], alive, sign, dt))
                     falls += int(data["terminated"].sum())
-                entry[arm] = {"falls": falls, "asked": mean(asked), "body": mean(executed)}
+                if not asked:
+                    continue
+                entry[arm] = {
+                    "trackers": len(asked),
+                    "falls": falls,
+                    "asked": mean(asked),
+                    "body": mean(executed),
+                }
                 a, b = entry[arm]["asked"], entry[arm]["body"]
                 print(
                     f"{body} {command:9s} {arm:20s} falls {falls:4d}  separation p05 asked "

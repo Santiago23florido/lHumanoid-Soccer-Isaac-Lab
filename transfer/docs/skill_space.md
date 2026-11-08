@@ -4394,6 +4394,98 @@ What one seed shows (no verdict; that needs the three seeds):
   - Under `ctl` at `right`, the held-out generator, continuing the body's history, asks for a
     duty factor of 0.87 (0.60 under `xf`). The body's directed ratio drops to 0.81.
 
+### 10.21 Cross-fitted decoders trained once from S; pre-registered (W20)
+
+Pre-registered 2026-11-08, 11:40, before any of its runs, while W19's NAO seeds 32 and 33 run.
+
+**Why.** The readings come from `python transfer/scripts/w19_compare.py`, run with the G1's three
+seeds and the NAO's seed 31 on disk.
+- *G1, three seeds* (sidestep under `mt18_no_sidestep`):
+  - `xf` falls 67 times and `ctl` 252, paired −61.7 ± 26.3, so W19 reads "reduces the falls".
+  - The open objective is still missed: the bar is `mt17_c`'s 24 falls plus 2.
+  - The largest deviation is hurt: +0.024 ± 0.009.
+- *Mechanism* (instrumentation, `python transfer/scripts/w18_mechanism.py --prefix xf` and
+  `--prefix ctl`):
+  - At `right`, `ctl`'s feet close: the 5th-percentile separation is 0.27 `L`, against 0.37
+    asked.
+  - `xf`'s stay apart: 0.365 against 0.379.
+  - Most of `xf`'s remaining falls are at `right` (52 of 67).
+- *NAO, seed 31:* `xf` falls once, `ctl` 229 times.
+- *W19's outcome tree.* The G1 alone rules out "fixes the falls on both bodies". "Reduces"
+  names the next step: a W13-length training from S with the cross-fitted plans. That is W20.
+
+**Hypothesis.**
+- W19 practised cross-fitted plans for 300 iterations on top of W13, and that reduced the falls.
+- W20 practises them for the whole of the decoder's base-task training (1000 iterations from S),
+  from its start, with the share unchanged.
+- The falls should then drop further, within the open objective's bar.
+
+**Design** (`transfer/scripts/w20_from_s.sh`, status `logs/contract/w20_from_s.status`; it
+starts when W19 is done).
+- *Arm `xs`.*
+  - S's incumbent is continued 1000 iterations in W13's conditions, with W19's
+    `base_tasks_xf.json` in place of `base_tasks.json`.
+  - That set is walk, flat, jog, `flat_xf` and `jog_xf`, with uniform weights and the family
+    at 0.5.
+  - Seeds 41–43 (G1) and 31–33 (NAO).
+- *Control.* W13's trackers: the same incumbent, seed, conditions and length, without the
+  cross-fitted plans. Their rows are on disk.
+- *Evaluation,* per `xs` tracker:
+  - its own refitted encoder and S0's walk (W13's ladder stages);
+  - flat's L4 and jog's at its middle command. The G1 is read in the task's units, as W13
+    read it; the NAO in its own, as W14 did;
+  - sidestep's L4 under `mt18_no_sidestep` and `mt18_no_sidestep_m`;
+  - rough's L4 under `rough_b4`, in its own units.
+- *Screen.* Seeds 41 and 31 run first. The others run if, on either body, under
+  `mt18_no_sidestep`:
+  - W13's tracker falls more than twice on sidestep (it fell 61 and 63 times), and
+  - `xs` falls at most half as often.
+- Sidestep and rough stay out of every gradient step.
+
+**Readings** (`transfer/scripts/w20_compare.py` → `transfer/results/w20_from_s.json`), per body,
+over the seeds run, `xs` against `mt` (W13):
+1. **Falls** on sidestep under `mt18_no_sidestep`, summed and paired per seed.
+2. **Open objective,** W18's reading 3, per arm and held-out generator:
+   - every command's directed speed ratio is at least 0.9;
+   - falls are at most two more than `mt17_c`'s on W13's trackers of the same seeds.
+3. **Deviation:** sidestep's largest, paired. "Help" below −2 SE, "hurt" above +2 SE.
+4. **No regression on rough** under `rough_b4`:
+   - paired, "regresses" above +2 SE;
+   - `xs`'s falls at most two more than `mt`'s.
+5. **No regression on the base tasks:**
+   - flat's L4 (the mean over its three commands) and jog's at its middle command, paired,
+     "regresses" above +2 SE;
+   - `xs`'s falls at most two more than `mt`'s;
+   - S0's walk passes on every `xs` tracker.
+- Beside the readings, as instrumentation: W19's `xf` continuation of the same seeds.
+
+**What each outcome leads to.**
+- *`xs` fixes the falls* (reading 2 passes under `mt18_no_sidestep`) on both bodies, with no
+  regression (readings 4 and 5).
+  - `xs` replaces W13 as each body's decoder.
+  - Which held-out task the program scores is left open, with W17–W20's evidence.
+  - Body zero-shot (a third body) is next.
+- *It reduces the falls* (paired, below −2 SE) without fixing them on both bodies.
+  - Length helps but is not enough.
+  - The next lever is coverage: every base task cross-fitted, the walk included (generators
+    trained without the walk and sidestep), in W20's recipe.
+- *No effect,* where W19's continuation reduced them.
+  - Then the effect depends on practising composed plans after the base tasks, not with them.
+  - The decoder's recipe becomes W13 followed by W19's continuation: still trained once, in two
+    phases.
+- *A regression on the base tasks or on rough.*
+  - It is reported, and the recipe is not adopted as it stands.
+  - The share of cross-fitted plans is the next lever.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the reading.
+
+**Budget** (W19's trainings took about 6.6 s per iteration on the G1 and 10 s on the NAO, wall
+clock from its status file).
+- Per tracker:
+  - about 1.9 h of training (G1) or 2.9 h (NAO);
+  - about 45 min of L4.
+- The screen takes about 6.5 h, the full run about 13 h more.
+- One Isaac process at a time.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

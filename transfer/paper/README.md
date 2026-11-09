@@ -220,6 +220,24 @@ Mean over the three commands of the |signed relative deviation|. Signed, total =
 | nao/flat | tracker | 0.018 | 0.011 | 0.017 | 0.020 | 0.066 |
 | nao/flat | estimator | 0.034 | 0.171 | 0.181 | 0.111 | 0.070 |
 
+### H — a held-out task: sidestep, out of every gradient step
+
+The generator `mt18_no_sidestep` never saw sidestep (walk, flat, backward, jog); `mt17_c` is the same recipe with sidestep in. Cost: sidestep's largest gait deviation, `mt18_no_sidestep − mt17_c` on W13's decoders, paired over seeds. Falls: on sidestep's three commands (left, left fast, right) under `mt18_no_sidestep`, summed over each body's three seeds; the open objective passes when every command keeps at least 0.9 of the teacher's directed speed and the falls are at most two more than `mt17_c`'s. Decoders: W13's (walk, flat and jog plans plus the procedural family); W19's (W13's continued 300 iterations with cross-fitted plans, drawn by generators that never saw that task); W20's (W13's recipe with cross-fitted plans, from S). No decoder ever saw sidestep. Source: `w18_loto.json`, `w19_crossfit.json`, `w20_from_s.json` (`skill_space.md` §10.19–10.21).
+
+| Body | Cost of holding it out | Falls, generator saw it | Falls, held out: W13 decoders | W19 decoders | W20 decoders | W20 − W13, paired |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 | +0.019 ± 0.002 | 24, passes | 265, misses | 67, misses | 15, passes | -83.3 ± 18.2 |
+| NAO | +0.013 ± 0.005 | 0, passes | 394, misses | 1, passes | 0, passes | -131.3 ± 52.3 |
+
+### H2 — what W20's decoders cost elsewhere
+
+Paired over seeds, W20 − W13, largest deviation (negative is closer to the teacher). Regresses: above +2 SE. Rough under `rough_b4`; flat is the mean over its three commands, jog its middle command; walk is S0's check. The G1 is read in the task's units, the NAO in its own (`OBSERVED`).
+
+| Body | Seeds | Sidestep | Rough | Flat | Jog | Walk |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 | 41, 42, 43 | +0.030 ± 0.005 | -0.003 ± 0.007 | +0.011 ± 0.005, regresses | +0.000 ± 0.002 | passes |
+| NAO | 31, 32, 33 | -0.004 ± 0.015 | +0.014 ± 0.015 | -0.047 ± 0.008 | -0.011 ± 0.004 | passes |
+
 ### A — ablations
 
 Rough L4 on the deployed path, one change at a time, unless the row says otherwise. The tags are in `paper_tables.py`'s `ABLATIONS`. The NAO's rows are read in the task generator's units, as first published: W14 did not re-read them (`skill_space.md` §10.15), and its falls and speeds did not move with the units.

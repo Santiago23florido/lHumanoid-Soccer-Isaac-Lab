@@ -4536,6 +4536,73 @@ clock from its status file).
 - The screen takes about 6.5 h, the full run about 13 h more.
 - One Isaac process at a time.
 
+**Result** (2026-11-09, 20:33). The reading comes from
+`python transfer/scripts/w20_compare.py --output transfer/results/w20_from_s.json`. The
+instrumentation comes from
+`python transfer/scripts/w20_starts.py --output transfer/results/w20_starts.json`, read after the
+screen.
+
+Sidestep under `mt18_no_sidestep`, three seeds per body:
+
+| Body | W13 falls | W19 `xf` falls | `xs` falls | Falls, `xs − mt` paired | Bar (`mt17_c` + 2) | `xs` directed, min | Deviation, `xs − mt` | Reading |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| G1 | 265 | 67 | **15** | −83.3 ± 18.2 | 26 | 1.10 | +0.030 ± 0.005, hurt | fixes the falls |
+| NAO | 394 | 1 | **0** | −131.3 ± 52.3 | 2 | 1.09 | −0.004 ± 0.015, none | fixes the falls |
+
+Elsewhere, `xs − mt` paired (largest deviation; flat is the mean of its three commands, jog its
+middle one):
+
+| Body | Rough (`rough_b4`) | Flat | Jog | Walk | Falls |
+| --- | --- | --- | --- | --- | --- |
+| G1 | −0.003 ± 0.007 | **+0.011 ± 0.005, regresses** | +0.000 ± 0.002 | passes | none in either arm |
+| NAO | +0.014 ± 0.015 | −0.047 ± 0.008 | −0.011 ± 0.004 | passes | none in either arm |
+
+- *Under `mt18_no_sidestep_m`:* G1 `xs` 31 falls (`mt` 711), NAO `xs` 4 (`mt` 367). Both miss
+  that generator's bar.
+- *Runs completed without a fall* (32 per command and seed, 288 per body): G1 206 (W13), 259
+  (W19), 282 (W20); NAO 203, 287, 288.
+- *The branch that applies.* Both bodies fix the falls, but the G1 regresses on flat
+  (+0.011 ± 0.005, every seed positive), so the pre-registered branch is "a regression on the
+  base tasks":
+  - the recipe is reported and not adopted as it stands;
+  - the share of cross-fitted plans is the next lever.
+- *On the NAO alone every reading passes,* with flat and jog closer to the teacher than W13's.
+  W21 uses the NAO's `xs` decoders, as its own rule says (§10.22); adoption for the NAO is
+  decided at review. On the G1, W21 uses W19's `xf`.
+- "Fixes on both bodies with no regression" does not apply, so the choice of held-out task and
+  the third body stay open.
+
+When the bodies fall, and what the plan asked then (instrumentation):
+- *Falls happen at the start.* 73–97 % of them come within 200 steps of a reset (G1: W13 0.93,
+  W19 0.87, W20 0.73; NAO: W13 0.97).
+- *Why a start is special.* At a reset the autonomous loop fills the generator's history with
+  the body at rest. Until a resynchronisation the generator then reads its own plans, which
+  therefore do not depend on the tracker. In 18–24 % of the G1's starts and 35–44 % of the
+  NAO's, the plan stays in double support (more than 0.4 of the first recorded steps): a
+  stalled start.
+- *Who survives a stalled start* (episodes begun before the recording):
+
+  | Body | Tracker | Stalled share | Falls, stalled start | Falls, walking start |
+  | --- | --- | --- | --- | --- |
+  | G1 | W13 | 0.24 | 0.57 | 0.16 |
+  | G1 | W19 | 0.19 | 0.29 | 0.03 |
+  | G1 | W20 | 0.18 | 0.12 | 0.00 |
+  | NAO | W13 | 0.44 | 0.42 | 0.20 |
+  | NAO | W19 | 0.36 | 0.00 | 0.01 |
+  | NAO | W20 | 0.35 | 0.00 | 0.00 |
+
+- *Reading.* How often a start stalls is the generator's; whether the body survives it is the
+  tracker's. Cross-fitted plans make the trackers survive stalled starts. A hypothesis, not
+  measured: the generator never saw a start from rest, since the teachers' captures begin after
+  100 settle steps.
+- *Correction to §10.20.*
+  - "The G1's remaining falls ... with the feet apart" read the separation over living steps
+    after the first 100 recorded ones, which leave out most falls' context. The falls are
+    start-up failures, as above.
+  - "In the autonomous loop the plans follow the body" holds only after a resynchronisation
+    (`resync_error`, 25 tolerances for 6 steps); before it, the generator reads its own plans.
+  - No run or criterion depended on either statement.
+
 ### 10.22 The learned latent, from free to collapsed, on the best decoders; pre-registered (W21)
 
 Pre-registered 2026-11-08, 19:15, before any of its runs, while W20 runs. It puts the learned

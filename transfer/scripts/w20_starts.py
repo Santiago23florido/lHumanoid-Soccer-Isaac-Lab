@@ -16,7 +16,9 @@ From the L4 captures on sidestep under one held-out generator, per body and trac
   - episodes that began inside it: window = ages 40-80, fall = a termination before age
     ``EARLY + 100``; those that fall before age 80, or end unobserved before then, are left out;
 
-  with the share of stalled starts and the fall rate of stalled and walking starts.
+  with the share of stalled starts and the fall rate of stalled and walking starts;
+- **runs completed**: the environments (32 per command and seed) that never fall over the
+  recorded 900 steps, and their share.
 
 Before the first resynchronisation the plans do not depend on the tracker, so the share of
 stalled starts is the generator's, and the fall rate given a stalled start is the tracker's.
@@ -108,6 +110,7 @@ def main() -> int:
         report["bodies"][body] = {}
         for prefix in args.prefixes:
             rows, fall_ages, used = [], [], []
+            runs = completed = 0
             for seed in seeds:
                 paths = [
                     REPO_ROOT
@@ -123,15 +126,21 @@ def main() -> int:
                     continue
                 used.append(seed)
                 for path in paths:
-                    r, a = starts(np.load(path))
+                    data = np.load(path)
+                    r, a = starts(data)
                     rows += r
                     fall_ages += a
+                    runs += data["terminated"].shape[1]
+                    completed += int((~data["terminated"].any(0)).sum())
             if not used:
                 continue
             a = np.array(fall_ages)
             entry = {
                 "seeds": used,
                 "falls": int(a.size),
+                "runs": runs,
+                "runs_completed": completed,
+                "completed_share": completed / runs,
                 "fall_age_p10_p50_p90": np.percentile(a, [10, 50, 90]).tolist() if a.size else None,
                 "falls_early_share": float((a <= EARLY).mean()) if a.size else None,
                 "first": summary(rows, "first"),
@@ -141,6 +150,7 @@ def main() -> int:
             f = entry["first"]
             print(
                 f"{body} {prefix} seeds {used} falls {entry['falls']:4d}"
+                f" completed {completed}/{runs}"
                 f" early {entry['falls_early_share'] or 0:.2f}"
                 f"  first: stalled {f['stalled_share']:.2f}"
                 f" P(fall|stalled) {f['fall_given_stalled'] if f['stalled'] else float('nan'):.2f}"

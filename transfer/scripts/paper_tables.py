@@ -242,9 +242,116 @@ def section(title: str, note: str, header: list[str], rows: list[list[str]]) -> 
     return "\n".join(lines)
 
 
+HELD_OUT = ("w18_loto.json", "w19_crossfit.json", "w20_from_s.json")
+"""Sidestep held out of every gradient step (W18), and the decoders trained on cross-fitted
+plans: W19's continuation and W20's training from S (``skill_space.md`` §10.19–10.21)."""
+
+
+def paired(entry: dict | None, digits: int = 3) -> str:
+    """A paired difference over seeds, ``mean ± SE``."""
+    if not entry or entry.get("mean") is None:
+        return "—"
+    return f"{entry['mean']:+.{digits}f} ± {entry['se']:.{digits}f}"
+
+
+def falls(entry: dict | None) -> str:
+    """Falls on sidestep summed over the seeds, and whether the open objective passes."""
+    if entry is None:
+        return "—"
+    return f"{entry['falls']}, {'passes' if entry['passes'] else 'misses'}"
+
+
+def held_out(data: dict) -> list[str]:
+    w18, w19, w20 = (read(name) for name in HELD_OUT)
+    if w18 is None:
+        return []
+    out, cost_rows, check_rows = [], [], []
+    for body in ("g1", "nao"):
+        b18 = w18["bodies"][body]
+        b19 = w19["bodies"][body] if w19 else None
+        b20 = w20["bodies"][body] if w20 else None
+        opened = b18["open_objective"]
+        data[body] = {
+            "cost": b18["cost"],
+            "open_objective_w18": opened,
+            "open_objective_w19": b19 and b19["open_objective"],
+            "w20": b20 and {k: v for k, v in b20.items() if k != "rows"},
+        }
+        cost_rows.append(
+            [
+                body.upper(),
+                paired(b18["cost"]),
+                falls(opened["mt17_c"]),
+                falls(opened["mt18_no_sidestep"]),
+                falls(b19["open_objective"]["xf/mt18_no_sidestep"]) if b19 else "—",
+                (
+                    falls(b20["open_objective"]["xs/mt18_no_sidestep"])
+                    + ("" if len(b20["seeds"]) == 3 else f" ({len(b20['seeds'])} seeds)")
+                    if b20
+                    else "—"
+                ),
+                paired(b20["falls_paired"], 1) if b20 else "—",
+            ]
+        )
+        if b20 is not None:
+            base = b20["base_tasks"]
+            check_rows.append(
+                [
+                    body.upper(),
+                    ", ".join(str(s) for s in b20["seeds"]),
+                    paired(b20["deviation_paired"]["mt18_no_sidestep"]),
+                    paired(b20["rough_regression"]["largest"]),
+                    paired(base["flat"]["largest"])
+                    + (", regresses" if base["flat"]["regresses"] else ""),
+                    paired(base["jog"]["largest"])
+                    + (", regresses" if base["jog"]["regresses"] else ""),
+                    "passes" if base["walk_passes"] else "fails",
+                ]
+            )
+    out.append(
+        section(
+            "H — a held-out task: sidestep, out of every gradient step",
+            "The generator `mt18_no_sidestep` never saw sidestep (walk, flat, backward, jog); "
+            "`mt17_c` is the same recipe with sidestep in. Cost: sidestep's largest gait "
+            "deviation, `mt18_no_sidestep − mt17_c` on W13's decoders, paired over seeds. Falls: "
+            "on sidestep's three commands (left, left fast, right) under `mt18_no_sidestep`, "
+            "summed over each body's three seeds; the open objective passes when every command "
+            "keeps at least 0.9 of the teacher's directed speed and the falls are at most two "
+            "more than `mt17_c`'s. Decoders: W13's (walk, flat and jog plans plus the procedural "
+            "family); W19's (W13's continued 300 iterations with cross-fitted plans, drawn by "
+            "generators that never saw that task); W20's (W13's recipe with cross-fitted plans, "
+            "from S). No decoder ever saw sidestep. Source: `w18_loto.json`, `w19_crossfit.json`, "
+            "`w20_from_s.json` (`skill_space.md` §10.19–10.21).",
+            [
+                "Body",
+                "Cost of holding it out",
+                "Falls, generator saw it",
+                "Falls, held out: W13 decoders",
+                "W19 decoders",
+                "W20 decoders",
+                "W20 − W13, paired",
+            ],
+            cost_rows,
+        )
+    )
+    if check_rows:
+        out.append(
+            section(
+                "H2 — what W20's decoders cost elsewhere",
+                "Paired over seeds, W20 − W13, largest deviation (negative is closer to the "
+                "teacher). Regresses: above +2 SE. Rough under `rough_b4`; flat is the mean over "
+                "its three commands, jog its middle command; walk is S0's check. The G1 is read "
+                "in the task's units, the NAO in its own (`OBSERVED`).",
+                ["Body", "Seeds", "Sidestep", "Rough", "Flat", "Jog", "Walk"],
+                check_rows,
+            )
+        )
+    return out
+
+
 def build() -> tuple[str, dict]:
     sections = []
-    data = {key: {} for key in ("M", "S", "B1", "B2", "B3", "gait", "SE", "T", "A", "D")}
+    data = {key: {} for key in ("M", "S", "B1", "B2", "B3", "gait", "SE", "T", "H", "A", "D")}
 
     rows = []
     for body, tag in MODEL.items():
@@ -461,6 +568,8 @@ def build() -> tuple[str, dict]:
                 rows,
             )
         )
+
+    sections += held_out(data["H"])
 
     rows = []
     for change, body, before, after in ABLATIONS:

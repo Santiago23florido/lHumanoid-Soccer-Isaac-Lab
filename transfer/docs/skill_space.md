@@ -4538,8 +4538,8 @@ clock from its status file).
 
 ### 10.22 The learned latent, from free to collapsed, on the best decoders; pre-registered (W21)
 
-Pre-registered 2026-11-08, 19:15, before any of its runs, while W20 runs: the best decoders so far with the
-learned latent, and a bottleneck in its loss.
+Pre-registered 2026-11-08, 19:15, before any of its runs, while W20 runs. It puts the learned
+latent on the best decoders so far, with a bottleneck in its loss.
 
 **A correction first: the leakage gate of W16 and W17 was mis-specified.**
 - *What the gate read.* A probe told the bodies apart from the generator's history summary,

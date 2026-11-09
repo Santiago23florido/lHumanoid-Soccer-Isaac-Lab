@@ -128,12 +128,15 @@ for arm in b1 b2 z; do
     $bodies --body-targets teacher --pair-command target
 done
 
-# 2. Leakage beyond the z* history, every arm on one set of pairs.
-"$python" transfer/scripts/w21_leakage.py --device cuda --generators mt18_no_sidestep \
-  mt18_no_sidestep_m mt21_b1 mt21_b2 mt21_z mt21_b1_c mt21_b2_c mt21_z_c \
-  --output "$results/w21_leakage.json" > logs/contract/w21_leakage.out 2>&1 \
-  || note "w21 leakage FAILED"
-note "leakage: $(grep -E 'passes|FAILS' logs/contract/w21_leakage.out | awk '{print $1, $NF}' | tr '\n' ' ')"
+# 2. Leakage beyond the z* history, every arm on one set of pairs (read once: a resumed run keeps
+# the first reading).
+if [ ! -f "$results/w21_leakage.json" ]; then
+  "$python" transfer/scripts/w21_leakage.py --device cuda --generators mt18_no_sidestep \
+    mt18_no_sidestep_m mt21_b1 mt21_b2 mt21_z mt21_b1_c mt21_b2_c mt21_z_c \
+    --output "$results/w21_leakage.json" > logs/contract/w21_leakage.out 2>&1 \
+    || note "w21 leakage FAILED"
+  note "leakage: $(grep -E 'passes|FAILS' logs/contract/w21_leakage.out | awk '{print $1, $NF}' | tr '\n' ' ')"
+fi
 deployed=""
 for arm in b1 b2 z; do
   grep -qE "^mt21_${arm} .*passes$" logs/contract/w21_leakage.out && deployed="$deployed mt21_${arm}"
@@ -145,8 +148,9 @@ note "deployed:${deployed:- none}"
   || { note "decoders FAILED"; note "w21 done"; exit 1; }
 note "decoders: $(tr '\n' ' ' < logs/contract/w21_decoders.out)"
 
-# 4. L4 on the chosen decoders (read first: nothing in the loop may consume the file).
-mapfile -t chosen < logs/contract/w21_decoders.out
+# 4. L4 on the chosen decoders (read first: nothing in the loop may consume the file). Python
+# writes CRLF on Windows, and a stray carriage return would end up in the run's name.
+mapfile -t chosen < <(tr -d '\r' < logs/contract/w21_decoders.out)
 for line in "${chosen[@]}"; do
   read -r body arm <<< "$line"
   for seed in ${seeds[$body]}; do

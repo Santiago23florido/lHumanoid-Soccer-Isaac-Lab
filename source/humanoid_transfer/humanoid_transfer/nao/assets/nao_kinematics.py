@@ -50,6 +50,9 @@ __all__ = [
     "MIMIC_DRIVEN_JOINTS",
     "FOOT_BODIES",
     "SOLE_FRAMES",
+    "SOLE_REST",
+    "scaled_drive_gains",
+    "sole_points_in_foot",
     "SUPPORT_POLYGON_X",
     "SUPPORT_POLYGON_Y_SINGLE",
     "STANCE_HALF_WIDTH",
@@ -293,6 +296,22 @@ def sole_height_below_base(
     return float(-min(poses["l_sole"][2, 3], poses["r_sole"][2, 3]))
 
 
+def sole_points_in_foot(rest: float = 0.0, urdf_path: Path | None = None) -> list[list[float]]:
+    """Each foot's sole point in its foot body's frame (:data:`FOOT_BODIES`), metres.
+
+    The URDF's sole frame, ``rest`` metres lower along the foot's own vertical: 0 for the
+    frame itself, :data:`SOLE_REST` for where a flat foot rests on the ground.
+    """
+    poses = forward_kinematics(NOMINAL_STAND_JOINT_POS, urdf_path)
+    points = [
+        list(map(float, (np.linalg.inv(poses[foot]) @ poses[sole])[:3, 3]))
+        for foot, sole in zip(FOOT_BODIES, SOLE_FRAMES, strict=True)
+    ]
+    for point in points:
+        point[2] -= rest
+    return points
+
+
 def com_height_above_soles(
     joint_pos: dict[str, float] | None = None, urdf_path: Path | None = None
 ) -> float:
@@ -505,6 +524,18 @@ them into their parent ankle links. Contact sensing therefore targets these.
 
 SOLE_FRAMES: tuple[str, ...] = ("l_sole", "r_sole")
 """Sole frames of the URDF, used for kinematics here but absent from the USD."""
+
+SOLE_REST: float = 0.002494
+"""How far below its URDF sole frame a flat, loaded foot rests in the simulator, metres.
+
+Measured, not modelled: over 44 NAO captures the sole frame of a foot carrying more than
+0.3 of the weight sits, at its 10th percentile (the flat foot), 0.010055 ``L`` above the
+ground -- 2.494 mm of the 0.24801 m leg -- in every capture within 0.0005 ``L``
+(``transfer/scripts/sole_offset.py``, ``transfer/results/sole_offset.json``). The ankle's
+collision mesh reaches 0.84 mm below the frame; the rest is the simulator's collision
+handling. The G1's sole point, measured in the simulator (``g1/scripts/measure_body.py``),
+rests at 0.00003 ``L``.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -743,3 +774,23 @@ def capturable_velocity_in_direction(
             np.where(direction[..., 1] < 0, (y_min - com[1]) / direction[..., 1], np.inf),
         )
     return omega * np.minimum(to_x, to_y)
+
+
+def scaled_drive_gains(
+    stiffness: dict[str, float], damping: dict[str, float], gain: float
+) -> tuple[dict[str, float], dict[str, float]]:
+    """PD gains made faster by ``gain`` without changing how damped they are.
+
+    ``K -> K g`` and ``D -> D sqrt(g)``. Against any inertia ``I`` the damping ratio
+    ``D / (2 sqrt(K I))`` is unchanged, so a stance joint stays critically damped
+    against the whole body it carries, while the drive's slow time constant ``D / K``
+    -- what a lightly loaded swing joint follows its target with -- shrinks by
+    ``sqrt(g)``. ``gain`` 1 returns the gains as given.
+    """
+    if gain <= 0:
+        raise ValueError(f"a drive gain must be positive, not {gain}")
+    root = math.sqrt(gain)
+    return (
+        {name: value * gain for name, value in stiffness.items()},
+        {name: value * root for name, value in damping.items()},
+    )

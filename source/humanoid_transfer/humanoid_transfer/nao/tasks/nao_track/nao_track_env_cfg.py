@@ -29,7 +29,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import numpy as np
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
@@ -73,7 +72,27 @@ PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
 CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
 LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
 """How the reward scores the feet's loads (``ReferenceCommandCfg.load_space``)."""
+RESAMPLE_SPACE = os.environ.get("HUMANOID_RESAMPLE", "linear")
+PLAN_CONTACT = os.environ.get("HUMANOID_PLAN_CONTACT", "as_drawn")
+"""Whether a plan's loaded feet are put on the ground (``ReferenceCommandCfg.plan_contact``)."""
+"""How plans and histories are read between the generator's grid and this body's steps
+(``ReferenceCommandCfg.resample_space``)."""
+LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
+"""Range of the procedural stances' load-profile warp
+(``ReferenceCommandCfg.procedural_load_shape``)."""
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_nao.json"
+SOLE = os.environ.get("HUMANOID_SOLE", "urdf")
+"""Where ``z*`` puts each foot (:func:`sole_points`): ``urdf``, the URDF's sole frame, as
+every NAO tracker before W6 had it, or ``contact``, where a flat, loaded foot
+rests in the simulator, :data:`~humanoid_transfer.nao.assets.nao_kinematics.SOLE_REST`
+lower -- the G1's definition, so a stance sole reads height 0 as every plan asks."""
+if SOLE not in ("urdf", "contact"):
+    raise ValueError(f"HUMANOID_SOLE must be 'urdf' or 'contact', not {SOLE!r}")
+LEG_GAIN = float(os.environ.get("HUMANOID_NAO_LEG_GAIN", "1"))
+"""The leg drives made faster as ``K g``, ``D sqrt(g)``
+(:func:`~humanoid_transfer.nao.assets.nao_kinematics.scaled_drive_gains`). The damping
+ratio against every inertia is kept, and the time constant ``D / K`` is divided by
+``sqrt(g)``. W7 (skill_space.md §10.9) probes it; 1, the derived gains, everywhere else."""
 
 COMMAND = "base_velocity"
 BASE_BODY = "base_link"
@@ -129,12 +148,9 @@ def contract_posture(contract: str) -> dict[str, float]:
 
 
 def sole_points() -> list[list[float]]:
-    """Each sole point in its foot link's frame, from the URDF (the sole frames merge away)."""
-    poses = nk.forward_kinematics(nk.NOMINAL_STAND_JOINT_POS)
-    return [
-        list(map(float, (np.linalg.inv(poses[foot]) @ poses[sole])[:3, 3]))
-        for foot, sole in zip(nk.FOOT_BODIES, nk.SOLE_FRAMES, strict=True)
-    ]
+    """Each sole point in its foot link's frame, from the URDF (the sole frames merge away),
+    lowered to the foot's resting contact when :data:`SOLE` is ``contact``."""
+    return nk.sole_points_in_foot(nk.SOLE_REST if SOLE == "contact" else 0.0)
 
 
 def sole_corners() -> list[list[list[float]]]:
@@ -224,6 +240,13 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Scene: the NAO on flat ground, crouched as low as the task's body walked.
         self.scene.robot = get_nao_stand_cfg(prim_path="{ENV_REGEX_NS}/Robot")
+        if LEG_GAIN != 1.0:
+            legs = self.scene.robot.actuators["legs"]
+            stiffness, damping = nk.scaled_drive_gains(legs.stiffness, legs.damping, LEG_GAIN)
+            self.scene.robot.actuators = {
+                **self.scene.robot.actuators,
+                "legs": legs.replace(stiffness=stiffness, damping=damping),
+            }
         posture = contract_posture(POSTURE_CONTRACT)
         self.scene.robot.init_state.joint_pos = {**NAO_STAND_JOINT_POS, **posture}
         self.scene.robot.init_state.pos = (0.0, 0.0, nk.sole_height_below_base(posture) + 0.005)
@@ -283,6 +306,9 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             procedural_fraction=PROCEDURAL,
             procedural_calibration=str(CALIBRATION),
             load_space=LOAD_SPACE,
+            resample_space=RESAMPLE_SPACE,
+            plan_contact=PLAN_CONTACT,
+            procedural_load_shape=LOAD_SHAPE,
             load_precision=str(LOAD_PRECISION),
         )
 

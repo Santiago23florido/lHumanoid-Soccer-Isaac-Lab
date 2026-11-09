@@ -1292,6 +1292,10 @@ Limits and stopping rules:
     duty 0.6–7.6 %, period 1.6–2.5 %, stride 1.8–8.5 %.
   - This comparison is post hoc. It is reported beside the pre-registered verdict and does
     not replace it.
+  - > **Correction (2026-11-04, §10.1).** The resampling behind this comparison interpolated
+    > the loads linearly, which lengthens the teacher's stances by 0.03–0.06; resampled
+    > without that bias, the NAO is not within 10 % at any command. The same holds for the
+    > "control rate" readings below.
 - **Pre-registered for the blind test**, before any of the rough policy's data is
   captured: across bodies, gate C compares a body with the teacher's gait measured at
   that body's control rate (resampled in body time). Both verdicts are reported — this
@@ -1299,12 +1303,13 @@ Limits and stopping rules:
   one body.
 - **The NAO's tracker is frozen** at round 1, deployed symmetrized: the duty gap is the
   control rate, which no tracker round can change. The second NAO round allowed by the
-  protocol is not used.
+  protocol is not used. *(The premise is withdrawn in §10.1.)*
 - **The cross-body verdict, implemented.** `evaluate_contract.py` adds
   `verdict_at_body_rate` whenever a run's control rate differs from the teacher's.
   Recomputed with it, the NAO's flat L4 passes at every command: duty 0.7–8.2 %, stride
   1.7–8.4 %, period 1.4–2.6 %, against the policy's gait at the NAO's rate. This is the
-  same post hoc reading as above, now the tool's.
+  same post hoc reading as above, now the tool's. *(Corrected in §10.1: with the loads
+  resampled without bias it passes no command; `verdict_at_body_rate_unbiased`.)*
 - **The blind test, pre-registered whole before any of its data exists**
   (`transfer/scripts/blind_test.sh`). No rollout, generator or result of
   `Isaac-Velocity-Rough-G1-v0` exists at this commit. The recipe is the published flat
@@ -1762,7 +1767,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
       384 episodes);
     - the published flat policy, the same and passing every command on both;
     - the NAO still misses the duty on rough's fast and turning commands at its own rate.
-- **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case.
+- **The NAO's remaining failure is in its tracker:** its left stance is 0.10–0.18 of a stride too long at the body's rate, on either estimator. This is decoder v2's case. *(Corrected in §10.1: "at the body's rate" carried a resampling bias. Against the teacher's own grid, or at the rate resampled without it, the NAO misses the duty at every command of both skills. Part of the excess is in the plans it is asked for, §10.3, but W1 found the body does not follow that part: the stance stays as long when the plans' excess is removed.)*
 - **F4 at equal competence: the warm study** (`transfer/scripts/warm_study.sh`). Both arms
   start from the incumbent (r3, iteration 6194) and get 1000 PPO iterations under the
   study's conditions:
@@ -1967,7 +1972,9 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     deviation from the teacher's signature stays 0.10–0.18 (control 0.07–0.19), and S0's
     walk is 1.00. The NAO's duty gap is mostly its control rate: its step is 1.62 × the G1's
     in body time, and the G1's own plans sampled at the NAO's rate show the same stance.
-    A reward cannot charge that as a graze. On the NAO only the physics prior moved the duty
+    A reward cannot charge that as a graze. *(Corrected in §10.1: the "same stance" came from
+    sampling the plans by linear interpolation of the loads, which lengthens every stance; a
+    duty factor does not depend on the rate. The NAO's gap is not its control rate.)* On the NAO only the physics prior moved the duty
     (flat, passes 3 of 3).
   - *Step 4, the physics decoder on the NAO*, at equal competence with the NAO's own control.
     The control is the incumbent r1_3498's PPO continued in its task; the physics arm is
@@ -2010,6 +2017,887 @@ There is no new blind test: Isaac Lab publishes no other G1 skill. The report sa
 - flat is semi-blind;
 - rough was diagnosed;
 - the strong evidence is the competence map, its corners and the ablations.
+
+## 10. Contact transitions across the chain (2026-11-04)
+
+Every published-policy transfer now runs without falls on both bodies; what fails gate C is
+the gait, and on both bodies it is the duty factor (G1 rough 0 of 3 commands; the NAO 0 of
+6 on its own grid). This section follows the stride's contact transitions through the
+chain -- teacher, generator, the contract's resampling, tracker, physics, and the
+evaluation itself -- one link at a time. The record of the study, with its reasons and
+everything rejected, is [`research_report.md`](research_report.md).
+
+### 10.1 A correction: "at the body's rate" was a resampling artifact
+
+`evaluate_contract.signature_at_rate` resampled the teacher's `z*` to a body's control
+instants by interpolating every field linearly, the feet's loads included, and then read
+contact as a load above 5 % of the weight. Between a stance sample (about half the
+weight) and a swing sample (zero) the blend stays above 5 % for nine tenths of the
+interval, so every swing boundary reads as contact. A duty factor is a fraction of time:
+sampled at any rate it is estimated without bias, and the rate cannot lengthen it.
+
+Measured on the teacher's own captures, resampled from the G1's step (0.0774 `T`) to the
+NAO's (0.1258 `T`) (`transfer/scripts/contact_fidelity.py`, field `teacher.duty_at_rate`
+of `transfer/results/contact_fidelity_l4.json`; flat forward shown, every capture alike):
+
+| resampling of the loads | duty, left / right |
+| --- | --- |
+| none (the teacher's own grid) | 0.470 / 0.528 |
+| linear, as `verdict_at_body_rate` did | **0.530 / 0.582** |
+| in log units, `log(load + 0.01)` | 0.477 / 0.534 |
+| nearest sample | 0.470 / 0.529 |
+
+Over the six teacher captures linear interpolation adds 0.03 to 0.06; nearest sampling and
+log units stay within 0.01. `verdict_at_body_rate` is kept unchanged, for comparison with
+every earlier result; `verdict_at_body_rate_unbiased` (log units, the nearest-sample
+signature beside it) is added. Recomputed for every NAO result already on disk, without
+changing any of them (`transfer/scripts/body_rate_verdicts.py`,
+`transfer/results/body_rate_verdicts.json`):
+
+| deployed path, commands passing | own grid | at the rate, linear (as recorded) | at the rate, unbiased |
+| --- | --- | --- | --- |
+| NAO incumbent, `flat_dagger2` | 0 / 3 | 3 / 3 | 0 / 3 |
+| NAO incumbent, `rough_b4` | 0 / 3 | 2 / 3 | 0 / 3 |
+| NAO incumbent, `rough_b3` | 0 / 3 | 1 / 3 | 0 / 3 |
+| B3 copy, rough, seed 42 | 0 / 3 | 2 / 3 | 0 / 3 |
+| NAO physics decoder (`warm_nao_v2t`), flat | 3 / 3 | 2 / 3 | 3 / 3 |
+
+With the loads resampled without bias the verdict at the body's rate agrees with the
+teacher's own grid wherever it was computed, as a rate-invariant quantity should.
+
+**What the wrong reading affected:**
+
+- §8.4: "against what the NAO can represent ... the NAO is within 10 % on every criterion"
+  and "the NAO's flat L4 passes at every command"; the blind test's "at the NAO's control
+  rate only the left foot's duty misses". Under the unbiased reading the NAO passes no
+  command of either skill.
+- §8.4 and §9.1: "the duty gap is the control rate, which no tracker round can change" and
+  "the NAO's duty gap is mostly its control rate". The teacher's duty does not change with
+  the rate. What does change is what the NAO is *asked* for: its plans pass through the
+  same linear interpolation (10.3). The conclusion that no tracker round could help is
+  withdrawn; whether one can is open. *(10.3's result: the asked duty's inflation is real,
+  but the body's stances do not follow it. Correcting the interface lowers the asked duty
+  by 0.024–0.029, and the body's duty does not move.)*
+- The adoption of `rough_b4` (`incumbents.json`): its NAO clause "passes 2 of 3 commands at
+  its rate against 1" becomes 0 against 0. The adoption stands: the deciding term was the
+  G1's falls (2.02 SE), and the NAO's clause asked only that it be no worse.
+- S0's third part counted the NAO's flat L4 as passing at its rate. It does not pass; S0 on
+  the NAO is read from here on as no regression against the incumbent's own numbers.
+- The README's results table (NAO flat "passes 3", rough "2 of 3 at its own rate").
+- Not affected: the paper's tables (`transfer/paper/README.md`), which hold gate C against
+  the teacher's own grid; the G1, whose rate is the teacher's.
+
+### 10.2 Where the transitions are lost, measured (W0)
+
+`common/contact.py` scores each plan against the state that follows it. For every L4
+result of every method (`transfer/results/contact_fidelity_table.json`, from
+`contact_table.py`; deployed path; mean over the three commands, then over seeds):
+
+| | light contact, teacher / plans / body | airborne where light contact is asked | lift-off, touchdown lag (left) | clearance, teacher / body |
+| --- | --- | --- | --- | --- |
+| G1 rough, zero-shot (3 seeds) | 0.14 / 0.18 / 0.05 | 0.53 / 0.47 | −0.067, +0.058 `T` | 0.08 / 0.09 `L` |
+| G1 rough, B1 (3 seeds) | 0.14 / 0.18 / 0.06 | 0.35 / 0.30 | −0.042, +0.037 `T` | 0.08 / 0.08 `L` |
+| NAO flat, zero-shot (3 seeds) | 0.04 / 0.11 / 0.03 | 0.28 / 0.25 | +0.005, −0.010 `T` | 0.10 / 0.05 `L` |
+| NAO flat, B1 (3 seeds) | 0.04 / 0.11 / 0.19 | 0.05 / 0.10 | +0.049, −0.160 `T` | 0.10 / 0.01 `L` |
+
+(light contact: above the threshold, at most a quarter of the weight; per foot, left shown.)
+
+- **The generator blurs.** Its plans ask for light contact three times as often as the
+  flat teacher shows it (0.11 against 0.04), a third more on rough.
+- **The trackers make contact binary.** Asked for a light contact, the G1's zero-shot
+  tracker has its foot in the air half the time; its left foot lifts one step early and
+  lands one late, and the stance falls short of the plan by 0.06–0.09 of the stride. B1,
+  trained on rough's own plans, is airborne a third of the time and keeps the duty. The
+  procedural family asks for light contact 5.5 % of the time
+  (`zs_warm_r3_logload_sym_procedural_starts.npz`), its half-sine stances leaving the load
+  transfers of real gaits mostly unpractised; on procedural plans the same tracker's
+  stance runs *longer* than asked (0.655 against 0.631).
+- **The NAO lifts its feet half as high as asked.** The plans ask the clearance they ask
+  of the G1 (0.07–0.09 `L`); the NAO's body reaches 0.03–0.05, and B1 on the NAO 0.01 --
+  a shuffle, its feet grazing in half of every planned swing.
+
+### 10.3 Pre-registered: the contract read in the generator's space (W1)
+
+- **Hypothesis.** The NAO is asked for longer stances than the generator plans, because
+  plans and histories are interpolated between the grids in linear load units. Read in
+  the generator's own space, the asked duty comes down to the generator's, and the body
+  follows.
+- **The change.** `ReferenceCommandCfg.resample_space = "generator"` (`HUMANOID_RESAMPLE`):
+  history and plan are blended with the loads as `log(load + 0.01)`
+  (`latent/resampling.py`). Nothing is trained; the G1, whose step is the grid's, is
+  bit-identical in either space (`tests/test_resampling.py`).
+- **Prediction, offline** (`transfer/scripts/chain_at_rate.py`, the generator chained as
+  the autonomous reference runs it; `transfer/results/chain_at_rate.json`). The linear
+  chain reproduces every recorded L4 capture's asked duty within 0.007. In the generator's
+  space the asked duty falls by 0.022–0.030 at every command of both skills, period,
+  stride and speed unchanged.
+- **Test.** The frozen NAO trackers -- the incumbent `r1_3498` and S's seeds 32 and 33,
+  symmetrized -- through L4 of `flat_dagger2` and `rough_b4`, and S0's walk, with
+  `HUMANOID_RESAMPLE=generator`; paired with their existing linear captures, of which one
+  is re-run first to confirm it reproduces.
+- **Criterion.** Target: the mean over the three commands and both skills of the two duty
+  factors' relative deviation from the teacher's own grid, lower than linear's by more
+  than twice the standard error of the three paired seed differences. No regression:
+  falls, speed ratio at least 0.9, stride length and period no worse by twice their
+  standard error, and S0's walk passing. Gate C is reported on all three references.
+- **What it does not test.** Whether a tracker *trained* under the generator space does
+  better still (30 % of its training plans pass through this interpolation); that is a
+  later step, only if this one passes.
+- **Result (2026-11-05): the hypothesis fails at its second step.** The asked duty came
+  down as predicted, and the body did not follow it.
+  - *The control reproduces.* The incumbent re-run under this code, linear, differs from its
+    recorded captures by at most 0.00097 in any duty, stride or period, over its six
+    commands (`transfer/results/w1_resample.json`, from `w1_compare.py`).
+  - *The criterion.* The duty deviation rises, by 0.0088 ± 0.0010 (standard error of the
+    three paired trackers), where it had to fall by more than twice that. Per tracker:
+    0.124 → 0.132, 0.134 → 0.142 and 0.138 → 0.149. Falls (0 → 0), speed, period and S0's
+    walk hold. The stride length's deviation rises by 0.0015 ± 0.0006, beyond twice its
+    standard error. **Not passed.**
+  - *Gate C on all three references* (`body_rate_verdicts_w1.json`, from
+    `body_rate_verdicts.py`; commands passed out of 18, linear → generator):
+    - the teacher's own grid: 0 → 0;
+    - at the body's rate without the resampling bias: 0 → 0;
+    - at the body's rate with it, the reading §10.1 withdrew: 12 → 11.
+  - *Where the asked duty went* (`w1_contact.json`, from `contact_fidelity.py` then
+    `w1_contact.py`; deployed path; 9 pairs per skill; the incumbent's linear side is its
+    control re-run):
+
+    | | asked duty | body duty | lift-off lag | touchdown lag |
+    | --- | --- | --- | --- | --- |
+    | flat, generator − linear | −0.0286 (sd 0.0002) | +0.0064 (0.0013) | +0.0165 `T` (0.0010) | −0.0179 `T` (0.0012) |
+    | rough, generator − linear | −0.0242 (0.0005) | +0.0033 (0.0017) | +0.0147 `T` (0.0011) | −0.0155 `T` (0.0014) |
+
+    The prediction was −0.022 to −0.030 for the asked duty. Over the teacher's own grid the
+    asked duty goes from +0.054 to +0.025 on flat and from +0.027 to +0.003 on rough. The
+    body's duty goes from +0.084 to +0.090 and from +0.047 to +0.050.
+  - *What the lags say.* Each planned boundary moved by about 0.016 `T`, an eighth of the
+    NAO's control step, and the body's contact events did not move. The lags against the
+    plan grew by exactly the plan's shift. The plans' interpolation inflates what the NAO
+    is asked for, but it is not what makes the NAO's stances long.
+  - *What does go with the long stances* (`touchdown_lift.json`, from
+    `touchdown_lift.py`; measured, a correlation). On the NAO, the swings that lift least
+    land earliest:
+    - Spearman +0.52 (flat) and +0.38 (rough) between a swing's peak and its touchdown lag,
+      under either interface;
+    - the lowest quarter of swings lands 0.10–0.13 `T` early, about one control step;
+    - the height at the swing's second airborne sample, which the touchdown cannot have cut
+      short, correlates +0.32 and +0.24;
+    - the G1's two are unrelated (−0.03 to +0.08).
+
+    The NAO's duty gap and its clearance gap (10.2) look like one failure, in the swing.
+  - *What follows.*
+    - `resample_space` stays `linear` by default; the option remains for a later study.
+    - W4 is not run: its condition was this result.
+    - The later step this section deferred, a tracker *trained* under the generator space,
+      is not run either. A tracker whose contact events do not move with the plan's
+      sub-step boundaries is unlikely to gain from sharper ones.
+
+### 10.4 The generator's blur is learned, not the sampler's (W2, offline)
+
+- **Hypothesis.** The plans' excess light contact comes from integrating the flow with too
+  few steps (midpoint, 8), which leaves samples between the stance and swing modes.
+- **Test** (`transfer/scripts/sampler_sharpness.py`, `transfer/results/sampler_sharpness.json`).
+  One plan from each window of the teacher's forward play capture (every 21st step, the
+  deployed estimator's noise on the history), against the future the teacher walked, and
+  the generator's own chain at the G1's rate:
+
+  | generator | light contact, teacher's future | plans | contact changes per plan, teacher / plans |
+  | --- | --- | --- | --- |
+  | `flat_dagger2`, midpoint 8 → 16 → 32, Euler 16 → 64 | 0.032 | 0.105–0.106 at every integrator | 3.00 / 3.11–3.15 |
+  | `flat_h20`, `flat_b3`, `flat_b4` (midpoint 8) | 0.032 | 0.146, 0.136, 0.110 | 3.00 / 3.17–3.78 |
+  | `rough_h20`, `rough_dagger2`, `rough_b3`, `rough_b4` (midpoint 8 and Euler 64 alike) | 0.145 | 0.207, 0.205, 0.174, 0.185 | 2.92 / 3.21–3.73 |
+
+- **Result: the hypothesis fails.** The integrator changes the light share by at most 0.003:
+  the sampler has converged. Training under the body's own noise does not remove it either
+  (`flat_b3` blurs more than `flat_dagger2`). The training data carry 0.04–0.05 on flat
+  (`flat_dart`, `flat_dagger_{1,2}`), so the generator produces 2–3 times the light contact
+  it was trained on, with slightly too many contact changes per plan: a learned property
+  of every flow variant tried.
+- **Not pursued here, for the user.** A generator that represents contact explicitly -- a
+  discrete contact channel next to the continuous loads, as the event model of §7 did for
+  timing alone -- is the structural option; it means retraining every task generator and
+  re-running S0, so it waits for review. The tracker side (W3) does not depend on it: B1,
+  trained on these same blurred plans, keeps the G1's duty.
+
+### 10.5 Pre-registered: load transfers in the family (W3)
+
+- **Hypothesis.** The family's stances are half-sines, which leave the load transfers of
+  real walks mostly unpractised (light contact 5.5 % of the time, against 10–18 % in the
+  tasks' plans; §10.2). The trackers learned that a light load means a swing is imminent,
+  and lift early on real plans. Practising load transfers, without seeing any task, should
+  give back the stance.
+- **What real stances look like** (`g1/rollouts/*.npz`, mean load per tenth of the
+  stance). Every teacher's stance is front-loaded: near its peak in the first tenth (the
+  walk teacher, the trackers' own training skill, 0.97; rough 0.84–0.94), draining slowly
+  before lift-off (rough's last three tenths 0.07–0.20). The half-sine is symmetric and
+  steep at both ends.
+- **The change** (`latent/procedural.py`, `GaitRanges.load_shape`, `HUMANOID_LOAD_SHAPE`).
+  - *The profile.* A walking stance carries the half-sine on a warped clock,
+    `κ s^(κ−1) sin(π s^κ)`, with `κ` drawn log-uniform in [0.5, 2] per segment. This is a
+    change of variables, so every warp keeps the half-sine's impulse: the biped's
+    vertical balance and every gait parameter it writes are untouched (tested; mean load
+    0.500 at every warp).
+  - *The bounds are physical.* Below 0.5 the load at touchdown is infinite; 2 is 0.5's
+    mirror in log.
+  - *Runs keep the half-sine,* because their amplitude is set by its partial impulse.
+  - *Probes* that name no warp stay half-sines, so the pre-registered maps are unchanged.
+  - *Unshaped is bit-identical.* With the range at (1, 1) the biped's plans equal the
+    committed biped's at both bodies' rates; S's seeds are therefore this arm's control.
+  - *Measured, duty 0.6.* Light contact 0.097 at `κ` 0.5, 0.065 for the half-sine, 0.080
+    at 2.
+- **Data hygiene, declared.** The direction of the warp was chosen after looking at the
+  teachers' stance profiles: the walk's (the training skill), flat's and rough's. Its
+  range is symmetric in log about the half-sine and bounded by physics, not fitted to
+  any of them. Rough has been diagnosed; flat is semi-blind; the walk is the training
+  skill.
+- **Step 1, deploy-time** (`transfer/probes/transfer_probes.json`: 12 walking schedules ×
+  warps 0.5, 1 and 2; `transfer_probe_effect.py`).
+  - *Run.* The frozen incumbents, symmetrized.
+  - *Prediction, G1.* At warp 0.5, against the same schedule as a half-sine, the stance
+    falls short of the plan (`duty_body − duty_asked`) by more, and the foot is airborne
+    where light contact is asked more often. Each holds by more than twice the standard
+    error of the twelve paired differences, on at least one foot.
+  - *If it holds,* the failure seen on rough is reproduced inside the family, with no
+    task, and step 3 is its correction. *If not,* steps 3 and 4 are not run, and the
+    finding goes to the user for a new framing.
+  - *The NAO.* Its own step-1 result decides step 4 the same way.
+- **Step 3, the G1.**
+  - *Training.* `r3_6194` continued for 1000 iterations exactly as S's seeds were
+    (`logload_seeds.sh`: log loads, 70 % procedural, mirror loss, the checkpoint's
+    adapted rate), plus `HUMANOID_LOAD_SHAPE=0.5,2`. Seeds 41, 42 and 43, paired with
+    S's `warm_r3_logload`, `warm_r3_s42_log` and `warm_r3_s43_log`.
+  - *Evaluation.* Laddered as S was: map and corners unsymmetrized; rough and flat L4,
+    and S0's walk, symmetrized. The transfer probes run on both arms.
+  - *Target.* The seed mean of L4's largest gate C deviation (the paper's reading, mean
+    over the three commands), on rough and on flat, deployed path. It must be lower than
+    S's by more than twice the combined standard error on at least one skill, and not
+    higher by as much on the other.
+  - *No regression.* Grid and corners pooled, by `compare_seeds.py` (hierarchical
+    bootstrap): not fewer probes mastered by more than twice its standard error. S0's
+    walk passes; the tests pass; the generators are untouched.
+  - *Reported apart.* The contact-fidelity metrics and the transfer probes.
+- **Step 4, the NAO.** `r1_3498` continued as S's NAO seeds were (31, 32, 33; linear
+  loads) plus the shape. The same target and no-regression rule against S's NAO seeds,
+  on the teacher's own grid, under the linear interface (S's), and also under the
+  generator-space interface if W1 confirmed it (reported apart).
+- **Step 1's result (2026-11-05): the prediction fails on both bodies, and its sign is
+  reversed.** `transfer/results/transfer_probes_g1_warm_r3_logload_sym.json` and
+  `transfer_probes_nao_r1_3498_sym_v3.json`, from `transfer_probe_effect.py`. Shown: warp 0.5
+  minus the half-sine, mean ± standard error of the twelve paired schedules, left / right
+  foot. No falls.
+
+  | | stance, body − asked | airborne where light contact is asked | lift-off lag | touchdown lag |
+  | --- | --- | --- | --- | --- |
+  | G1 | +0.039 ± 0.004 / +0.034 ± 0.005 | −0.084 ± 0.050 / −0.069 ± 0.051 | +0.001 ± 0.003 / −0.001 ± 0.003 `T` | −0.039 ± 0.003 / −0.034 ± 0.003 `T` |
+  | NAO | +0.019 ± 0.005 / +0.021 ± 0.006 | −0.006 ± 0.073 / +0.002 ± 0.075 | −0.005 ± 0.007 / −0.002 ± 0.008 `T` | −0.025 ± 0.006 / −0.023 ± 0.007 `T` |
+
+  - *What the frozen trackers do with a long load transfer.* The prediction was a shorter
+    stance and more time airborne. Instead the stance is *longer* than asked, by more
+    than at the half-sine, and the foot is no more often in the air. The change is at
+    touchdown: the body lands earlier. The lift-off, where rough's failure sits (10.2:
+    the G1's left foot lifts 0.067 `T` early), does not move.
+  - *Warp 2, reported, not part of the prediction.* On the G1: +0.023 ± 0.011 /
+    +0.021 ± 0.013, and the lift-off 0.013–0.015 `T` later. On the NAO: +0.134 ± 0.009 on both
+    feet, the touchdown 0.11 `T` early.
+  - *What follows, as pre-registered.* Steps 3 and 4 are not run. Rough's early lift-off is
+    not reproduced inside the family by the shape of the load transfer, so the half-sine
+    family is not shown to be its cause. The finding goes to the user for a new framing.
+    The generator's extra contact changes per plan (10.4: 3.21–3.73 against the teacher's
+    2.92) and rough's irregular steps remain, as hypotheses.
+  - *The code stays.* `GaitRanges.load_shape` is off by default and bit-identical when off;
+    nothing has trained with it.
+
+### 10.6 Pre-registered: is B1's loss on the NAO the interface's? (W4)
+
+- **Question.** On the NAO, B1 -- the incumbent trained on a skill's own plans -- ends
+  further from the teacher than the zero-shot model (+0.197 and +0.488 in the largest
+  deviation; it shuffles: clearance 0.01 `L`, grazes in half of every planned swing). Its
+  plans were the generator's resampled to the NAO by linear blends of the loads, whose
+  every swing boundary is a light-load ramp; the procedural plans the zero-shot model
+  mostly practised are written at the NAO's own instants and have none.
+- **Run only if W1 passes.** B1-NAO's seed 31 retrained, both skills, exactly as before
+  (`paper_queue.sh b1_nao`) but with `HUMANOID_RESAMPLE=generator` in training and
+  evaluation; laddered as B1 was.
+- **Reading.** Against B1-NAO seed 31 linear and the zero-shot incumbent under the generator
+  space (W1), by the largest deviation and the contact-fidelity metrics. One seed: it can
+  confirm or rule out a large effect, not resolve a small one; if B1-NAO comes within the
+  zero-shot model's seed range, two more seeds are queued before anything is written.
+- **Not run (2026-11-05).** Its condition failed: W1 did not pass (10.3). The question stays
+  open. The zero-shot trackers' contact events do not follow the interface, which makes the
+  interface a less likely cause of B1-NAO's shuffle, but this does not test it.
+
+### 10.7 Robustness, reported beside the criteria (W5)
+
+None of the pre-registered evaluations pushes a body or degrades its estimate. W5 adds both,
+as instrumentation: it decides nothing, and it is reported apart.
+- **Setup** (`transfer/scripts/w5_robust.sh`). L4's forward command of both skills,
+  deployed as L4 deploys, 32 environments × 900 steps.
+- **Pushes.** The base is pushed by up to 0.1 or 0.2 `V` in each horizontal direction,
+  every 20 `T` on average (`capture_contract.py --push`, Isaac Lab's
+  `push_by_setting_velocity`). In body units both bodies get the same disturbance,
+  dynamically; on the G1, 0.2 `V` is about the 0.5 m/s Isaac Lab trains its published
+  policies against.
+- **A worse estimate.** Gaussian noise of 2 or 4 times the estimator's measured precision
+  on the deployed `ẑ*` (`--estimate-noise`, `ReferenceCommandCfg.estimate_noise`, 0
+  everywhere else).
+- **Trackers.**
+  - Both incumbents.
+  - The NAO's under the generator-space interface (W1).
+  - W3's first seeds and their controls, where they exist.
+- **Read.** Falls, speed ratio, the gait's deviation from the teacher, and the contact
+  metrics.
+- **Result (2026-11-05, 11:49–12:51;** `transfer/results/w5_robust.json`, from
+  `w5_table.py`; forward command, 32 environments, falls over episodes).
+
+  | tracker, skill | nominal | push 0.1 / 0.2 `V` | estimate noise ×2 | ×4 |
+  | --- | --- | --- | --- | --- |
+  | G1 incumbent, flat (`flat_dagger2`) | 0/64, passes | 0/64, 0/64, both pass | **262/294**, speed 0.57 | **550/582** |
+  | G1 incumbent, rough (`rough_b4`) | 0/64 | 0/64, 0/64 | 0/64 | 0/64 |
+  | NAO incumbent, flat | 0/64 | 0/64, 0/64 | **272/304**, speed 0.85 | **792/824** |
+  | NAO incumbent, rough | 0/64 | 0/64, 0/64 | 0/64 | 0/64 |
+  | NAO, generator-space interface, flat / rough | 0/64 / 0/64 | 0 falls | **261/293** / 0/64 | **783/815** / 0/64 |
+
+  - *Pushes change nothing.* No falls on either body at 0.2 `V`. The largest gate C
+    deviation moves by at most 0.007, and the lift by at most 0.02.
+  - *A degraded estimate breaks the flat skill and not the rough one.* At twice the
+    estimator's precision the flat skill falls in nine episodes of ten, on both bodies;
+    at four times it walks backwards. Rough holds at four times with no fall, its gait
+    within 0.006 of nominal on the G1. The tracker is the same in both rows, so the
+    difference is the generator's.
+    - `rough_b4` was trained across history-noise levels of 0.125–32 times the precision,
+      and reads the level as an input (§9.1, B4).
+    - `flat_dagger2` was trained at one inflated level (§8.4), and reads none.
+    - Hypothesis: a generator that has not seen the deployed noise level fails where the
+      estimate degrades, as B3 found for the chain.
+  - *Not pre-registered, so it decides nothing.* But it bears on the flat incumbent's
+    choice: `flat_b4`, trained as `rough_b4` was, was set aside for one S0 check (§9.1).
+- **W5b, added (`transfer/scripts/w5b_flat_b4.sh`).** The same four perturbations on
+  `flat_b4`, on both incumbents (about 25 minutes, after W8). Reported in this table, it too
+  decides nothing. If `flat_b4` holds where `flat_dagger2` falls, the flat incumbent's
+  choice is put back to the adoption rule with robustness on the record.
+- **W5b result (2026-11-05, 18:12–18:38;** the same table, `w5_robust.json`, rows
+  `<body> <tag> flat_b4`).
+
+  | tracker, `flat_b4` | nominal | push 0.1 / 0.2 `V` | estimate noise ×2 | ×4 |
+  | --- | --- | --- | --- | --- |
+  | G1 incumbent | 0/64, passes (largest 0.096) | 0/64, passes / 0/64, largest 0.121 | 0/64, passes (0.086) | 0/64, passes (0.081) |
+  | NAO incumbent | 0/64 (largest 0.166) | 0/64 (0.164) / 0/64 (0.163) | 0/64 (0.170) | 0/64 (0.196) |
+
+  - *The hypothesis holds.* Trained across noise levels and reading the level, the flat
+    generator does not fall at four times the estimator's precision on either body.
+    `flat_dagger2`, with the same tracker, falls in nine episodes of ten at twice. The
+    G1's gait is no worse with noise. The NAO's largest deviation rises by 0.030 at four
+    times.
+  - *The one cost seen.* At pushes of 0.2 `V` the G1's largest deviation rises from 0.096
+    to 0.121, and gate C fails on the forward command.
+  - **Back to the adoption rule.**
+    - *Robustness is not in the rule.* The rule reads each generator's target and the
+      regression suite (`incumbents.json`), and robustness is in neither.
+    - *What the suite shows.* On today's incumbents, at L4's three commands
+      (`zero_shot_<body>_<tag>_{flat_dagger2,flat_b4}_auto_kin_l4_*.json`), `flat_b4`
+      passes gate C on the G1 at two of three where `flat_dagger2` passes three. Turning
+      is lost on duty, 0.106. On the NAO neither passes. `flat_b4`'s duty deviations are
+      lower (0.109–0.166 against 0.137–0.184), and its forward stride is further off
+      (0.112 against 0.065).
+    - *So the rule keeps `flat_dagger2`.* `flat_b4` trades one of the G1's gate C passes
+      (turning, duty 0.106 against the 0.10 limit) for not failing under a degraded
+      estimate.
+    - *Whether robustness belongs in the regression suite* is a change to the criterion,
+      and so the user's call. It is put to them in the recommendation (report §7).
+
+### 10.8 The NAO's sole point is not where its foot rests; pre-registered (W6)
+
+**Measured** (`transfer/scripts/sole_offset.py`, `transfer/results/sole_offset.json`;
+command in the script's docstring).
+- *Where the sole point sits.* `z*` puts each foot at its sole point, and every plan puts a
+  stance sole at height 0.
+  - The G1's sole point is the underside of its collision box, measured in the simulator.
+    A flat, loaded foot reads −0.00003 `L` (20 captures).
+  - The NAO's is the URDF's `l_sole`/`r_sole` frame. A flat, loaded foot reads +0.01006 `L`,
+    2.494 mm (44 captures: oracle, imitation, B1, zero-shot; range 0.01002–0.01051). The
+    ankle's collision mesh reaches 0.84 mm below the frame; the rest is the simulator's
+    contact.
+- *What it costs.* The foot-height tolerance is 0.0016–0.0020 `L`, so the offset is about 6
+  tolerances in every stance sample, and no motion can remove it. On the probes the NAO's
+  foot-height error is a median 5.4–8.1 tolerances, 81–83 % of its foot-position term; the
+  G1's is 0.9–1.9 (`transfer/scripts/clearance_mechanism.py`,
+  `transfer/results/clearance_mechanism.json`).
+- *What it does to the clearance.* The clearance shortfall (asked − reached, each above its
+  own stance level) is the absolute peak's shortfall plus this offset:
+  - map: 0.022 `L` = 0.011 + 0.010;
+  - corners: 0.048 = 0.037 + 0.010;
+  - both skills on S's seeds, forward command: 0.028–0.038 = 0.020–0.029 + 0.007–0.009.
+
+  A tracker that met the absolute arc exactly would still lift 0.007–0.010 `L` short. The
+  offset is a quarter to a half of the shortfall; the larger part is a low peak.
+- *What it does to the deployed estimate.* The kinematic estimator puts the ground under
+  the lowest sole corner, which lies at the sole point's height. On the NAO it reads the
+  trunk 0.007–0.009 `L` low on flat (0.002–0.007 on rough); on the G1, 0.0001.
+- *Ruled out alongside it.* The NAO's swings are as long as asked (body/asked air time,
+  median 1.00). Swings that stay in the air the full asked time reach 0.43 (corners) to
+  0.58 (grid) of the asked clearance, as the others do.
+
+**Pre-registered** before any run.
+- **H6.** With the sole point at the resting contact, the NAO's reward charges the whole
+  clearance and none of the stance. A NAO tracker trained that way lifts its feet closer to
+  the asked clearance.
+- **Switch.** `HUMANOID_SOLE=contact` (`nao_track_env_cfg.SOLE`; default `urdf`, every
+  existing tracker unchanged). It lowers both sole points and their corners by
+  `nao_kinematics.SOLE_REST` = 2.494 mm. The posture, the plans and the learned encoder
+  are untouched; the deployed estimator takes only the loads from the encoder.
+- **Arm.** r1_3498 continued 1000 iterations exactly as S's NAO seeds, with the switch, in
+  training and evaluation. Laddered as S's were (map and corners; L4 on both skills;
+  encoder and walk on rough).
+- **Control.** S's NAO seeds 31–33 (`warm_nao_r1`, `warm_nao_r1_s32`, `warm_nao_r1_s33`),
+  as they stand.
+- **Target.** The clearance ratio (reached/asked) of the L4 captures: mean over both skills
+  × three commands, deployed path.
+  - Three seeds: the arm's seed mean above the control's by more than 2 SE of the
+    difference of seed means, `sqrt(s_a²/3 + s_c²/3)` (`transfer/scripts/w6_compare.py`).
+    The controls read 0.551, 0.495 and 0.462. Were the absolute peak kept, removing the
+    offset would add up to 0.14.
+  - No regression: falls, speed ≥ 0.9; the largest deviation and the duty deviation not
+    worse by 2 SE; S0's walk passes.
+  - Every metric used here is defined against each foot's own stance level, so it reads
+    the same under either definition.
+- **Screen.** Seed 31 runs first.
+  - If its clearance ratio is above every control seed's, seeds 32 and 33 follow, and the
+    comparison is written with three seeds.
+  - Otherwise the one seed is reported as such, as a fact with a reframing, not as a
+    conclusion about H6.
+- **Order.** After W5, so it never delays the approved queues (`transfer/scripts/w6_sole.sh`).
+  *(2026-11-05: moved behind W7 and W8, 10.9–10.10, which are deploy-time and decide what a
+  later arm trains with. W6 had not started; its script is unchanged.)*
+
+**Result (2026-11-05: the screen does not pass; seeds 32 and 33 are not run).**
+`python transfer/scripts/w6_compare.py --output transfer/results/w6_sole.json`. Seed 31
+trained 18:40–21:00 and was laddered until 21:36. Mean over both skills × three commands,
+deployed path:
+
+| Tracker | Clearance ratio | Duty deviation | Largest deviation | Falls | Walk |
+| --- | --- | --- | --- | --- | --- |
+| S seeds 31 / 32 / 33 (control) | 0.551 / 0.495 / 0.462 | 0.110 / 0.134 / 0.138 | 0.139 / 0.175 / 0.189 | 0 | passes |
+| W6 seed 31 (arm) | 0.454 | 0.139 | 0.171 | 0 | passes |
+
+- *The screen.* The arm's 0.454 is below every control seed's (the highest is 0.551). As
+  pre-registered, seeds 32 and 33 are not run, and this one seed is reported as a fact, not
+  as a conclusion about H6.
+- *Within the controls' spread.* On every metric the arm sits at an edge of S's three seeds
+  or inside them. Its clearance is just under the lowest (0.462), its duty deviation just
+  over the highest (0.138), and its largest deviation inside. One seed cannot separate
+  this from seed variance.
+
+**Where the swing went** (`python transfer/scripts/w6_mechanism.py --output
+transfer/results/w6_mechanism.json`; the same captures). Mean over both skills × three
+commands, `L`:
+
+| Tracker | Stance level, body (plan 0.0049) | Swing peak, absolute (plan 0.089) | Clearance above own stance | Body duty |
+| --- | --- | --- | --- | --- |
+| S seeds 31 / 32 / 33 | 0.0143 / 0.0128 / 0.0133 | 0.0599 / 0.0537 / 0.0514 | 0.0453 / 0.0409 / 0.0383 | 0.573 / 0.585 / 0.590 |
+| W6 seed 31 | 0.0052 | 0.0426 | 0.0373 | 0.590 |
+
+- *The switch did what it was built to do.* The arm's stance level sits on the plan's
+  (0.0052 against 0.0049). S's seeds stand 0.008–0.009 above it.
+- *The swing peak came down with it.* The absolute peak fell to 0.0426, from 0.051–0.060.
+  Above its own stance, the arm's foot rises 0.037 `L`, close to S's lowest seed (0.038).
+  The swing the body makes did not grow.
+- *What the reward charged.* With the offset, a swinging sole point read 0.010 `L` above
+  the foot's underside. So removing the offset made the reward charge a larger swing
+  shortfall, as well as removing the stance error. The tracker did not raise its swing to
+  meet that charge.
+- **Reframing** (a hypothesis, with W7's evidence). The stance error the switch removed was
+  not what kept the NAO's swing low. What the tracker can command through the drives is
+  the remaining candidate. On the same kind of frozen trackers, faster drives raised the
+  lift by 0.128 at `g` = 2 (W7b, 10.9). W7c, trained at `g` = 2, tests it. W8n reads W8's
+  grounded plans on this arm's tracker, whose stance can reach the plan's height.
+- *A correction to the pre-registration.* It said the arm would be "laddered as S's were
+  (map and corners; L4 on both skills; encoder and walk on rough)". S's NAO seeds have no
+  map or corners captures, and `w6_sole.sh` laddered the arm as they were laddered: rough
+  through the encoder, the walk and L4, flat through L4. The target reads L4 only, so no
+  computed figure depended on the parenthesis.
+
+### 10.9 The NAO's leg drives lag its targets; pre-registered (W7)
+
+**Measured** (`transfer/scripts/swing_drive.py`, `transfer/results/swing_drive.json`;
+deployed path, the W1 linear captures of the three NAO trackers and S's three G1 seeds).
+- *The drives are slow in the body's own time.* A PD drive follows a moving target with the
+  time constant `D / K`. The NAO's leg drives (`nao.py`, derived for stance against the
+  whole body) take 0.92 `T` at the hip, 0.83 at the knee and 0.87 at the ankle. The G1's
+  take 0.10 `T` at the hip and knee. A planned swing lasts a median 0.50 `T`.
+- *The NAO's swing joints move as isolated PD joints.* From each recorded state, integrating
+  the joint's own PD law against the leg's own inertia predicts the next step. Actual on
+  predicted: hip slope 0.88, R² 0.84; knee 0.77, 0.72; ankle 1.00, 0.97. The G1's hip fits
+  worse (0.72, 0.50); the body around it moves too.
+- *What the drives deliver.* In a swing the NAO's hip target moves a median 0.26 rad from
+  the swing's start (it moves at all in 90 % of swings), and the hip itself 0.09 rad. That
+  is a median 0.34 of its own target's excursion. The knee's target does not rise after
+  lift-off in 58 % of swings: the NAO lifts with its hip. The G1's hip delivers 0.60 of its
+  target and its knee 1.25.
+- *What faster drives would give, open-loop.* The same targets are replayed through the
+  isolated joints with the leg gains scaled to `K g`, `D √g`. That keeps the damping ratio
+  against every inertia, so a stance joint stays critically damped, and divides `D / K` by
+  `√g`. The hip and knee's planar sole rise, as a share of the asked lift, is 0.22 at
+  `g` = 1 (the record's own joints give 0.16), 0.31 at 2, 0.39 at 4 and 0.45 at 8. The
+  planar rise covers only part of the lift `z*` measures (0.49 of asked for the incumbent),
+  and the replay ignores the tracker's response to a faster leg.
+
+**Pre-registered (2026-11-05, before any run).**
+- **Hypothesis.** The NAO lifts low because its leg drives lag the tracker's targets by most
+  of a swing, and a low swing lands early, lengthening the stance (10.3,
+  `touchdown_lift.json`). Faster drives on the same frozen tracker should raise the lift,
+  and if the lift sets the stance, shorten it.
+- **Change.** `HUMANOID_NAO_LEG_GAIN=4` (`nao_track_env_cfg.LEG_GAIN`, default 1;
+  `nao_kinematics.scaled_drive_gains`): every leg drive at `K × 4`, `D × 2`, so `D / K` is
+  halved to 0.42–0.46 `T`. Effort and velocity limits are unchanged, and nothing is trained.
+- **Test** (`transfer/scripts/w7_drives.sh`). The frozen trackers W1 used -- `r1_3498` and
+  S's seeds 32 and 33, symmetrized -- through L4 of `flat_dagger2` and `rough_b4` and S0's
+  walk, on the linear interface. Each is paired with its own capture under the derived
+  gains: the incumbent's W1 control re-run, and the seeds' records. As a dose, the
+  incumbent also runs at `g` = 2, on both skills.
+- **Criterion** (`transfer/scripts/w7_compare.py`). Paired over the three trackers, mean
+  over both skills × three commands, deployed path:
+  1. *Lift:* the clearance reached over asked (`common/contact.py`) rises by more than
+     twice the standard error of the paired differences.
+  2. *Duty:* W1's target, the duty factors' relative deviation from the teacher's own grid,
+     falls by more than twice its standard error.
+  3. *No regression:* falls at most two more in total, speed ratio at least 0.9 at every
+     command, S0's walk passing.
+- **Reading.**
+  - *Both* (with 3): the drives' lag is a cause of both gaps, and the lift sets the
+    stance. An RL arm then opens: S's NAO recipe with the faster drives, three seeds,
+    pre-registered before it runs.
+  - *Lift only:* the lift does not set the stance.
+  - *Neither:* the frozen tracker was trained against the slower leg, so this says
+    nothing either way about the drives. Reported with a reframing.
+- **What it changes, declared.** The simulated NAO's drives, which is part of the body.
+  The gains were derived for stance (`nao.py`). Every NAO result in this repository was
+  obtained with them, and none is replaced. A result here is a body-model candidate,
+  reported apart.
+- **Order.** After W5, before W8 (10.10) and W6.
+
+**Result (2026-11-05: reads *both*, fails no regression on falls; the RL arm does not
+open).** `python transfer/scripts/w7_compare.py --output transfer/results/w7_drives.json`.
+Three trackers, derived gains → `g` = 4, mean over both skills × three commands:
+
+| Tracker | Lift (reached / asked) | Duty deviation | Body duty | Gate C passes | Falls |
+| --- | --- | --- | --- | --- | --- |
+| `r1_3498_sym_v3` | 0.489 → 0.688 | 0.124 → 0.063 | 0.580 → 0.540 | 0 → 4 of 6 | 0 → 1 |
+| S seed 32 | 0.491 → 0.692 | 0.134 → 0.075 | 0.585 → 0.543 | 0 → 3 of 6 | 0 → 6 |
+| S seed 33 | 0.455 → 0.663 | 0.138 → 0.062 | 0.590 → 0.539 | 0 → 3 of 6 | 0 → 6 |
+| Paired difference (± SE) | +0.203 ± 0.003 | −0.065 ± 0.005 | −0.044 ± 0.003 | | +13 |
+
+- *Criteria 1 and 2 pass by a wide margin.* The lift rises by 76 SE and the duty deviation
+  falls by 12. Touchdowns come later (+0.011 ± 0.002 `T`), and the foot grazes less in
+  swing (−0.034 ± 0.003). The NAO passes gate C for the first time on its own grid: 10 of
+  the 18 rows.
+- *Criterion 3 fails on falls.* All 13 falls are on `rough_b4` at the fast command: 1 of 63
+  episodes for the incumbent, 6 of 65 and 6 of 63 for the seeds. Elsewhere none fall. The
+  speed ratio stays at least 0.99, and S0's walk passes for all three (speed 0.997–1.003,
+  no fall excess).
+- *The dose.* At `g` = 2 the incumbent keeps most of the gain: lift 0.620, duty deviation
+  0.080, body duty 0.551, gate C 4 of 6. It has no falls, `rough_b4` fast included. It ran
+  without the walk.
+- **Reading, as pre-registered.** *Both*: the drives' lag is a cause of both gaps, and the
+  lift sets the stance. The falls criterion fails, so the RL arm does not open at `g` = 4.
+- **Reframing** (hypothesis, not measured). Each tracker was trained against the derived
+  drives, and their lag is part of what it learned to command. A leg four times stiffer
+  on the hardest condition (rough terrain, the fastest command) overshoots targets shaped
+  for a slower one. That would make the falls a frozen-tracker mismatch, not a property of
+  the faster body. The dose fits this: half the stiffness keeps most of the gain and drops
+  the falls.
+- **What the gains are.** `nao.py` (the comment above `NAO_STIFFNESS`) derives the leg
+  gains at `ω_n` = 12 rad/s against the whole body's inertia, critically damped in stance.
+  A swinging leg carries only its own, much smaller, inertia, so the same gains overdamp
+  it by construction. The gains are a modelling choice, not an identification of the real
+  NAO's drives. Whether the real robot's drives respond faster is not measured in this
+  repository.
+
+**W7b, pre-registered (2026-11-05, after W7's result, before any run at `g` = 2 on the
+seeds).**
+- **Change.** `HUMANOID_NAO_LEG_GAIN=2`: `K × 2`, `D × √2`, so `D / K` falls from 0.83–0.92
+  to 0.59–0.65 `T`.
+- **Test** (`transfer/scripts/w7b_drives.sh`). The same three trackers.
+  - The incumbent's L4 at `g` = 2 is W7's dose, already read; its walk is added.
+  - S's seeds 32 and 33 run L4 on both skills and the walk at `g` = 2, none of it seen.
+- **Criterion.** W7's three, unchanged:
+  `python transfer/scripts/w7_compare.py --gain 2 --output transfer/results/w7b_drives.json`.
+- **Reading.** *Both* with no regression opens the RL arm at `g` = 2. That arm uses S's NAO
+  recipe with `HUMANOID_NAO_LEG_GAIN=2`, three seeds warm from `r1_3498`, and is
+  pre-registered before it runs and reported as a body-model candidate. Any other reading
+  is reported with a reframing.
+- **Declared.** The gain was chosen after W7's falls at `g` = 4 were seen, so the
+  incumbent's third of the evidence is in-sample. W7's own verdict stands as written.
+- **Order.** After W8, before W5b and W6.
+
+**W7b result (2026-11-05: reads *both*, no regression; the RL arm opens at `g` = 2).**
+`python transfer/scripts/w7_compare.py --gain 2 --output transfer/results/w7b_drives.json`.
+
+| Tracker | Lift | Duty deviation | Body duty | Gate C passes | Falls |
+| --- | --- | --- | --- | --- | --- |
+| `r1_3498_sym_v3` | 0.489 → 0.620 | 0.124 → 0.080 | 0.580 → 0.551 | 0 → 4 of 6 | 0 → 0 |
+| S seed 32 | 0.491 → 0.616 | 0.134 → 0.094 | 0.585 → 0.557 | 0 → 1 of 6 | 0 → 0 |
+| S seed 33 | 0.455 → 0.582 | 0.138 → 0.088 | 0.590 → 0.557 | 0 → 2 of 6 | 0 → 0 |
+| Paired difference (± SE) | +0.128 ± 0.002 | −0.045 ± 0.003 | −0.030 ± 0.001 | | 0 |
+
+- No tracker falls in any of the 1150 episodes. The speed ratio stays at least 1.00, and S0's
+  walk passes for all three (speed 0.995–0.997).
+- The seeds gain less than the incumbent, and rough at the fast command stays the hardest
+  row: largest deviation 0.183–0.186 for the seeds.
+- Against `g` = 4 (W7), half the stiffness gives about 0.6 of the lift (+0.128 against
+  +0.203) and 0.7 of the duty change (−0.045 against −0.065), without the falls.
+
+**W7c, pre-registered (2026-11-05, after W7b's result, before any training).**
+- **Question.** Does a tracker trained against the faster drives do better than a frozen
+  one deployed on them? W7 and W7b changed the body under trackers that learned the slower
+  one.
+- **Arm** (`transfer/scripts/w7c_train.sh`). `r1_3498` continued 1000 iterations exactly as
+  S's NAO seeds were (`w6_sole.sh`'s recipe: 70 % procedural, the mirror loss, the
+  checkpoint's adapted rate), with `HUMANOID_NAO_LEG_GAIN=2` in training and evaluation.
+  - Seeds 31, 32 and 33, `warm_nao_g2_s<seed>`.
+  - Laddered as S's were: rough with the encoder, the walk and L4; flat with L4.
+  - A 3-iteration smoke run must show the scaled leg gains in `params/env.yaml` first.
+- **Control.** S's seeds 31–33, deployed frozen at `g` = 2. Seeds 32 and 33 are W7b's
+  captures; seed 31 (`warm_nao_r1`) runs first in the same queue.
+- **Criterion** (`transfer/scripts/w7c_compare.py` → `transfer/results/w7c_trained.json`).
+  - *Target:* the largest gate C deviation is the paper's reading: per command, the
+    largest of the stride, period and duty deviations, then the mean over both skills ×
+    three commands. The arm's seed mean must fall below the control's by more than 2 SE of
+    the difference of seed means, `sqrt(s_a²/3 + s_c²/3)`.
+  - *No regression:* falls at most two more in total, speed ratio at least 0.9 at every
+    command, S0's walk passing, and the lift not lower by more than 2 SE.
+  - *Reported beside it:* the arm against S's seeds at the derived gains (the whole change
+    against the system as it stands), gate C passes, and the duty deviation.
+- **Reading.**
+  - *Passes:* training on the faster body adds to deploying on it. A body-model candidate
+    (faster drives plus their tracker), reported apart.
+  - *Fails:* the deploy-time result stands alone, reported with a reframing.
+  - *Either way:* no NAO result is replaced. Adopting any of it needs the real NAO's drive
+    response, which no file here measures.
+- **Zero-shot.** Training uses S's NAO recipe, the procedural family and the walk
+  teacher's contract. It uses neither skill's plans.
+- **Budget and order.** About 9 h (three trainings of about 2.5 h, plus ladders), after W8n.
+  It uses part of the 13 h the closed W3 arms left in the approved program.
+
+**W7c result (2026-11-05 22:03 – 2026-11-06 07:13: fails; the target is missed the other
+way).** `python transfer/scripts/w7c_compare.py --output transfer/results/w7c_trained.json`.
+Seed means, mean over both skills × three commands, deployed path; ± is the standard
+error of the difference of seed means:
+
+| Group (seeds 31 / 32 / 33) | Largest deviation | Lift (reached / asked) | Duty deviation | Gate C passes | Falls |
+| --- | --- | --- | --- | --- | --- |
+| Arm, trained at `g` = 2 | 0.160 / 0.145 / 0.139 | 0.533 / 0.555 / 0.591 | 0.129 / 0.118 / 0.100 | 3 of 18 | 0 |
+| Control, S frozen at `g` = 2 | 0.113 / 0.125 / 0.124 | 0.673 / 0.616 / 0.582 | 0.084 / 0.094 / 0.088 | 5 of 18 | 2 |
+| Arm − control | +0.027 ± 0.007 | −0.064 ± 0.031 | +0.027 ± 0.009 | | |
+| S at the derived gains (beside it) | 0.139 / 0.175 / 0.189 | 0.551 / 0.491 / 0.455 | 0.110 / 0.134 / 0.138 | 1 of 18 | 0 |
+| Arm − derived | −0.020 ± 0.016 | +0.061 ± 0.033 | −0.012 ± 0.012 | | |
+
+- **The target fails.** The arm's largest deviation is *above* the frozen control's, by
+  3.7 SE. The lift fails no regression (−0.064 against a bound of −0.063). Falls, speed
+  (at least 1.00) and S0's walk pass.
+- **Reading, as pre-registered.** *Fails*: training on the faster body does not add to
+  deploying on it. W7b's deploy-time result stands alone.
+- *Beside it.* Against S at the derived gains, the system as it stands, the arm is better
+  on every term (largest −0.020, lift +0.061, duty −0.012), and by less than 2 SE on each
+  (1.2, 1.9 and 1.0).
+- **Where the gait went** (`python transfer/scripts/w7c_mechanism.py --output
+  transfer/results/w7c_mechanism.json`; the same captures; seed mean ± SE).
+
+  | Group | Lift-off lag (`T`) | Air time, body / plan | Swing peak (`L`) | Clearance above stance | Body duty (plan 0.560) |
+  | --- | --- | --- | --- | --- | --- |
+  | S, derived gains | +0.004 ± 0.006 | 0.94 | 0.055 | 0.041 | 0.583 |
+  | S frozen at `g` = 2 | −0.020 ± 0.006 | 0.99 | 0.067 | 0.052 | 0.555 |
+  | Arm, trained at `g` = 2 | +0.002 ± 0.004 | 0.94 | 0.060 | 0.047 | 0.576 |
+
+  - The frozen trackers on the faster drives lift off before the plan does, on every
+    seed (−0.009, −0.022, −0.027 `T`), and swing the full asked time.
+  - Trained on the same drives, the trackers lift off when the plan does, as the derived
+    ones do. Their swings shorten back to the derived trackers' 0.94 of asked, and the
+    peak and duty return most of the way.
+- **Reframing** (hypothesis). Part of W7b's gain is a frozen tracker's mismatch with a
+  body it did not learn. Its targets lead drives that lag; on faster drives the same lead
+  lifts the foot sooner, which buys a full swing, a higher peak and a shorter stance.
+  Training removes the lead: the reward scores contact against the plan, and the trained
+  tracker lifts when told. So the NAO's gait is not set by the drives alone. The tracker's
+  objective keeps the swing it has on either drive, and what it does not reach once it
+  lifts on time is the asked swing's length and height. Faster drives keep part of the lift
+  through training (+0.061 ± 0.033 over the derived gains), not enough to show at 2 SE.
+- *What this does to the body-model candidate.* W7 and W7b remain deploy-time results on
+  frozen trackers. A body model with faster drives would not by itself be expected to
+  close the NAO's gap once its trackers are retrained, so adopting it rests on the real
+  drives and on that smaller, unconfirmed gain.
+
+### 10.10 The plans load feet they hold above the ground; pre-registered (W8)
+
+**Measured** (`transfer/scripts/plan_contact.py`, `transfer/results/plan_contact.json`;
+deployed path, S's three seeds of each body, both skills, three commands).
+- *Where a loaded foot is.* In the teachers' gaits a foot carrying more than the contact
+  threshold rests on the ground: sole height a median 0.000 `L`, 0.006 (flat) and 0.013
+  (rough) at the 90th percentile. In the plans the G1 was given, a loaded foot sits at a
+  median 0.0025 (flat) and 0.0050 (rough) `L`, and at 0.018 and 0.029 at the 90th. In
+  light contact it sits at 0.013 and 0.014, against the teachers' 0.0065 and 0.0043. The
+  generator models load and position as separate fields, and its plans do not keep them
+  consistent where contact changes.
+- *What the trackers do with it.* Each planned event is matched to the body's own within
+  0.5 `T`, and set against the plan's sole height over its two loaded samples next to the
+  event. On rough's plans:
+  - the G1 lifts off earlier the higher the plan holds the still-loaded foot (Spearman
+    −0.35). The quarter held highest (above 0.016 `L`) lifts off 0.124 `T` early, the
+    lowest 0.022;
+  - it lands later the higher the first loaded samples (+0.49; 0.112 `T` late against
+    0.005).
+
+  On flat's plans the G1 behaves the same way (−0.27, +0.53), but flat's plans hold their
+  loaded feet lower: event heights at a median 0.0038 and 0.0077 `L`, against rough's 0.0065
+  and 0.0174. The NAO shows the same relation (−0.29 to −0.30, +0.34 to +0.37).
+- *Why this fits the G1's failure on rough and its success on flat.* It accounts for the
+  lift-off 0.054 `T` early and the touchdown 0.049 late, a stance 0.06–0.09 short (10.2).
+  It accounts for B1 too: trained on rough's own plans, B1 learned which of the two fields
+  to believe there. The family's half-sines (10.5) never pose the conflict: the
+  biped's loaded feet are on the ground, at 0.000 `L` at the median and the 90th
+  percentile.
+
+**Pre-registered (2026-11-05, before any run).**
+- **Hypothesis.** Where a plan loads a foot it also holds above the ground, the tracker
+  follows the position and leaves the ground. Making the plans say one thing should give
+  back the stance.
+- **Change.** `HUMANOID_PLAN_CONTACT=ground` (`ReferenceCommandCfg.plan_contact`; default
+  `as_drawn`; `latent/plan_contact.py`). Each foot the task's plan loads above the contact
+  threshold is put on the ground by its height alone; its horizontal position, velocity,
+  load and every other field are kept, bit for bit (`tests/test_plan_contact.py`).
+  - *Where it acts.* The plan as drawn and resampled, before the tracker reads it. Under
+    the autonomous reference the generator's history is made of those plans, so it reads
+    the consistent version too. This is declared, not isolated.
+  - *What it does not touch.* The procedural biped's plans, already consistent, and nothing
+    trained.
+  - *Why it is no strategy.* It enforces what the plan's own load implies: a foot carrying
+    weight is on the ground. It says nothing about how the body should move.
+- **Test** (`transfer/scripts/w8_plan_contact.sh`). The frozen trackers -- S's three G1 seeds
+  (`warm_r3_logload`, `_s42_log`, `_s43_log`) and the three NAO trackers W1 used, all
+  symmetrized -- through L4 of `rough_b4` and `flat_dagger2` and S0's walk. Each is paired
+  with its own captures of the plans as drawn.
+- **Criterion** (`transfer/scripts/w8_compare.py`).
+  - *G1, the target:* L4's largest gate C deviation on rough, the paper's reading (mean
+    over the three commands; now 0.148–0.161), falls by more than twice the standard
+    error of the three paired seed differences, and flat's (0.082–0.090) rises by no more
+    than that.
+  - *NAO:* W1's target, the duty deviation over both skills, falls by more than twice its
+    standard error.
+  - *No regression, each body:* falls at most two more in total, speed ratio at least 0.9
+    at every command, S0's walk passing.
+  - *Reported beside them:* gate C passes, airborne-where-light, the lift-off and
+    touchdown lags.
+- **Reading.**
+  - *If the G1 passes,* the rough deficit is the plans' inconsistency, removable at
+    deployment for every body. Candidate adoption then follows `incumbents.json`'s rule,
+    with S0's chains re-run.
+  - *If it does not,* the correlation was not the cause, or a tracker trained on
+    inconsistent plans cannot use consistent ones. Reported with a reframing.
+- **Data hygiene.** The relation was found on rough's and flat's own captures, so these two
+  skills are diagnosed for this question. The change is generic, and its threshold is the
+  contact threshold gate C uses: nothing was fitted.
+- **Order.** After W7, before W6.
+
+**Result (2026-11-05: the G1 passes, the NAO does not).**
+`python transfer/scripts/w8_compare.py --output transfer/results/w8_plan_contact.json`. As drawn
+→ grounded, frozen trackers, mean over three commands:
+
+| Body | Seed | Rough, largest | Flat, largest | Duty deviation, both skills | Falls |
+| --- | --- | --- | --- | --- | --- |
+| G1 | 41 (`warm_r3_logload`) | 0.148 → 0.128 | 0.089 → 0.070 | 0.102 → 0.084 | 0 → 0 |
+| G1 | 42 | 0.161 → 0.128 | 0.090 → 0.071 | 0.098 → 0.082 | 3 → 0 |
+| G1 | 43 | 0.150 → 0.120 | 0.082 → 0.065 | 0.093 → 0.078 | 0 → 0 |
+| G1 | paired difference (± SE) | −0.027 ± 0.004 | −0.019 ± 0.001 | −0.017 ± 0.001 | |
+| NAO | `r1_3498` | 0.154 → 0.193 | 0.174 → 0.173 | 0.124 → 0.133 | 0 → 0 |
+| NAO | 32 | 0.164 → 0.209 | 0.187 → 0.186 | 0.134 → 0.145 | 0 → 0 |
+| NAO | 33 | 0.169 → 0.212 | 0.209 → 0.210 | 0.138 → 0.148 | 0 → 0 |
+| NAO | paired difference (± SE) | +0.042 ± 0.002 | −0.000 ± 0.001 | +0.010 ± 0.001 | |
+
+- **The G1 meets its target.** Rough's largest deviation falls by 6.5 SE, and flat's falls
+  too (by 27 SE) instead of rising. The no-regression terms hold: no falls (seed 42's three
+  on rough are gone), speed at least 1.00, S0's walk at fall excess 0.
+  - *What it closes.* Rough moves 0.027 of the 0.081 between the zero-shot model and B1
+    (0.153 ± 0.004 against 0.072 ± 0.001, `transfer/paper/README.md`, B1's note). It still
+    passes gate C at none of the nine rough rows; flat passes all nine (eight before).
+  - *How.* The stance lengthens toward the teacher's (body duty +0.008 on flat, +0.011 on
+    rough). Lift-off comes later and touchdown earlier, and airborne-where-light falls by
+    0.06 on both skills.
+  - *The walk.* Every gate C deviation of S0's walk is smaller (stride length 0.195–0.216
+    → 0.131–0.159), and its speed ratio rises from 1.004–1.009 to 1.064–1.067.
+- **The NAO misses its target.** Rough's duty deviation rises (+0.018 ± 0.001), and flat's
+  does not move. No falls, speed held, the walk passes.
+- **Reading, as pre-registered.**
+  - *G1:* the rough deficit is partly the plans' inconsistency, and grounding their loaded
+    feet removes that part at deployment. Candidate adoption follows `incumbents.json`'s
+    rule (below).
+  - *NAO:* the change does not carry. That contradicts the hypothesis's "for every body".
+- **Reframing for the NAO** (measured offsets, the cause a hypothesis). In the same
+  captures (`plan_contact.json`, `trackers.<body> <skill>.bodies.loaded`), a loaded G1 foot
+  reads a median 0.0000 `L` on flat and 0.0005 on rough. A loaded NAO foot reads 0.0116 and
+  0.0134: the sole point's 0.010 `L` resting offset (10.8). As drawn, the plans hold it at
+  0.0036 and 0.0059. Grounding them moves the plan to 0, which the G1's foot reaches and the
+  NAO's cannot, so on the NAO it widens the gap between plan and body in stance. W6
+  (`HUMANOID_SOLE=contact`) removes the offset, and W8's switch on W6's tracker is the test.
+- **Adoption check for the G1** (`incumbents.json`'s rule; S0, run 2026-11-05 at `af6f526`).
+  - Target: rough's largest deviation, better by more than 2 SE.
+  - pytest and ruff pass.
+  - The chains of `rough_b3`, `rough_b4` and `flat_b4` are byte-identical to their records
+    (`regression_s0.sh`'s chain loop). `plan_contact` acts in the command, not the
+    generator, so they cannot depend on it.
+  - Flat L4 is better on all three seeds, and the walk is as above.
+  - The NAO's deployment is unchanged, so its half of S0 is unaffected.
+  - **Not written into `incumbents.json`.** The assignment keeps the original incumbents, and
+    adoption is the user's call at review. The candidate is recorded in
+    `transfer/results/candidates.json`.
+
+**W8n, pre-registered (2026-11-05, after W8's result, before W6 has trained).**
+- **Hypothesis.** W8 missed on the NAO because of the sole offset. A grounded plan asks a
+  loaded foot to read 0, which the URDF sole point, resting at +0.010 `L`, cannot. On W6's
+  trackers the sole point rests at 0 (`HUMANOID_SOLE=contact`, 10.8), so grounding should
+  not hurt them, and should help as it did the G1.
+- **Test** (`transfer/scripts/w8_sole.sh`). Run after W6, on every W6 tracker that exists
+  (seed 31; seeds 32 and 33 only if W6's screen passed). L4 of both skills and S0's walk
+  with `HUMANOID_PLAN_CONTACT=ground`, under W6's own conditions. Each is paired with its
+  own capture of the plans as drawn. Nothing is trained.
+- **Criterion** (`w8_compare.py --bodies nao --nao-trackers <W6's tags>` →
+  `transfer/results/w8n_sole.json`).
+  - *Three trackers:* W8's NAO criterion, unchanged.
+  - *One tracker* (no standard error): a screen. It reads *the offset* if grounding leaves
+    rough's duty deviation no higher (`single.rough_b4.duty` ≤ 0). On the URDF sole point
+    that difference was +0.017 to +0.019 per tracker. Otherwise it reads *not the offset*.
+    One seed decides nothing, and either reading is reported as a fact.
+- **Declared.** The hypothesis and this test were written after W8's NAO result. W6's
+  trackers differ from S's in training (the sole definition), so the pairing is within each
+  W6 tracker.
+- **Order.** After W6.
+
+**W8n result (2026-11-05, 21:37–22:03: reads *not the offset*, on one tracker).**
+`python transfer/scripts/w8_compare.py --bodies nao --nao-trackers warm_nao_sole_s31_sym
+--output transfer/results/w8n_sole.json`. W6's screen did not pass (10.8), so its seed 31
+is the only tracker. As drawn → grounded, mean over three commands, deployed path:
+
+| Tracker | Rough, largest | Rough, duty deviation | Flat, largest | Flat, duty deviation | Airborne where light (rough / flat) | Falls |
+| --- | --- | --- | --- | --- | --- | --- |
+| W6 seed 31 (sole at contact) | 0.140 → 0.169 (+0.029) | 0.097 → 0.103 (+0.006) | 0.202 → 0.201 | 0.181 → 0.181 | −0.057 / −0.063 | 0 → 0 |
+| W8's three, URDF sole (per tracker) | +0.039 / +0.045 / +0.043 | +0.017 / +0.019 / +0.019 | −0.001 / −0.000 / +0.001 | +0.002 / +0.003 / +0.002 | −0.052 to −0.062 / −0.057 to −0.070 | 0 → 0 |
+
+- **Reading, as pre-registered.** Grounding raises rough's duty deviation on this tracker
+  (`single.rough_b4.duty` = +0.006 > 0), so the screen reads *not the offset*. One tracker
+  decides nothing, and this is reported as a fact.
+- *What did change.* The harm is about a third of what it was on the URDF sole point
+  (+0.006 against +0.017 to +0.019), and rough's largest deviation rises by about two
+  thirds as much (+0.029 against +0.039 to +0.045). Flat does not move on either sole
+  point. No falls, the speed ratio at least 1.00, and S0's walk passes (speed 0.995 →
+  1.055, as the URDF trackers' 0.994–0.997 → 1.055–1.059).
+- *Where the loaded foot is* (`transfer/results/w6_mechanism.json`, entry
+  `arm_s31_ground`, from `w6_mechanism.py`). The grounded plans put a loaded foot at 0.0000.
+  W6's tracker stands at 0.0027 `L` on flat and 0.0069 on rough, so on rough the plan
+  still asks for 0.007 `L` the stance does not give, about two thirds of the URDF offset.
+  Why a loaded NAO foot reads higher on rough than on flat is not measured here.
+- **Reframing** (hypothesis). The sole offset is part of W8's NAO miss, not all of it.
+  What remains sits where the stance level still differs from the grounded plan's, on
+  rough. A test would read the NAO's rough stance level against the terrain under the
+  foot. It is not queued: no NAO candidate depends on it, and the G1's candidate does not
+  touch the NAO.
 
 ## What this stage hands to the next
 

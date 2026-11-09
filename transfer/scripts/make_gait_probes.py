@@ -73,11 +73,16 @@ def main() -> int:
         "--coverage", type=Path, default=REPO_ROOT / "transfer/results/procedural_coverage.json"
     )
     parser.add_argument("--corners", action="store_true", help="The family's corners only.")
+    parser.add_argument(
+        "--transfer", action="store_true", help="Walking schedules at three load profiles."
+    )
     args = parser.parse_args()
     ranges = GaitRanges()
     min_swing = max(ranges.min_swing, SWING_STEPS * G1_STEP)
     if args.corners:
         return write(args.output, corners(ranges, min_swing))
+    if args.transfer:
+        return write(args.output, transfer(min_swing))
     probes = []
     for forward, period, duty in itertools.product(
         (0.0, 0.08, 0.16, 0.25, 0.35), (0.8, 1.2, 1.8, 2.6), (0.4, 0.55, 0.7, 0.85)
@@ -149,6 +154,37 @@ def corners(ranges: GaitRanges, min_swing: float) -> list[dict]:
             probes.append(
                 gait("corner", name, forward=forward, period=1.0, duty=(duty, duty),
                      height=height, clearance=clearance)
+            )  # fmt: skip
+    return probes
+
+
+def transfer(min_swing: float) -> list[dict]:
+    """Walking schedules of the grid, each at three stance-load warps (``skill_space.md`` §10.5).
+
+    Forward speed {0.08, 0.16, 0.25} ``V`` × stride period {0.8, 1.2, 1.8} ``T`` × duty
+    {0.55, 0.7} -- walks, with the double support a load transfer happens in -- at warp
+    0.5 (load at touchdown, slow unloading before lift-off), 1 (the half-sine) and 2 (its
+    mirror). Feasibility is checked with the warp's peak, as the family checks it, and a
+    schedule is kept only if it is feasible at all three warps, so the groups pair up.
+    """
+    shaped = GaitRanges(load_shape=(0.5, 2.0))
+    warps = (0.5, 1.0, 2.0)
+    probes = []
+    for forward, period, duty in itertools.product(
+        (0.08, 0.16, 0.25), (0.8, 1.2, 1.8), (0.55, 0.7)
+    ):
+        t = torch.tensor
+        ok = feasible(
+            t([period] * 3), t([[duty, duty]] * 3), t([forward] * 3), t([0.0] * 3),
+            t([MIDDLE["width"]] * 3), shaped, min_swing, t(warps),
+        )  # fmt: skip
+        if not bool(ok.all()):
+            continue
+        for warp in warps:
+            name = f"v{forward}_P{period}_d{duty}_k{warp}"
+            probes.append(
+                {**gait(f"warp{warp}", name, forward=forward, period=period, duty=(duty, duty)),
+                 "load_shape": warp}
             )  # fmt: skip
     return probes
 

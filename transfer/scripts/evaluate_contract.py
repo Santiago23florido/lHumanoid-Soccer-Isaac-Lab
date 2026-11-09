@@ -15,12 +15,20 @@ was held to, from ``evaluate_latent.py``: speed at least 0.90 of the
 teacher's, fall rate at most 2 points above it, and stride length, stride
 period and both duty factors within 10 %.
 
-**Across bodies** (pre-registered for the blind test, ``skill_space.md`` §8.4). A
-body samples a gait at its own control rate, and a coarser rate lengthens every
-stance it can represent: the NAO's step is 1.62 times the G1's in body time. When
-a run's rate differs from the teacher's, ``verdict_at_body_rate`` also holds it
-to the teacher's gait resampled, in body time, to the run's rate. Both verdicts
-are reported; within one body they coincide.
+**Across bodies** (pre-registered for the blind test, ``skill_space.md`` §8.4). When
+a run's rate differs from the teacher's, ``verdict_at_body_rate`` also holds it to
+the teacher's gait resampled, in body time, to the run's rate. Both verdicts are
+reported; within one body they coincide.
+
+**Correction (2026-11-04, ``skill_space.md`` §10).** That resampling interpolates the
+feet's loads linearly and then thresholds them, which counts about nine tenths of
+every swing boundary as contact: on the teacher's captures resampled to the NAO's
+step it adds 0.03 to 0.06 to each duty factor, while a duty factor -- a fraction of
+time -- does not depend on the rate it is sampled at (nearest sampling and log-unit
+interpolation stay within 0.01). ``verdict_at_body_rate`` is kept as it was, for
+comparison with every earlier result; ``verdict_at_body_rate_unbiased`` resamples the
+loads in log units (the generator's own space) and records the nearest-sample
+signature beside it.
 
 **Where a miss comes from** (captures that record the plan). The plans' own
 due states, stitched in time, are the motion the body was asked for: its gait
@@ -47,6 +55,7 @@ sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from evaluate_latent import CRITERIA, SETTLE_STEPS, summarise, verdict  # noqa: E402
+from humanoid_transfer.common.contact import resample  # noqa: E402
 from humanoid_transfer.common.gait import gait_signature  # noqa: E402
 from humanoid_transfer.common.similarity import UnitSystem  # noqa: E402
 from humanoid_transfer.common.skill_state import SKILL_LAYOUT  # noqa: E402
@@ -115,23 +124,15 @@ def dt_star(path: Path) -> float:
     return float(data["control_dt"]) / units.time
 
 
-def signature_at_rate(path: Path, rate: float) -> dict:
-    """The gait of a capture as a body controlled every ``rate`` body times would sample it."""
+def signature_at_rate(path: Path, rate: float, loads: str = "linear") -> dict:
+    """The gait of a capture as a body controlled every ``rate`` body times would sample it.
+
+    ``loads`` is how the feet's loads are resampled (:func:`~...common.contact.resample`):
+    ``linear``, the original rule, lengthens every stance; ``log`` and ``nearest`` do not.
+    """
     data = np.load(path)
     z = data["skill_state"].astype(float)
-    done = data["done"]
-    source = np.arange(z.shape[0]) * dt_star(path)
-    target = np.arange(0.0, source[-1], rate)
-    resampled = np.empty((len(target), z.shape[1], z.shape[2]))
-    for env in range(z.shape[1]):
-        for k in range(z.shape[2]):
-            resampled[:, env, k] = np.interp(target, source, z[:, env, k])
-    # A new sample ends an episode if any original step since the previous one did.
-    ended = np.cumsum(done, axis=0)
-    index = np.minimum(np.searchsorted(source, target, side="right") - 1, len(source) - 1)
-    counts = ended[index]
-    resampled_done = np.zeros(counts.shape, dtype=bool)
-    resampled_done[1:] = counts[1:] > counts[:-1]
+    resampled, resampled_done = resample(z, data["done"], dt_star(path), rate, loads=loads)
     return gait_signature(resampled, resampled_done, rate).as_dict()
 
 
@@ -182,6 +183,18 @@ def main() -> int:
                     "body_dt_star": rate,
                     "teacher_dt_star": teacher_rate,
                 }
+                unbiased = {**runs["teacher"]}
+                unbiased["signature"] = signature_at_rate(paths["teacher"], rate, loads="log")
+                run["verdict_at_body_rate_unbiased"] = {
+                    **verdict(in_v(run), in_v(unbiased)),
+                    "teacher_signature": unbiased["signature"],
+                    "teacher_signature_nearest": signature_at_rate(
+                        paths["teacher"], rate, loads="nearest"
+                    ),
+                    "loads": "log",
+                    "body_dt_star": rate,
+                    "teacher_dt_star": teacher_rate,
+                }
         if "asked" in run:
             plan = run["asked"]
             asked_run = {**run, "forward_speed": plan["forward_speed"]}
@@ -217,13 +230,17 @@ def main() -> int:
             u = run["contract_use"]
             line += f"  use {u['ratio']:.3f} ({'PASS' if u['passes'] else 'fail'})"
         print(line)
-        if "verdict_at_body_rate" in run:
-            v = run["verdict_at_body_rate"]
-            print(
-                f"{'  at the body rate':<22} dev "
-                f"{ {k: round(x, 3) for k, x in v['signature_deviation'].items()} }  "
-                f"{'PASS' if v['passes'] else 'fail'}"
-            )
+        for key, label in (
+            ("verdict_at_body_rate", "  at the body rate"),
+            ("verdict_at_body_rate_unbiased", "  ... loads unbiased"),
+        ):
+            if key in run:
+                v = run[key]
+                print(
+                    f"{label:<22} dev "
+                    f"{ {k: round(x, 3) for k, x in v['signature_deviation'].items()} }  "
+                    f"{'PASS' if v['passes'] else 'fail'}"
+                )
         if "asked" in run:
             a = run["asked"]
             sig = a["signature"]

@@ -154,13 +154,22 @@ tolerance of the teacher's:
 
 | Skill | G1 | NAO |
 | --- | --- | --- |
-| Flat | **0 / 192** falls, passes 3 | **0 / 192** falls, passes 3 |
-| Rough | **0 / 192** falls | **0 / 192** falls, passes 2 of 3 at its own rate |
+| Flat | **0 / 192** falls, passes 3 | **0 / 192** falls, passes 0 |
+| Rough | **0 / 192** falls, passes 0 | **0 / 192** falls, passes 0 |
 | Before this method | 120–240 falls on flat | shuffling, 14–41 % of the speed |
 
-The NAO's longer stance on rough is the one shortfall left. Its step is 1.62 × the
-G1's in body time, and the G1's own plans, sampled at the NAO's rate, show the same
-stance.
+What is left is the gait's duty factor: the G1 on rough, and the NAO on both skills,
+keep their feet down for a different share of the stride than the teacher.
+
+*Correction (2026-11-04).* This table used to read "passes 3" for the NAO on flat and
+"passes 2 of 3 at its own rate" on rough, and put the NAO's longer stance down to its
+control rate. Both came from resampling the teacher's gait to the NAO's step by
+interpolating the foot loads linearly, which lengthens every stance by 0.03–0.06. A duty
+factor does not depend on the rate it is sampled at; resampled without that bias, the NAO
+passes no command. See [`skill_space.md`](transfer/docs/skill_space.md) §10.1 for what else
+the wrong reading affected, and §10.3 for the same interpolation in the plans the NAO is
+asked to follow. Removing that interpolation from the plans lowers the duty the NAO is
+asked for by 0.024–0.029, but the NAO's own stances do not shorten (§10.3).
 
 **What did not win: decoder v2.** It adds physics in the decoder: an IK and
 feed-forward prior with an RL residual, physics heads and a physics critic. It also
@@ -192,7 +201,8 @@ The test: the G1's incumbent continued the same way with each scoring, three see
 each. Probes mastered went from 37, 35, 36 to **40, 41, 43** on the grid (+5.3 ± 2.1),
 and to +7.3 ± 2.7 pooled with the corners. The duty improves on both feet, with no
 regression on S0. That continuation is now the G1's tracker. On the NAO the same change
-does not move the duty, whose gap is mostly its control rate.
+does not move the duty (its gap was put down to its control rate, a reading withdrawn on
+2026-11-04: §10.1).
 
 S0's walk check runs under the autonomous reference since 2026-10-24, a recorded
 deviation. The physical reference, which no tracker trains in, made the new decoders
@@ -208,7 +218,9 @@ decoder-v2 log (§9). Every number there comes with the result file it comes fro
   semi-blind, and rough was diagnosed before it passed.
 - **Single seed** per training run in most comparisons; the adoption of the
   log-space loads rests on three.
-- **The NAO's stance** against the G1 teacher's signature, mostly its control rate.
+- **The duty factor** on both bodies: contact transitions are lost at the generator, at
+  the resampling between control rates, and at the tracker
+  ([`skill_space.md`](transfer/docs/skill_space.md) §10).
 - **Locomotion only.** `z*` holds the CoM and the feet; a kick or the hands need
   fields it does not have.
 - **The capture-point controller underperforms badly** (27.8 %) and the reason

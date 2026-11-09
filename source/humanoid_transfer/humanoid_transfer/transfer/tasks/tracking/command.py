@@ -50,8 +50,10 @@ from ....common.similarity import UnitSystem
 from ....common.skill_state import SKILL_LAYOUT
 from ...latent.contract import load_contract, plan_integrals
 from ...latent.memory import TimeGrid
+from ...latent.plan_contact import PLAN_CONTACTS, ground_loaded_feet
 from ...latent.plan_trust import PlanTrust, smooth_noise, sway
 from ...latent.procedural import GaitRanges, PointMassBiped
+from ...latent.resampling import RESAMPLE_SPACES, plan_interpolation, resample_rows
 from ...latent.skill_torch import BodyConstants, proprioceptive_skill_state, skill_state
 
 if TYPE_CHECKING:
@@ -66,27 +68,6 @@ _YAW_RATE = SKILL_LAYOUT.slice_of("base_angular_velocity").start + 2
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
 _TILT = SKILL_LAYOUT.slice_of("gravity")
 """Normalised units: fifty standard deviations of the teacher's ``z*``."""
-
-
-def plan_interpolation(grid_step: float, horizon: int, dt_star: float) -> torch.Tensor:
-    """``(L, horizon + 1)``: a plan (now, then ``horizon`` grid samples) at the body's steps.
-
-    Row ``j`` is the instant ``(j + 1) * dt_star`` after the plan was drawn, as
-    long as it lies within the plan. When the body's step equals the grid's,
-    this selects the plan's samples one by one.
-    """
-    length = math.floor(horizon * grid_step / dt_star + _TOLERANCE)
-    matrix = torch.zeros(length, horizon + 1)
-    for j in range(length):
-        position = (j + 1) * dt_star / grid_step
-        low = min(math.floor(position + _TOLERANCE), horizon)
-        weight = position - low
-        if weight < _TOLERANCE or low == horizon:
-            matrix[j, low] = 1.0
-        else:
-            matrix[j, low] = 1.0 - weight
-            matrix[j, low + 1] = weight
-    return matrix
 
 
 class ReferenceCommand(UniformVelocityCommand):
@@ -106,6 +87,9 @@ class ReferenceCommand(UniformVelocityCommand):
         if cfg.use_encoder and self.encoder is None:
             raise ValueError(f"{cfg.contract} carries no encoder")
         self.sigma = contract.sigma.to(self.device) * cfg.noise_scale
+        self.precision = contract.sigma.to(self.device)
+        """The body estimator's measured error per dimension (normalised): the unit of
+        ``estimate_noise``."""
 
         self.sensor = env.scene[cfg.sensor_name]
         foot_ids, foot_names = self.robot.find_bodies(cfg.foot_bodies, preserve_order=True)
@@ -141,6 +125,11 @@ class ReferenceCommand(UniformVelocityCommand):
             [1.0 / units.velocity, 1.0 / units.velocity, units.time], device=self.device
         )
         generator = self.generator
+        if cfg.resample_space not in RESAMPLE_SPACES:
+            raise ValueError(f"unknown resample_space {cfg.resample_space!r}")
+        self.resample_space = cfg.resample_space
+        if cfg.plan_contact not in PLAN_CONTACTS:
+            raise ValueError(f"unknown plan_contact {cfg.plan_contact!r}")
         grid_step = float(generator.grid_step)
         grid = TimeGrid(step=grid_step, samples=generator.history)
         self.interpolation = torch.tensor(
@@ -224,14 +213,18 @@ class ReferenceCommand(UniformVelocityCommand):
         """Envs whose episode follows the point-mass biped instead of the task's generator."""
         self.biped = None
         if cfg.procedural_fraction > 0.0 or cfg.procedural_probes:
+            ranges = GaitRanges(load_shape=tuple(float(v) for v in cfg.procedural_load_shape))
+            # Probes that name a load profile need the shaped biped, whatever the ranges.
+            named = any("load_shape" in p for p in (cfg.procedural_probes or []))
             self.biped = PointMassBiped(
                 n,
-                GaitRanges(),
+                ranges,
                 body_step=self.dt_star,
                 substep=grid_step / 4,
                 horizon=length * self.dt_star,
                 device=self.device,
                 seed=cfg.procedural_seed,
+                shaped=ranges.shaped or named,
             )
             offsets = torch.arange(1, length + 1, dtype=torch.float64) * self.dt_star
             self.biped.set_offsets(offsets)
@@ -255,7 +248,8 @@ class ReferenceCommand(UniformVelocityCommand):
     def __str__(self) -> str:
         return (
             f"ReferenceCommand: contract {self.cfg.contract}, dt* {self.dt_star:.4f}, "
-            f"commit {self.commit}, view {self.view}, encoder {self.encoder is not None}\n"
+            f"commit {self.commit}, view {self.view}, encoder {self.encoder is not None}, "
+            f"resample {self.resample_space}, plan contact {self.cfg.plan_contact}\n"
             + super().__str__()
         )
 
@@ -291,6 +285,10 @@ class ReferenceCommand(UniformVelocityCommand):
         params["offset"] = torch.tensor(
             [float(probes[w].get("offset", 0.5)) for w in which], device=self.device
         )
+        if any("load_shape" in p for p in probes):
+            params["load_shape"] = torch.tensor(
+                [float(probes[w].get("load_shape", 1.0)) for w in which], device=self.device
+            )
         self.biped.set_probes(torch.arange(n, device=self.device), params)
         self.probe_index = torch.tensor(which, device=self.device)
 
@@ -457,6 +455,14 @@ class ReferenceCommand(UniformVelocityCommand):
     def _estimate(self) -> torch.Tensor:
         if self.encoder is None:
             return self._true_now + self.sigma * torch.randn_like(self._true_now)
+        estimate = self._deployed_estimate()
+        if self.cfg.estimate_noise > 0.0:
+            # Robustness probe: the deployed estimate read worse, by multiples of its precision.
+            precision = self.precision * self.cfg.estimate_noise
+            estimate = estimate + precision * torch.randn_like(estimate)
+        return estimate
+
+    def _deployed_estimate(self) -> torch.Tensor:
         with torch.no_grad():
             learned = self.encoder(self.encoder_input())
         if self.cfg.estimator == "encoder":
@@ -604,7 +610,8 @@ class ReferenceCommand(UniformVelocityCommand):
             [c * moved[:, 0] - s * moved[:, 1], s * moved[:, 0] + c * moved[:, 1]], dim=-1
         )
         reference_yaw = self.start_yaw[ids] + moved[:, 2]
-        window = torch.einsum("hs,nsd->nhd", self.interpolation, self.history[ids])
+        space = self.resample_space
+        window = resample_rows(self.generator, self.interpolation, self.history[ids], space)
         command = self.vel_command_b[ids] * self.command_scale
         noise = torch.randn(len(ids), self.generator.noise_size, device=self.device)
         with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
@@ -613,7 +620,9 @@ class ReferenceCommand(UniformVelocityCommand):
         # generator's answer to them is meaningless but must stay finite.
         plan = torch.nan_to_num(plan, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
         full = torch.cat([window[:, -1:], plan], dim=1)
-        rows = torch.einsum("lk,nkd->nld", self.plan_matrix, full)
+        rows = resample_rows(self.generator, self.plan_matrix, full, space)
+        if self.cfg.plan_contact == "ground":
+            rows = ground_loaded_feet(rows, self.generator.skill_norm)
         step = float(self.generator.grid_step)
         integrals = plan_integrals(self.generator.skill_norm.inverse(plan), step)
         integrals = torch.cat([torch.zeros_like(integrals[:, :1]), integrals], dim=1)
@@ -624,9 +633,11 @@ class ReferenceCommand(UniformVelocityCommand):
             with torch.no_grad(), torch.autocast("cuda", torch.float16, self.cfg.half_precision):
                 second = self.generator.sample(window, command, torch.randn_like(noise)).float()
             second = torch.nan_to_num(second, nan=0.0).clamp(-_PLAN_LIMIT, _PLAN_LIMIT)
-            second = torch.einsum(
-                "lk,nkd->nld", self.plan_matrix, torch.cat([window[:, -1:], second], dim=1)
+            second = resample_rows(
+                self.generator, self.plan_matrix, torch.cat([window[:, -1:], second], dim=1), space
             )
+            if self.cfg.plan_contact == "ground":
+                second = ground_loaded_feet(second, self.generator.skill_norm)
             task_disagreement = (rows - second).pow(2)
         applied = torch.zeros(rows.shape[1:], device=self.device)
         if self.biped is not None:
@@ -893,6 +904,11 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     noise_scale: float = 1.0
     """Multiplies the encoder error used as noise on the true state while training."""
 
+    estimate_noise: float = 0.0
+    """On the deployed path only, a robustness probe: Gaussian noise added to the deployed
+    estimate, in multiples of the estimator's measured precision (the contract's ``sigma``).
+    0 in training and in every pre-registered evaluation."""
+
     flow_solver: str | None = None
     """Overrides the generator's integrator (``euler`` or ``midpoint``); None keeps it."""
 
@@ -909,6 +925,22 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     load_precision: str = ""
     """With ``load_space="log"``: a ``load_precision.py`` report; its ``log_rms`` is the scale."""
+
+    resample_space: str = "linear"
+    """How the contract is read between the generator's grid and the body's instants (the
+    history onto the grid, each plan back onto the body's steps): ``linear``, as every run
+    before 2026-11-04, or ``generator`` -- in the generator's own space, the loads as
+    ``log(load + 0.01)``. Linear blends of loads lengthen every stance a body is asked for,
+    by 0.02-0.03 of the duty on the NAO (``latent/resampling.py``, ``skill_space.md`` §10). A
+    body whose step equals the grid's (the G1) is bit-identical in either space."""
+
+    plan_contact: str = "as_drawn"
+    """What the task's plans say about a loaded foot's height: ``as_drawn``, as the generator
+    drew it, as every run before 2026-11-05; or ``ground`` -- each foot a plan loads above
+    the contact threshold put on the ground by its height alone
+    (:func:`~...latent.plan_contact.ground_loaded_feet`). The generator's plans hold loaded
+    feet above the ground where its teachers never did (``skill_space.md`` §10.10). The
+    procedural biped's plans are untouched."""
 
     tolerance: str = "precision"
     """``precision``: the encoder's error (a plan is a commitment); ``spread``: the
@@ -955,6 +987,12 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     """``procedural_calibration.json``: the biped's model error per component."""
 
     procedural_seed: int = 0
+
+    procedural_load_shape: tuple[float, float] = (1.0, 1.0)
+    """Range of the time warp of a walking stance's half-sine of load (``GaitRanges.load_shape``,
+    ``latent/procedural.py``): ``(1, 1)``, the half-sine, as every tracker before 2026-11-04
+    practised; ``(0.5, 2)`` adds the slow load transfers of real stances (``skill_space.md``
+    §10.5)."""
 
     plan_trust: bool = False
     """Measure each plan source's sampling noise online (``latent/plan_trust.py``): two plans a

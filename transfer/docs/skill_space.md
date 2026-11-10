@@ -4712,6 +4712,72 @@ falls). "Help" is below −2 SE, "hurt" above +2 SE.
   - 30 on rough (five arms, six decoders).
 - One Isaac process at a time.
 
+**Result** (2026-11-10, 05:14). The reading comes from
+`python transfer/scripts/w21_compare.py --output transfer/results/w21_latent.json`, the leakage
+from `w21_leakage.py` (`transfer/results/w21_leakage.json`), both run by `w21_latent.sh`.
+- *An interruption, not a deviation.* The first pass (2026-11-09, 20:34–22:20) trained the
+  generators and read the leakage, but ran no L4: the decoders' names carried a carriage return
+  from Python's output on Windows, so no tracker run was found. The fix (6fbc377) strips it and
+  keeps the first leakage reading; the resumed pass ran the 48 L4 runs. Nothing was tuned.
+- *Decoders* (step 3): W20's `xs` on the NAO; W19's `xf` on the G1, where W20 regresses on flat.
+
+Leakage beyond the `z*` window (window 0.9982 on these pairs):
+
+| Generator | Summary | Beyond | 3 SE | Gate |
+| --- | --- | --- | --- | --- |
+| `c` | 0.9971 | −0.0011 | 0.0017 | passes |
+| `m` (free summary) | 0.9994 | +0.0012 | 0.0012 | fails, at the edge |
+| `b1` (beta 0.001) | 0.9744 | −0.0238 | | passes |
+| `b2` (beta 0.01) | 0.9894 | −0.0088 | | passes |
+| `z` (beta 1.0) | 0.8192 | −0.1790 | | passes |
+
+- `m` passed on W21's earlier set of pairs (+0.0010 against 0.0013,
+  `w21_leakage_existing.json`). It sits on the gate's edge, within the pairs' noise.
+- The new generators' chain fidelity is 0.39–0.42, against `m`'s 0.33 and `c`'s 0.22. Like
+  W18's, they fail the training script's chain gate, which does not decide deployment.
+
+Contrasts, paired over the three decoders ("help" below −2 SE, "hurt" above +2 SE):
+
+| Body | Contrast | Sidestep falls | Sidestep, largest | Rough, largest | Rough falls |
+| --- | --- | --- | --- | --- | --- |
+| G1 | `m − z` (learned latent) | −32.0 ± 17.5, none | +0.011 ± 0.008, none | **−0.210 ± 0.022, help** | 0 / 10 |
+| G1 | `b1 − m` | +329.7 ± 21.9, hurt | +0.109 ± 0.012, hurt | +0.161 ± 0.013, hurt | 47 / 0 |
+| G1 | `b2 − m` | +55.7 ± 21.2, hurt | −0.011 ± 0.005, none | +0.163 ± 0.002, hurt | 20 / 0 |
+| G1 | `m − c` (bodies' data) | +26.7 ± 12.3, hurt | −0.010 ± 0.005, none | −0.018 ± 0.004, help | 0 / 0 |
+| NAO | `m − z` (learned latent) | +0.7 ± 0.3, none | **−0.024 ± 0.002, help** | +0.010 ± 0.007, none | 3 / 15 |
+| NAO | `b1 − m` | +166.0 ± 23.6, hurt | −0.006 ± 0.020, none | −0.018 ± 0.010, none | 34 / 3 |
+| NAO | `b2 − m` | −1.0 ± 0.6, none | +0.017 ± 0.001, hurt | −0.030 ± 0.014, help | 14 / 3 |
+| NAO | `m − c` (bodies' data) | +1.3 ± 0.3, hurt | −0.024 ± 0.001, help | −0.014 ± 0.003, help | 3 / 0 |
+
+Open objective on sidestep (bar: `mt17_c`'s falls plus 2, i.e. 26 on the G1 and 2 on the NAO):
+- G1, on W19's `xf`: `c` 67, `m` 147, `b1` 1136, `b2` 314, `z` 243 falls. No arm passes.
+- NAO, on W20's `xs`: `c` 0, `b2` 1 and `z` 2 pass; `m` 4 and `b1` 502 miss.
+
+The correction (reading 0), `mt17_l − mt17_m` on rough on W13's trackers:
+- G1: −0.022 ± 0.033, none; falls 20 against 21.
+- NAO: −0.019 ± 0.002, help on the deviation, but 59 falls against 11 and a speed ratio down
+  to 0.80. On the bottleneck's footing (it must hurt neither task) the MMD summary is not a
+  candidate.
+
+**The branch that applies:** the learned latent helps over `z*` alone, and no bottleneck helps
+beyond it.
+- `m − z` helps on the G1's rough (−0.210 ± 0.022, and 0 falls against 10) and on the NAO's
+  sidestep deviation (−0.024 ± 0.002), and hurts nowhere.
+- `b1` hurts both bodies on sidestep's falls; `b2` hurts the G1 on sidestep's falls and on
+  rough, and the NAO on sidestep's deviation.
+- The free summary stays. Its leakage beyond the contract is at the gate's edge (passed on one
+  set of pairs, failed by a rounding margin on the other), which this result reports rather
+  than resolves.
+
+What it shows:
+- *The history summary is not where the held-out falls come from.* Collapsing it (`z`) does not
+  reduce them on either body (G1 243 against `m`'s 147; NAO 2 against 4). This agrees with
+  §10.21: the falls are start-up failures, before the plans depend on the body.
+- *The summary carries useful gait state.* Removing it costs the G1 0.21 of largest deviation on
+  rough, a task no generator here saw.
+- *The bodies' data help the deviation on rough (both bodies) and on the NAO's sidestep, and cost
+  sidestep falls on both* (G1 +27, NAO 4 against 0), as in W18.
+
 ## What this stage hands to the next
 
 - `common/skill_state.py` and `transfer/embodiment.py`: the shared coordinates

@@ -754,7 +754,7 @@ The general correction is to train each body's tracker once on every
 skill available, and to test with a skill held out of that set. It is
 still N + M trainings, but on the union of skills rather than on one.
 That changes the requirement ("trained once, with walking"), so it is
-left to the user.
+left open.
 
 ### 7.4 The NAO
 
@@ -1001,7 +1001,7 @@ Limits and stopping rules:
 - **The NAO.** It is trained only once the G1 passes L4, and the published
   generator stays frozen for it. A twin outside the NAO's competence is
   reported as a physical limit of that body, not a transfer failure.
-- **Escalations, decided by the user.** A model-based decoder, training on
+- **Escalations, decided at review.** A model-based decoder, training on
   the union of skills, or a different length unit.
 
 **Threats to validity, declared.**
@@ -1449,7 +1449,7 @@ Limits and stopping rules:
     the teacher's segments would provide), or the chain's own rhythm matched to the
     teacher's directly.
   - *Nothing in use changed.*
-- **Iterative cycles, at the user's request:** each proposal judged on step 1's
+- **Iterative cycles, as decided at review:** each proposal judged on step 1's
   criterion, the next tried when one fails, each recorded as it ends.
 
   | cycle | what | rough (0.162) | flat (0.078) |
@@ -1507,8 +1507,17 @@ Limits and stopping rules:
 
 The design takes from the works in [related_work.md](related_work.md). Nothing below changes the zero-shot rule:
 
-- no gradient step of a body's encoder or tracker uses a task's data;
-- the G1's pretrained policies are Isaac Lab's published ones only.
+- no gradient step of a body's encoder or tracker uses a task's data; *(2026-11-06, the design for
+  the multi-task stage, `method_revision.md` §6: the generator and each body's decoder
+  train on a set of base tasks, the generator on more than one body's data (the G1's
+  experts and every body executing the base tasks), and only a held-out task, rough, is
+  excluded from every gradient step. Results under it are reported as "held-out task zero-shot", apart from every
+  earlier result, which keeps this rule.)*
+- the G1's pretrained policies are Isaac Lab's published ones only. *(2026-11-06, a
+  design decision: or trained in this repository with Isaac Lab's published recipe, only
+  the command range changed, as `G1Walk-Teacher-v0` already was. It affects which G1
+  experts may supply a generator's tasks (10.12), and nothing about the bodies' encoders
+  or trackers.)*
 
 **Adoption rule, for every phase.** A candidate replaces an incumbent (`transfer/results/incumbents.json`) only if:
 
@@ -1523,7 +1532,7 @@ S0 is:
 - L1b of the walk.
 
 **Deviation, 2026-10-24.** S0's walk is measured on the deployed path under the *autonomous*
-reference, decided by the user. Until then it used the physical one, in which the reference
+reference, decided at review. Until then it used the physical one, in which the reference
 restarts from the body at each plan. No tracker trains in that mode, and a body can steer it
 towards a slower gait. In it, round 8's new decoders walked at 0.81 and 0.85 of the teacher's
 speed; under the autonomous reference, which every tracker trains in and L4 deploys with, they
@@ -1646,7 +1655,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     weight. Two paired states -- the same planned gait at the same phase -- are held up
     differently on the two bodies. A shared `ζ` read by one shared predictor, and forbidden
     to encode the body, cannot be right on both. The test asked for the impossible.
-  - *Taken to the user.* The user chose to keep `ζ` shared and body-blind, and give each body
+  - *Decided at review:* keep `ζ` shared and body-blind, and give each body
     its own physics readout (round 2).
 - **F5, round 2: the three pre-registered checks pass** (`free_latent_f5_r2.json`; `ζ` shared,
   each body's head trained on its own procedural data, centre of pressure as a fraction of
@@ -1697,7 +1706,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     trunk and the height step by step, about as the teachers' bodies do, plus about 30 %
     sampling noise. The biped's plans held the trunk fixed. The prior turned the sway into joint
     motion its residual never practised.
-  - *Round 2 is the user's choice* (`plan_trust.py`, variant v2t):
+  - *Round 2, as decided at review* (`plan_trust.py`, variant v2t):
     - the prior trusts each plan by its measured sampling noise;
     - it aims the trunk at the plan's slow tilt;
     - the biped's plans carry the measured noise and the gait's trunk sway.
@@ -1743,10 +1752,10 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     v2t is level on rough (15 %), better on the grid (35 against 32), worse on the corners
     (25 against 27) and on flat (4 falls; the gate missed on speed, ratio up to 1.19). Both
     from-scratch trackers stay well below the incumbent, which has three times the training.
-    The user's rule applies: a round that does not pass is reported and reframed, not
+    The project's rule applies: a round that does not pass is reported and reframed, not
     concluded.
   - *F1, under the deployed estimator, G1:* `rough_b4` falls 0/192 against `rough_b3`'s 4/190
-    (about 2 SE). The NAO's half of the re-baseline is left: the run paused when the user's own
+    (about 2 SE). The NAO's half of the re-baseline is left: the run paused when other
     jobs needed the GPU.
 - **F1 decided, under the deployed estimator** (`zero_shot_{g1_r3_6194_sym_v3,nao_r1_3498_sym_v3}_*_auto_kin_l4_*.json`).
   Falls over the three commands; "passes" is at the body's rate:
@@ -1948,7 +1957,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
     pre-registered bar, though: more cells mastered by over two standard errors, where it
     has one probe. The duty moves by six standard errors, but across the probes' tolerance
     in few of them.
-  - *Seeds decide it* (`logload_seeds.sh`, `compare_seeds.py`; the user's choice of
+  - *Seeds decide it* (`logload_seeds.sh`, `compare_seeds.py`; decided on
     2026-10-25). Three seeds per arm (41, 42, 43), each the incumbent continued as the
     control, with only the load's space differing. Statistic: the difference in probes passed
     per seed; standard error from a hierarchical bootstrap over the probes and, within each
@@ -1994,7 +2003,7 @@ Training constraints are Lagrangian, with a bound that is measured, not chosen.
       stays 0.14 off, and forward gets worse (0.12 against 0.07).
     - *Both arms walk too fast* (1.64 and 1.32 of the teacher's speed).
   - *By the rule it is not adopted:* it regresses on S0 (the walk) and on the family's duty.
-    As the user's rule has it, the round is reported and reframed, not concluded. The core,
+    As the project's rule has it, the round is reported and reframed, not concluded. The core,
     distilled the same way, also walks slow (0.85, `zero_shot_g1_warm_core_walk_kin.json`), so
     the slowdown may come with the distillation rather than with the prior. The next check is
     a distilled student's walk before PPO.
@@ -2213,7 +2222,7 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
   (`flat_dart`, `flat_dagger_{1,2}`), so the generator produces 2–3 times the light contact
   it was trained on, with slightly too many contact changes per plan: a learned property
   of every flow variant tried.
-- **Not pursued here, for the user.** A generator that represents contact explicitly -- a
+- **Not pursued here; left open.** A generator that represents contact explicitly -- a
   discrete contact channel next to the continuous loads, as the event model of §7 did for
   timing alone -- is the structural option; it means retraining every task generator and
   re-running S0, so it waits for review. The tracker side (W3) does not depend on it: B1,
@@ -2259,7 +2268,7 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
     error of the twelve paired differences, on at least one foot.
   - *If it holds,* the failure seen on rough is reproduced inside the family, with no
     task, and step 3 is its correction. *If not,* steps 3 and 4 are not run, and the
-    finding goes to the user for a new framing.
+    finding is reported for a new framing.
   - *The NAO.* Its own step-1 result decides step 4 the same way.
 - **Step 3, the G1.**
   - *Training.* `r3_6194` continued for 1000 iterations exactly as S's seeds were
@@ -2301,7 +2310,7 @@ result of every method (`transfer/results/contact_fidelity_table.json`, from
     feet, the touchdown 0.11 `T` early.
   - *What follows, as pre-registered.* Steps 3 and 4 are not run. Rough's early lift-off is
     not reproduced inside the family by the shape of the load transfer, so the half-sine
-    family is not shown to be its cause. The finding goes to the user for a new framing.
+    family is not shown to be its cause. The finding is reported for a new framing.
     The generator's extra contact changes per plan (10.4: 3.21–3.73 against the teacher's
     2.92) and rough's irregular steps remain, as hypotheses.
   - *The code stays.* `GaitRanges.load_shape` is off by default and bit-identical when off;
@@ -2403,7 +2412,7 @@ as instrumentation: it decides nothing, and it is reported apart.
       (turning, duty 0.106 against the 0.10 limit) for not failing under a degraded
       estimate.
     - *Whether robustness belongs in the regression suite* is a change to the criterion,
-      and so the user's call. It is put to them in the recommendation (report §7).
+      and so a decision for review. It is put in the recommendation (report §7).
 
 ### 10.8 The NAO's sole point is not where its foot rests; pre-registered (W6)
 
@@ -2846,7 +2855,7 @@ deployed path, S's three seeds of each body, both skills, three commands).
   - Flat L4 is better on all three seeds, and the walk is as above.
   - The NAO's deployment is unchanged, so its half of S0 is unaffected.
   - **Not written into `incumbents.json`.** The assignment keeps the original incumbents, and
-    adoption is the user's call at review. The candidate is recorded in
+    adoption is decided at review. The candidate is recorded in
     `transfer/results/candidates.json`.
 
 **W8n, pre-registered (2026-11-05, after W8's result, before W6 has trained).**
@@ -2898,6 +2907,1876 @@ is the only tracker. As drawn → grounded, mean over three commands, deployed p
   rough. A test would read the NAO's rough stance level against the terrain under the
   foot. It is not queued: no NAO candidate depends on it, and the G1's candidate does not
   touch the NAO.
+
+### 10.11 The plans slide their stance feet; pre-registered (W9)
+
+**Measured** (`transfer/scripts/plan_slip.py`, `transfer/results/plan_slip.json`; the
+offline check in `transfer/scripts/stick_offline.py`, `transfer/results/stick_offline.json`;
+the theory in [`method_revision.md`](method_revision.md)).
+- *A loaded foot moves in the plans.* Median horizontal speed of a foot above the contact
+  threshold, `V`:
+  - teachers 0.0020 (flat), 0.0022 (rough), 0.0017 (walk);
+  - the procedural plans the trackers practise on 0.0000, the walk contract's plans 0.009
+    (NAO) and 0.014 (G1);
+  - the skill plans 0.10–0.12 on both bodies, 0.088–0.115 under firm load.
+
+  W8's grounding leaves this unchanged.
+- *The bodies.* The G1 does not follow the slide (0.004–0.006). The NAO drags its stance
+  foot at 0.042–0.046 on the skills, against 0.016 on the walk.
+- *It is the generator's own.* Plans drawn offline from the teachers' histories slide at
+  0.114 (flat) and 0.124 (rough). The most consistent of eight draws still slides at
+  0.100 and 0.110.
+
+**Pre-registered (2026-11-06, before any run).**
+- **Hypothesis.** A plan whose loaded foot moves asks for what no body can do, the same
+  inconsistency W8 removed for the height. Holding the loaded feet still as well as
+  grounding them improves on grounding alone on the G1, and on the plans as drawn on the
+  NAO.
+- **Change.** `HUMANOID_PLAN_CONTACT=stick` (`latent/plan_contact.stick_loaded_feet`).
+  Each foot a plan loads above the contact threshold gets its sole on the ground and its
+  sole velocity set to zero. Nothing else changes, nothing is trained, and the default
+  stays `as_drawn`.
+- **Test** (`transfer/scripts/w9_stick.sh`). S's three G1 seeds and the three NAO
+  trackers, frozen, through L4 of `flat_dagger2` and `rough_b4` and S0's walk, under W8's
+  conditions with `stick`.
+- **Criterion** (`transfer/scripts/w9_compare.py` → `transfer/results/w9_stick.json`).
+  - *G1, against its W8 `ground` captures* (the recorded candidate): rough's largest gate C
+    deviation falls by more than 2 SE of the three paired differences; flat's rises by no
+    more than 2 SE.
+  - *NAO, against the plans as drawn* (its deployment; grounding hurt it): the duty
+    deviation over both skills falls by more than 2 SE, which is W8's NAO criterion.
+  - *No regression*, per body: falls at most two more in total, speed ratio at least 0.9 at
+    every command, S0's walk passing.
+  - *Reported beside it:* the other baseline for each body (G1 as drawn, NAO grounded),
+    contact metrics, and the bodies' loaded-foot speed.
+- **Reading.**
+  - *G1 passes:* a second G1 candidate, recorded in `candidates.json` beside
+    `g1_plan_contact_ground`, not adopted.
+  - *Fails:* reported as a fact with a reframing; realisations 2 and 3 of
+    `method_revision.md` wait for review.
+  - *NAO:* reported either way; no NAO candidate without a pass.
+- **Order and budget.** About 2.5 h of simulator time behind the room waiter. Nothing
+  else is queued.
+  *(2026-11-06: W11, 10.12, is now queued after it.)*
+
+**W9 result (2026-11-06, 10:23–15:27: G1 passes, NAO fails).**
+`python transfer/scripts/w9_compare.py --output transfer/results/w9_stick.json`. Each figure
+is the mean over the three commands, on the deployed path.
+
+*G1, `ground` → `stick` (the recorded candidate → the change):*
+
+| Seed | Rough, largest | Rough, gate C passes | Flat, largest | Flat, gate C passes | Falls | Walk speed |
+| --- | --- | --- | --- | --- | --- | --- |
+| `warm_r3_logload_sym` | 0.128 → 0.101 | 0 → 1 of 3 | 0.070 → 0.046 | 3 → 3 | 0 → 0 | 1.067 → 1.090 |
+| `warm_r3_s42_log_sym` | 0.128 → 0.108 | 0 → 1 of 3 | 0.071 → 0.042 | 3 → 3 | 0 → 0 | 1.064 → 1.078 |
+| `warm_r3_s43_log_sym` | 0.120 → 0.096 | 0 → 3 of 3 | 0.065 → 0.041 | 3 → 3 | 0 → 0 | 1.067 → 1.089 |
+
+- **Target met.** Rough's largest deviation falls by 0.024 ± 0.002 (paired, about 11 SE).
+  Flat's falls too, by 0.025 ± 0.001, where the criterion only required it not to rise.
+- **No regression.** No falls, the speed ratio is at least 1.006 at every command, and S0's
+  walk passes. **The G1 passes.**
+- *Against the plans as drawn* (`beside`): rough −0.051 ± 0.002 and flat −0.044 ± 0.002.
+  - Rough's mean largest deviation is 0.102, against 0.153 as drawn and B1's 0.072. B1 is
+    trained on rough's own plans (`transfer/paper/README.md`, B1's note).
+  - Zero-shot closes 63 % of that gap (0.051 of 0.081). Grounding alone closed 34 %.
+  - It is the first zero-shot G1 tracker to pass any rough command at gate C: 5 of 9.
+- *Contact.* Where the plan is light, the body is airborne less often: −0.071 ± 0.004 on
+  rough and −0.103 ± 0.001 on flat. Lift-off lags the plan by 0.009 `T` more. The
+  body's duty factor rises by 0.012 to 0.014, and the gate C duty deviation falls by 0.026
+  (rough) and 0.020 (flat).
+- *The body's own slip* (`body_drag`). On rough it is 0.0056–0.0061 `V` as drawn,
+  0.0047–0.0049 grounded and 0.0046–0.0047 held still. The G1 never followed the slide, so
+  the gain is not a stance that slips less.
+
+*NAO, `as_drawn` → `stick`:*
+
+| Tracker | Rough, largest | Rough, duty deviation | Flat, largest | Flat, duty deviation | Body duty (rough) | Falls |
+| --- | --- | --- | --- | --- | --- | --- |
+| `r1_3498_sym_v3` | 0.154 → 0.206 | 0.090 → 0.115 | 0.174 → 0.192 | 0.158 → 0.180 | 0.585 → 0.599 | 0 → 0 |
+| `warm_nao_r1_s32_sym` | 0.164 → 0.219 | 0.096 → 0.122 | 0.187 → 0.208 | 0.171 → 0.195 | 0.590 → 0.606 | 0 → 0 |
+| `warm_nao_r1_s33_sym` | 0.169 → 0.215 | 0.101 → 0.124 | 0.209 → 0.232 | 0.176 → 0.197 | 0.596 → 0.609 | 0 → 0 |
+
+- **Target missed, the other way.** The duty deviation over both skills rises by
+  0.024 ± 0.001. Rough's largest deviation rises by 0.051 ± 0.003 and flat's by
+  0.021 ± 0.001. Grounding alone (`beside`) raised the duty deviation by 0.013 ± 0.001;
+  holding the feet still adds to it.
+- No falls; speed ratio at least 1.002; the walk passes (0.994–0.997 → 1.081–1.084).
+- *What moved.* The airborne-where-light share falls by 0.083 (rough) and 0.095 (flat), as
+  on the G1. The NAO's stance slip falls from 0.045–0.048 to 0.042–0.044 `V` on rough. Its
+  body duty rises by 0.011 to 0.014, again as on the G1.
+- **Reading.** Holding stance feet still lengthens stance on both bodies. On the G1 that
+  brings the body's contact pattern towards the plan's. On the NAO it moves it away.
+  - *Hypothesis, not measured here:* the NAO already holds stance longer than the plans ask
+    (body duty under `stick` 0.59–0.61 on rough, against the G1's 0.49–0.50). This is the
+    short, low swing of the contact-fidelity study (10.9), and a stricter stance target
+    deepens it.
+  - This is consistent with W7c, where faster drives fixed lift and duty and training on
+    them did not.
+- **Adoption check for the G1** (`incumbents.json`'s rule, run 2026-11-06 at `d7f881a`).
+  - pytest and ruff pass.
+  - The chains of `rough_b3`, `rough_b4` and `flat_b4` are byte-identical to their records
+    (`regression_s0.sh`'s chain loop).
+  - Flat is better on all three seeds, and the walk passes.
+  - The NAO's deployment keeps `as_drawn`.
+- **Recorded.** The G1 candidate `g1_plan_contact_stick` is added to
+  `transfer/results/candidates.json` beside `g1_plan_contact_ground`, as its alternative.
+  It is not adopted: adoption is decided at review. No NAO candidate.
+
+### 10.12 Base tasks for a multi-task generator; pre-registered (W11)
+
+**Context.** The target design (`method_revision.md` §6):
+- a generator trained on about five base tasks, whose training may see several bodies;
+- each body's decoder trained once;
+- zero-shot at inference, tested by leaving a task out.
+
+On 2026-11-06 it was decided that the extra experts are trained on the G1 with Isaac
+Lab's recipe. The repository had three tasks: the walk (`G1Walk-Teacher-v0`, itself
+trained here with Isaac Lab's recipe and a narrowed command range) and the published flat
+and rough policies.
+
+**The three new tasks** (`g1/tasks/g1_base`; tests in `tests/test_g1_base_tasks.py`).
+Isaac Lab's `G1FlatEnvCfg` and `G1FlatPPORunnerCfg` (1500 iterations), with only the
+command range changed:
+
+| Task | Command range | Play commands (m/s) |
+| --- | --- | --- |
+| backward | `lin_vel_x` −0.5 to 0 | −0.2, −0.35, −0.5 |
+| sidestep | `lin_vel_y` −0.5 to 0.5 | 0.25, 0.45, −0.35 (lateral) |
+| jog | `lin_vel_x` 1.0 to 1.5 | 1.0, 1.25, 1.5 |
+
+The ranges are free parameters, declared as such.
+
+**Left out, with reasons.**
+- *Turning in place.* The recipe's `feet_air_time_positive_biped` pays nothing below
+  0.1 m/s of linear command, so it asks for no stepping.
+- *Stairs.* `z*` carries no terrain; even rough runs on a plane (`G1RoughOnFlat`).
+
+**Test** (`transfer/scripts/w11_experts.sh`, after W9).
+1. *Smoke.* Three iterations; the saved `env.yaml` must carry the backward range.
+2. *Per task.*
+   - train: seed 42, 4096 environments;
+   - export: `export_actor.py`;
+   - DART rollouts for the generator (`held_out_task.sh`'s settings: 128 environments,
+     1000 steps, action noise 0.1, standing share 0.3, resampling every 2–6 s);
+   - play rollouts at the three commands (32 environments, 900 steps).
+
+**Acceptance** (`transfer/scripts/w11_accept.py` → `transfer/results/w11_experts.json`).
+A task enters the generator's set if, at each of its three play commands:
+- at most one episode ends in a fall;
+- the CoM's speed along the commanded axis is 0.8–1.2 of the command;
+- each foot's duty factor is at most 0.9, so the expert steps.
+
+These select tasks; none is a condition in training. A rejected task is reported with its
+figures, and its recipe is not tuned afterwards.
+
+**Budget.** The walk teacher took 2.0 h for 1500 iterations (`logs/rsl_rl/g1_flat/
+2026-09-23_13-28-36_teacher`, checkpoints 0 to 1499). Three experts are about 6 h, plus
+about 1 h of captures. The multi-task generator and its leave-one-task-out test are
+pre-registered after this, on the accepted set.
+
+**Interim result and a declared deviation (2026-11-06, about 21:45).** Backward and
+sidestep are done; jog is still training. The figures come from
+`python transfer/scripts/w11_accept.py --output transfer/results/w11_experts.json`, which
+also writes them to that file.
+
+| Task | Command (m/s) | Achieved | Ratio | Largest duty | Falls | Registered | Calibrated |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| backward | −0.20 | −0.421 | 2.10 | 0.82 | 147 | fail | fail |
+| backward | −0.35 | −0.518 | 1.48 | 0.78 | 121 | fail | fail |
+| backward | −0.50 | −0.567 | 1.13 | 0.73 | 63 | fail | fail |
+| sidestep | 0.25 | 0.196 | 0.78 | 0.86 | 1 | fail | pass |
+| sidestep | 0.45 | 0.399 | 0.89 | 0.59 | 0 | pass | pass |
+| sidestep | −0.35 | −0.312 | 0.89 | 0.80 | 0 | pass | pass |
+
+- **The registered bound rejects the reference already in the set.**
+  - *What was checked.* The same check on the published flat expert. That expert entered
+    the task set without passing the check, so its play rollouts make a fair reference:
+    `g1/rollouts/flat_play_forward.npz` and `flat_play_fast.npz`, captured in the same play
+    variant with action noise 0, 32 × 900 steps.
+  - *What it does.* At 0.25 m/s it achieves 0.183, a ratio of 0.73; at 0.6 m/s, 0.485 (0.81).
+    It never falls, and its largest duty is 0.53.
+  - *Why.* Isaac Lab's recipe under-tracks its lowest commands. The 0.8 bound was set
+    without reading what the recipe achieves there.
+- **The deviation.**
+  - *The calibrated reading.* The speed bound becomes the reference's smallest ratio,
+    0.733, which the script computes. Every other criterion is unchanged.
+  - *When.* Declared after backward's and sidestep's figures were seen, but before jog's
+    play rollouts exist.
+  - *What is kept.* `w11_experts.json` keeps the registered reading as `accepted`. W12 and
+    the task set read `accepted_calibrated`.
+  - *What it changes.* Sidestep enters. Under the registered bound it fails only at
+    0.25 m/s, by 0.02. Its recipe is untouched.
+- **Backward is rejected under both readings**, and its failure looks like the play
+  variant's.
+  - *Its DART capture.* The same exported policy in the training variant, with action noise
+    0.1, falls 2 times in 128 × 1000 steps. It under-tracks rather than over-speeds: −0.287
+    at −0.35, −0.210 at −0.25 (`dart_tracking` in the same file).
+  - *Not the play variant alone.* Sidestep's play rollouts, in the same variant, fall at
+    most once.
+- **Pre-registered reading of the 2 × 2 check.** The script is
+  `transfer/scripts/w11_play_check.sh`, which runs after W11. This reading is fixed now,
+  before it runs. All four cells are at −0.35 m/s and are read with the same check and the
+  calibrated bound.
+  - *The play variant is the cause:* the training variant without action noise passes and
+    the play variant fails. Backward is then re-read at its three commands in the training
+    variant, and its L4 references are re-captured there. That would be a second declared
+    deviation: the generator learns from that variant.
+  - *The expert depends on action noise:* only the cells with noise 0.1 pass. Backward stays
+    rejected, because the experts are deployed without noise.
+  - *Every cell fails:* the cause is the fixed-command protocol, which every task shares.
+    Backward stays rejected, and that is reported.
+
+**Result (2026-11-06, 23:00).** Three commands produce it:
+- `bash transfer/scripts/w11_play_check.sh`, the 2 × 2 check;
+- `bash transfer/scripts/w11_backward_train.sh`;
+- `python transfer/scripts/w11_accept.py --output transfer/results/w11_experts.json`, which
+  the second script runs at its end.
+
+*The 2 × 2, at −0.35 m/s:*
+
+| Variant | Action noise | Achieved | Ratio | Largest duty | Falls |
+| --- | --- | --- | --- | --- | --- |
+| play | 0 (W11's) | −0.518 | 1.48 | 0.78 | 121 |
+| play | 0.1 | −0.376 | 1.08 | 0.73 | 15 |
+| training | 0 | −0.294 | 0.84 | 0.80 | 0 |
+| training | 0.1 | −0.310 | 0.88 | 0.78 | 0 |
+
+The first pre-registered case holds: the training variant without action noise passes,
+and the play variant fails. Backward was therefore re-read at its three commands in the
+training variant. That is the second declared deviation.
+
+*Backward in the training variant, and jog:*
+
+| Task | Command (m/s) | Achieved | Ratio | Largest duty | Falls |
+| --- | --- | --- | --- | --- | --- |
+| backward | −0.20 | −0.170 | 0.85 | 0.87 | 0 |
+| backward | −0.35 | −0.294 | 0.84 | 0.80 | 0 |
+| backward | −0.50 | −0.410 | 0.82 | 0.73 | 0 |
+| jog | 1.00 | 0.988 | 0.99 | 0.53 | 0 |
+| jog | 1.25 | 1.233 | 0.99 | 0.52 | 0 |
+| jog | 1.50 | 1.469 | 0.98 | 0.53 | 0 |
+
+*Decision.*
+- The registered reading (`accepted`) accepts jog only.
+- The reading with both declared deviations (`accepted_calibrated`) accepts backward,
+  sidestep and jog. In the training variant, backward passes even the registered 0.8 bound.
+
+*What stays declared.*
+- **Backward's L4 references come from its training variant**
+  (`base_backward_train_<name>.npz`). That variant has observation noise and random
+  pushes, which neither the other tasks' play rollouts nor the decoders' L4 runs have.
+- **Why the expert falls when observation noise and pushes are removed is not
+  explained.** In the play variant it runs faster than commanded (ratio 1.48 at −0.35) and
+  falls. Adding action noise alone cuts the falls from 121 to 15. One hypothesis, not
+  tested, is that the policy depends on the perturbations it was trained under.
+
+### 10.13 One generator per new base task; pre-registered (W12)
+
+**Context.** Step 2 of `method_revision.md` §6: one generator per base task, from the G1's
+experts. The walk (`walk_dagger3e`) and flat (`flat_dagger2`, `flat_b4`) already have
+theirs. This trains one for each new task that W11 accepts. Rough's generators are not used
+anywhere in the stage.
+
+**Pre-registered (2026-11-06, while W11 trains, before any expert exists).**
+- **Recipe**, the same as `rough_b4` and `flat_b4` (`chain_study_b4.sh`):
+  - horizon 20, commit 13, midpoint solver with 8 flow steps, log-warped loads;
+  - the G1 body's encoder (`walk_zs_g1_r3_6194_sym`), trained under its noise and
+    noise-conditional.
+- **Data:** the expert's DART rollouts (`g1/rollouts/base_<task>_dart.npz`) only.
+- **Chain fidelity** is read on one play rollout per task, its middle command: backward
+  `mid` (−0.35 m/s), sidestep `left` (0.25 m/s), jog `mid` (1.25 m/s). This choice is
+  declared, not derived.
+- **Declared asymmetry.** The walk's and flat's generators had DAgger rounds; these do not.
+  - A DAgger round needs a G1 decoder that executes the task in a closed loop.
+  - The current G1 tracker cannot: 5 of W11's 9 play commands lie outside the family's
+    ranges (`method_revision.md` §6).
+  - A DAgger round for the new tasks is therefore possible only after step 3, and would be
+    pre-registered then.
+- **Gate:** `train_contract.py`'s own, fixed before training. On held-out data, the instant
+  each foot's contact next changes is calibrated to within 0.05. It is reported in
+  `transfer/results/contract_base_<task>_b4.json`.
+- **Reading.** A task enters the multi-task stage if its expert was accepted (W11) and its
+  generator passes the gate. A failing generator is reported with its figures, and its
+  recipe is not tuned afterwards.
+- **Run:** `transfer/scripts/w12_task_generators.sh`, after W11, offline. Budget: about
+  12 min per generator (`flat_b4`'s generator took 704 s), so under 1 h. Nothing of either
+  body is trained.
+
+**Result (2026-11-06, 23:08).** The generators come from
+`bash transfer/scripts/w12_task_generators.sh`, which ran twice: once on W11's first
+acceptance and once after backward's re-read. The figures are in
+`transfer/results/contract_base_<task>_b4.json`.
+
+| Task | Calibration error (left, right) | Gate | Chain fidelity |
+| --- | --- | --- | --- |
+| backward | 0.0612, 0.0623 | fails | 0.085 ± 0.013 |
+| sidestep | 0.0388, 0.0514 | fails | 0.422 ± 0.026 |
+| jog | 0.0132, 0.0038 | passes | 0.064 ± 0.004 |
+
+- **Backward's chain fidelity** is read on its rollout from the training variant
+  (`base_backward_train_mid.npz`), as §10.12's second deviation requires. W12's script
+  takes that path from a per-task map.
+- **The gate is not miscalibrated for this set.** Every generator already in the set
+  passes it with margin: `walk_dagger3`, 0.0044 and 0.0049; `flat_dagger2`, 0.0076 and
+  0.0063. So do the DART-only generators trained on flat and rough: `flat_h20`, 0.0067 and
+  0.0053; `rough_h20`, 0.030 and 0.020. Unlike the speed bound, nothing here calls for a
+  deviation.
+- **A cause that does not fit.** The walk's DART-only generator also failed this gate
+  (`walk`, 0.060), and data with starts fixed it (`walk_starts`, 0.0044). W11's captures
+  already include starts: a standing share of 0.3 and resampling every 2–6 s. And
+  `flat_h20` passed with the same amount of data. So "more data" is not supported, and no
+  data round is run.
+- **Decision, as pre-registered.** Backward and sidestep leave this stage. Their recipe is
+  not tuned. The multi-task stage has the walk (task 0), flat and jog. Rough stays held out.
+- **The way back is the one this section already declared:** a DAgger round on these two
+  tasks, once a G1 decoder executes them. W13 measures that precondition beside its
+  criteria (§10.14).
+
+### 10.14 Each body's decoder trained once on the base tasks; pre-registered (W13)
+
+**Context.** Step 3 of `method_revision.md` §6. Each body's decoder trains once on the base
+tasks' plans with the procedural family, and is then frozen for every task, including the
+held-out one. S's trackers saw the walk and the family only. 5 of W11's 9 play commands lie
+outside the family's ranges, so S cannot be expected to execute the new tasks.
+
+**The change** (`a8a029b`, `ReferenceCommandCfg.tasks`; the task set from
+`transfer/scripts/base_task_set.py` → `transfer/results/base_tasks.json`).
+- Every episode that is not procedural follows one task, drawn uniformly. The tracker is
+  not told which.
+- *The tasks:* the walk (the contract's, task 0), flat (`flat_dagger2`, L4's generator) and
+  each new task that W11 accepts and W12 gates.
+- *Commands:* each task's ranges, dimensionless, so each body receives the task in its own
+  units.
+- *Starts:* the G1 starts inside each expert's states; the NAO seeds its history from the
+  same captures' windows, as it does for the walk.
+- **Rough is in none of it.** The builder and `latent/task_set.py` refuse it, and
+  `tests/test_task_set.py` checks the recorded set.
+
+**Pre-registered (2026-11-06, before any run).**
+- **Recipe:** S's exactly (`paper_queue.sh`): each body's incumbent continued for 1000
+  iterations in its own conditions at its checkpoint's learning rate.
+  - The G1 from `zs_g1_r3_loss` `model_6194`, seeds 41, 42 and 43.
+  - The NAO from `zs_nao_r1` `model_3498`, seeds 31, 32 and 33.
+  - Two changes from S: the task set is added, and the family's share is 0.5 instead of
+    0.7. The share is a free parameter, declared; it gives each task about a tenth of the
+    episodes.
+- **Control:** S's trackers, paired by seed: on the G1 `warm_r3_logload_sym`,
+  `warm_r3_s42_log_sym` and `warm_r3_s43_log_sym`; on the NAO `r1_3498_sym_v3`,
+  `warm_nao_r1_s32_sym` and `warm_nao_r1_s33_sym`.
+  - *Declared:* the NAO's first control is its incumbent itself, as in W8, W9 and the
+    paper. That pair also differs by the 1000 iterations.
+- **Smoke first:** 3 iterations on each body. The log must carry a `task_<name>` metric for
+  every task, and no error. Otherwise W13 stops.
+- **Evaluation**, on the deployed path and symmetrized, as S was:
+  - each W13 tracker: encoder refit, S0's walk, and flat's L4;
+  - every tracker of both arms: each new task's L4 at its middle command (backward −0.35,
+    sidestep 0.25 lateral, jog 1.25 m/s), against its expert's play rollout.
+- **Criterion** (`transfer/scripts/w13_compare.py` → `transfer/results/w13_decoders.json`).
+  - *Target, per body:* over the new tasks, the largest gate C deviation falls by more than
+    2 SE of the three paired differences.
+  - *Executes, per body and task:* every W13 tracker has at most one fall and a speed ratio
+    of 0.8–1.2. This is W11's expert criterion without the duty term.
+    - *Amended on 2026-11-06, before any W13 run.* The ratio is now the CoM's dimensionless
+      speed along the task's commanded axis, divided by the expert's own speed in its play
+      rollout at the same command. Both are taken once settled, as L4 reads speed.
+    - *Why.* L4's `speed_ratio` uses the forward axis only, so it is undefined for sidestep.
+      And W11's experts do not all reach their command (10.12).
+    - *What does not change.* The target's gate C deviations do not depend on direction:
+      stride length uses the norm of the horizontal speed.
+  - *No regression:* flat's largest deviation rises by no more than 2 SE; falls rise by at
+    most two in total; S0's walk passes on every W13 tracker.
+- **Reading.**
+  - A body whose decoders execute a task can produce that task's data for step 4.
+  - A task no body executes leaves the generator's multi-body set but stays in its G1 set.
+  - A failure is reported with its figures and a reframing. It is not tuned afterwards.
+- **The task set that W11 and W12 produced:** walk, flat and jog. "The new tasks" above is
+  jog alone. `python transfer/scripts/base_task_set.py --output
+  transfer/results/base_tasks.json` gives jog's range as x 1.0–1.5 m/s, with no lateral
+  speed and no yaw.
+  - *The builder's range check.* It now leaves out exactly-zero commands, which are the
+    capture's standing share. Jog's range excludes zero speed, yet its capture stands 31 %
+    of the time. The standing mode is the command term's on every task.
+- **Beside the criteria, added before W13 ran.** Backward and sidestep, which W12's gate
+  left out, are run on the G1's three W13 trackers at their middle command. They are read
+  with the same "executes" rule (`g1_gated_out` in `w13_decoders.json`). A decoder that
+  executes them is the precondition for their DAgger round (10.13). This is not a W13
+  criterion, and nothing is trained on those tasks.
+- **Not read here:** rough. It waits for the multi-task generator (step 6).
+- **Run:** `transfer/scripts/w13_decoders.sh`, after W12.
+
+**The smoke run (2026-11-06, 23:16–23:25).**
+- *The G1 passed at once.* Its log carries `task_contract`, `task_flat` and `task_jog`.
+- *The NAO's first smoke run failed:* "flat_dagger2: not on the contract's grid and units".
+  - *Cause.* Every generator normalises `z*` with its own statistics. The G1's contracts
+    share one set. The NAO's walk contract, `walk_dagger2e`, fitted its own on different
+    data.
+  - *The fix.* `command.py` now maps each environment's history into the task generator's
+    units, and maps the plan back. This is an exact affine map through `z*`, applied only
+    when the statistics differ. The G1's path is unchanged.
+  - *Rerun.* The second smoke run passed. Its only logged reset happened to draw no flat or
+    jog environment, so the first NAO training log is where the share of each task is
+    checked.
+- **An open finding, not yet measured, that may bias the NAO's published results.**
+  - *What.* L4 makes the task's generator the contract, so the command term normalises
+    everything it hands the NAO tracker (history, estimate, plan) with that generator's
+    statistics, not with those the tracker trained under.
+  - *How large the input shift is* (`python transfer/scripts/units_shift.py --own
+    logs/contract/walk_dagger2e/generator.pt --other logs/contract/flat_dagger2/generator.pt
+    logs/contract/rough_b4/generator.pt`): an offset of up to 0.118 std
+    (`foot_position.left.y`), 0.033 on average, and a scale change of up to 17.6 %
+    (`foot_velocity.left.y`).
+  - *Who is affected.* Every NAO evaluation on a G1-derived task generator: flat and rough
+    in the paper, W8 and W9's NAO arms. The G1 is not affected.
+  - *What is not known.* How much it moves those results. That needs a re-evaluation with
+    the tracker's own units pinned, to be pre-registered separately.
+  - *Why W13 is unchanged.* S's NAO results were read the same way, and W13 is paired
+    against them, so W13 keeps that evaluation path for both arms.
+- **Budget**, from S's logs: 1000 iterations took 1.45 h on the G1 and 2.33 h on the NAO,
+  so about 11.5 h of training before any slowdown from drawing several tasks' plans. The
+  evaluation adds about 6–8 h.
+
+**A script fix, before any criterion was read (2026-11-07, 05:45).**
+- *What was wrong.* `w13_compare.walk()` took the ladder's `verdict["passes"]`, which adds
+  gate C's signature tolerance. S0's walk check, as W1–W9 read it (`w8_compare.py`,
+  `w9_compare.py`), is a speed ratio of at least 0.9 and a fall excess of at most 0.02.
+- *How it showed.* That reading failed the walk on S's three G1 controls too, whose stride
+  and period sit 19.5–22.7 % off on the walk. Those controls passed S0 in W8 and W9.
+- *The fix.* `walk()` now applies S0's check. The registered clause, "S0's walk passes on
+  every W13 tracker", is unchanged. It is the script that now does what the clause says.
+
+**Interim, the G1 (2026-11-07, 05:30): the three W13 trackers trained and laddered.** Read
+with the criterion's own functions. This is not the criterion: jog's L4 runs after the NAO's
+trainings.
+
+| Pair (S → W13) | Flat largest deviation | Flat falls | Flat commands passing | Walk speed | Walk signature, largest (instrumentation) |
+| --- | --- | --- | --- | --- | --- |
+| `warm_r3_logload_sym` → `mt_g1_s41_sym` | 0.0894 → 0.0699 | 0 → 0 | 3 → 3 | 1.009 → 1.007 | 0.208 → 0.176 |
+| `warm_r3_s42_log_sym` → `mt_g1_s42_sym` | 0.0903 → 0.0684 | 0 → 0 | 2 → 3 | 1.007 → 1.009 | 0.227 → 0.160 |
+| `warm_r3_s43_log_sym` → `mt_g1_s43_sym` | 0.0824 → 0.0589 | 0 → 0 | 3 → 3 | 1.004 → 1.006 | 0.209 → 0.206 |
+
+- *Flat:* the paired difference is −0.0217 ± 0.0011. Flat is now one of the decoder's
+  training tasks, so this is no longer a zero-shot reading of flat. The no-regression clause
+  holds on the G1.
+- *The walk:* S0 passes on all three. No fall excess.
+- *Not yet read:* jog (the target and "executes"), the gated-out aside, and the NAO.
+
+**Interim, the NAO's seed 31 (2026-11-07, 08:27).** One seed, against the incumbent.
+
+| Tracker | Flat largest deviation | Body duty on flat, forward (left, right) | Walk signature, largest |
+| --- | --- | --- | --- |
+| `r1_3498_sym_v3` (incumbent) | 0.174 | 0.536, 0.625 | 0.221 |
+| `warm_nao_r1_s32_sym` (S) | 0.187 | 0.553, 0.623 | 0.186 |
+| `warm_nao_r1_s33_sym` (S) | 0.209 | 0.545, 0.636 | 0.213 |
+| `mt_nao_s31_sym` (W13) | 0.376 | 0.656, 0.685 | 0.244 |
+
+- *Where it comes from.* Duty: the deviation is 0.323 against S's 0.158–0.176, while stride
+  and period stay within 0.075. The liftoff lag goes from about 0 to 0.065.
+- *Not the plans.* All four trackers are asked the same duty (0.526, 0.578 at forward). It
+  is the execution that changed.
+- *No falls; speed 1.04–1.06; S0's walk passes.*
+- *Two explanations, which this seed cannot separate.*
+  - **Units:** W13 trained the NAO on flat's plans in its own units (the fix of the smoke
+    run), and L4 shows them to it in the G1's.
+  - **Learned:** training on the tasks changed how the NAO executes any plan. The walk,
+    which L4 shows in the NAO's own units, drifts a little too.
+  - Hence W14 (10.15), pre-registered before seeds 32 and 33 exist.
+
+**Interim, the NAO's seed 32 (2026-11-07, 11:23).** The regression repeats.
+
+| Tracker | Flat largest deviation | Duty deviation on flat | Body duty on flat, forward (left, right) | Walk signature, largest |
+| --- | --- | --- | --- | --- |
+| `warm_nao_r1_s32_sym` (S) | 0.187 | 0.171 | 0.553, 0.623 | 0.186 |
+| `mt_nao_s32_sym` (W13) | 0.401 | 0.313 | 0.658, 0.657 | 0.261 |
+
+- *Paired by seed, two pairs:* W13 − S on flat's largest deviation is +0.208 ± 0.006
+  (+0.202 on seed 31, +0.214 on seed 32).
+- *Same place.* The largest field is a duty factor at every command, and is largest on the
+  left foot (0.365–0.439). Stride period moves by at most 0.068.
+- *Same asked duty* (0.526, 0.578 at forward). No falls; the minimum speed ratio is 1.035;
+  S0's walk passes (speed 0.997).
+- Units or learned is still W14's question. Its reading 2 applies only with three seeds.
+- *How it was read.* With the criterion's own functions: `w8_compare.condition` over
+  `COMMANDS`, and `w13_compare.walk`. The duties are `runs.encoder.asked.signature` and
+  `runs.encoder.signature` of the forward capture. The registered reading is
+  `w13_compare.py`'s, after jog.
+
+**Interim, the NAO's seed 33 (2026-11-07, 14:19): three seeds, read the same way.**
+
+| Tracker | Flat largest deviation | Duty deviation on flat | Body duty on flat, forward (left, right) | Walk signature, largest |
+| --- | --- | --- | --- | --- |
+| `warm_nao_r1_s33_sym` (S) | 0.209 | 0.176 | 0.545, 0.636 | 0.213 |
+| `mt_nao_s33_sym` (W13) | 0.413 | 0.326 | 0.691, 0.668 | 0.257 |
+
+- *Paired by seed, three pairs:* W13 − S on flat's largest deviation is **+0.207 ± 0.004**
+  (+0.202, +0.214, +0.204).
+  - Read as registered, in the task's units, the NAO fails W13's no-regression clause.
+  - The registered verdict stays `w13_compare.py`'s, after jog.
+- *Same place on all three.*
+  - The largest field is the left foot's duty factor (0.366–0.468), at every command.
+  - Stride period moves by at most 0.065.
+  - Asked duty is 0.526, 0.577.
+- *No falls.* The minimum speed ratio is 1.040, and S0's walk passes.
+- *What it triggers.* W14's reading 2 now applies: the regression is above 2 SE on three
+  seeds in the task's units. Its verdict, units or learned, decides how this failure is
+  read.
+
+**Result (2026-11-07, 15:29): the G1 passes; the NAO fails its target and the flat clause.**
+Read from `python transfer/scripts/w13_compare.py --output transfer/results/w13_decoders.json`,
+which printed "g1 target True executes jog; nao target False executes jog". Jog's L4 is at
+1.25 m/s. The figures are the largest gate C deviation, paired S → W13, as mean ± SE over three.
+
+| Body | Jog, per pair | Jog, paired | Flat, paired | Executes jog | Falls; S0's walk | Passes |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 | 0.082 → 0.031, 0.085 → 0.033, 0.090 → 0.029 | **−0.0546 ± 0.0030** | −0.0217 ± 0.0011 | yes: no falls, axis speed 1.009 | 0 → 0; passes | **yes** |
+| NAO | 0.022 → 0.068, 0.038 → 0.065, 0.037 → 0.072 | **+0.0359 ± 0.0057** | +0.207 ± 0.004 | yes: no falls, axis speed 1.014 | 0 → 0; passes | **no** |
+
+- *The G1.* Training its decoder on jog brings its jog deviation to about a third, with no cost
+  on flat or the walk. Jog is a training task of the W13 trackers, so this is not zero-shot.
+  Their decoders can produce jog's data for step 4.
+- *The NAO.*
+  - It misses the target: jog gets worse, not better.
+  - It fails the no-regression clause on flat.
+  - It still executes jog under the registered rule, so it can produce jog's data for step
+    4. The reading allows that, but the failure has to be read first (below).
+  - S's NAO trackers were already close to the expert on jog (0.022–0.038), well below the
+    G1's S trackers (0.082–0.090). Jog was zero-shot for S.
+- *Where the NAO's jog deviation sits* (instrumentation, seed 32, middle command).
+  - Duty factors, (left, right): the expert executes 0.513, 0.522, and the plans ask
+    0.555, 0.569.
+  - S's body executes 0.532, 0.519; W13's executes 0.547, 0.556.
+  - On jog, W13's NAO moves toward the plan's duty, which sits above the expert's. On flat,
+    it overshoots the plan: 0.658, 0.657 against an asked 0.526, 0.578 and the expert's
+    0.471, 0.528.
+  - Either way, W13's NAO holds stance longer than S's.
+- *The aside, not a criterion* (`g1_gated_out`), on the G1's W13 trackers at the middle
+  command.
+  - **Backward does not execute.** It has 6, 3 and 2 falls (at most one is allowed),
+    although the axis speed is 1.01–1.03 and the largest deviation is 0.063–0.091.
+  - **Sidestep executes.** It has no falls and an axis speed of 1.048–1.049. Its largest
+    deviation is 0.37–0.41, in stride length and period, so it executes the plans with a
+    different stride.
+  - So the precondition for a DAgger round (10.13) holds for sidestep, and not for
+    backward.
+- *Reframing, as the reading requires.* The NAO's failure is not closed here, and its
+  decoder is not retuned. W14 (10.15) was pre-registered before seeds 32 and 33 existed,
+  and asks whether the regression is the units the NAO is shown its plans in, or learned.
+  - **Units:** W13 is re-read with the NAO's pinned figures, and the failure is restated in
+    those terms.
+  - **Learned:** the failure stands as measured. Training the NAO's decoder on the G1's
+    plans then cost what it was meant to gain. The next question becomes the plans: they
+    are drawn from the G1's data and are not its own. Step 5's multi-body generator is
+    where that question goes.
+
+### 10.15 The tracker's own units on the deployed path; pre-registered (W14)
+
+**Context.** The open finding of 10.14. L4 makes the task's generator the contract.
+- *What is exact.* The body's encoder is moved into it exactly (`body_encoder.py` folds the
+  affine change into its last layer and checks it to 1e-4).
+- *What is not.* Every `z*` handed to the tracker as an observation is normalised with the
+  task generator's statistics, not with those the tracker trained under.
+- *Who is affected.*
+  - The G1's contracts share one set of statistics, so the G1 is not affected.
+  - The NAO's walk contract (`walk_dagger2e`) has its own. Every NAO reading on a
+    G1-derived generator is affected: flat and rough in the paper, W8 and W9's NAO arms,
+    W13's NAO rows.
+- *Which reading is right.* A tracker reads its observations in the units it trained in, so
+  that reading is the correct one by construction. What is unknown is how far the published
+  NAO figures move.
+
+**The change** (a units option for the command term; off by default).
+- With it, each `z*` the command term writes into the tracker's observation is mapped into
+  the tracker's own contract's units, `x ↦ N_own(N_task⁻¹(x))`. The map is affine and exact.
+- The generator still samples, and the encoder still estimates, in the task's units, exactly
+  as now. Only what the tracker reads changes.
+- *Tests.*
+  - Off, the path is byte-identical.
+  - With equal statistics (the G1), the map is the identity.
+  - The map composed with its inverse returns its input.
+- It is written after W13's last simulator process, so W13 runs on an unchanged tree.
+
+**Pre-registered (2026-11-07, 08:45, before W13's NAO seeds 32 and 33 exist).**
+- **Runs**, all on frozen trackers, symmetrized, on the deployed path as L4 runs them, with
+  the units option on (`transfer/scripts/w14_units.sh`, after W13's "done"). The current
+  path's captures are the pairs; they are already on disk.
+  - *S's three NAO trackers:* `flat_dagger2` and `rough_b4`, at the three commands. These
+    are the paper's NAO figures.
+  - *W13's three NAO trackers:* `flat_dagger2` at the three commands, and jog's L4 at its
+    middle command.
+  - *S's three NAO trackers:* jog's L4 at its middle command, so that W13's jog reading has
+    its control in the same units.
+  - *Not run:* rough on W13's trackers (it waits for step 6), and the G1 (the map is the
+    identity there).
+  - Only the encoder run is captured. The truth run is instrumentation and is not read.
+- **Readings** (`transfer/scripts/w14_compare.py` → `transfer/results/w14_units.json`),
+  pinned minus current, paired by tracker, as mean ± SE over three:
+  1. *The published NAO figures.* On S's trackers, the change in the largest deviation and
+     in the duty deviation, per skill.
+     - If either moves by more than 2 SE, the paper's NAO figures for that skill are
+       corrected to the pinned reading. The correction says what the wrong figure
+       affected (the paper's tables, the NAO arms of W8 and W9).
+     - Otherwise they are reported as unchanged within 2 SE.
+     - Either way, the pinned reading is the NAO's evaluation path from W14 on.
+  2. *What W13's NAO flat regression is.* This reading applies only if the regression holds
+     on all three seeds under the current path (W13 − S paired, flat's largest deviation,
+     above 2 SE).
+     - **Units** if, pinned, that paired difference is no longer above 2 SE and W13's
+       body duty on flat falls by more than 2 SE.
+     - **Learned** if, pinned, the difference stays above 2 SE.
+     - Neither, otherwise. That outcome is reported with its figures.
+  3. *W13's NAO "executes" on jog,* re-read pinned with W13's rule.
+- **What W14 does not change.**
+  - W13's verdict is read as registered, on the current path.
+  - If reading 1 or 2 shows the units move the NAO's readings, step 4 of
+    `method_revision.md` §6 uses the NAO's pinned readings, and says so.
+- **Budget.** 33 deployed captures at about 2 min each (W13 seed 31's ladder:
+  3.8 min per L4 command, half of it the truth run), so about 1.5 h.
+
+**Result (2026-11-07, 17:12).** `bash transfer/scripts/w14_units.sh`, then `python
+transfer/scripts/w14_compare.py --output transfer/results/w14_units.json`, which printed
+"flat_dagger2 corrected; rough_b4 corrected; regression learned; jog executes True". The run
+took 1 h 11 min.
+
+1. **The published NAO figures move. Both skills are corrected.** Pinned minus current, on
+   S's three NAO trackers:
+
+   | Skill | Largest deviation, paired | Duty deviation, paired | Per tracker (current → pinned) |
+   | --- | --- | --- | --- |
+   | `flat_dagger2` | −0.0049 ± 0.0024 | −0.0042 ± 0.0008 | 0.174 → 0.164, 0.187 → 0.184, 0.209 → 0.207 |
+   | `rough_b4` | −0.0099 ± 0.0004 | −0.0056 ± 0.0003 | 0.154 → 0.144, 0.164 → 0.155, 0.169 → 0.159 |
+
+   - *What crosses the threshold.* On rough, both the largest and the duty deviation move by
+     more than 2 SE. On flat, the duty deviation does; the largest deviation is just at 2 SE.
+   - *Direction and size.* The tracker in its own units is closer to the teacher, by 1–7 % of
+     the figure: rough 6–7 %, flat 1–6 %.
+   - *What does not move.* There are no falls either way, and the minimum speed ratio moves
+     by at most 0.001.
+   - *Consequence.* The published figures were pessimistic for the NAO. The paper's NAO
+     figures are corrected to the pinned reading; how, and what the wrong ones affected, is
+     below.
+2. **W13's NAO regression is learned.** The reading applies: on the current path, W13 − S on
+   flat's largest deviation is +0.207 ± 0.004.
+   - Pinned, it is **+0.212 ± 0.004**, still above 2 SE.
+   - W13's body duty on flat does not move with the units: pinned minus current is
+     +0.0000 ± 0.0004.
+   - W13's trackers barely move at all: 0.376 → 0.375, 0.401 → 0.403, 0.413 → 0.412. S's
+     move by 0.002–0.010.
+   - So the units explain none of the regression.
+3. **Jog, pinned.** W13's NAO still executes jog, with no falls and an axis speed of
+   1.014–1.015. W13 − S on jog's largest deviation is +0.0374 ± 0.0054 (+0.0359 ± 0.0057 on
+   the current path).
+
+**What follows, as registered.**
+- W13's NAO verdict stands: it fails its target and the flat clause. That is a property of
+  the trained decoder, not of the evaluation's units.
+- Step 4 of `method_revision.md` §6 reads the NAO on the pinned path, because reading 1
+  moved its figures. From W14 on, the pinned path is the NAO's evaluation path.
+
+**Instrumentation: where the learned regression sits** (the W13 ladder's flat captures, mean
+over the three commands and both feet, from `runs.<path>.asked.signature` and
+`runs.<path>.signature`).
+
+| Trackers | Teacher's duty | Asked | Body, true state | Body, deployed |
+| --- | --- | --- | --- | --- |
+| S (incumbent, s32, s33) | 0.496 | 0.550 | 0.617, 0.619, 0.623 | 0.575, 0.580, 0.584 |
+| W13 (s31, s32, s33) | 0.496 | 0.549–0.550 | 0.642, 0.660, 0.652 | 0.655, 0.649, 0.655 |
+
+- *Every NAO tracker holds stance longer than it is asked,* on the true-state path too. This
+  is the NAO's slow swing of the contact-fidelity study (W7: faster leg drives fixed lift and
+  duty).
+- *W13 adds to that by 0.02–0.04 on the true-state path.*
+- *The deployed path widens the gap.* S's deployed duty is lower than its true-state duty;
+  W13's is not.
+- This is read, not tested. It points to two places for the next question: the NAO's
+  execution of the G1's faster task plans in training, and how W13's tracker uses the
+  estimate.
+
+**The paper's NAO figures, corrected (2026-11-07, 18:20).** `bash
+transfer/scripts/w14_paper.sh`, then `python transfer/scripts/paper_decomposition.py --output
+transfer/paper/data/decomposition.json`, `python transfer/scripts/paper_bootstrap.py` and
+`python transfer/scripts/paper_tables.py`.
+
+| NAO, largest deviation | Rough, as published → pinned | Flat, as published → pinned |
+| --- | --- | --- |
+| Zero-shot, adopted | 0.154 → 0.144 | 0.174 → 0.164 |
+| Zero-shot, S's seeds | 0.149 ± 0.017 → 0.141 ± 0.016 | 0.186 ± 0.014 → 0.185 ± 0.012 |
+| B1 minus zero-shot | +0.197 ± 0.020 → +0.205 ± 0.019 | +0.488 ± 0.022 → +0.489 ± 0.021 |
+| B3 copy minus zero-shot | +0.045 ± 0.031 → +0.053 ± 0.030 | +0.122 ± 0.016 → +0.123 ± 0.015 |
+
+- S's seed 31 moves on rough from 0.115 to 0.110, and on flat from 0.162 to 0.164.
+- The paper's prose quoting these figures is corrected, and so is its note on the corrections
+  (`transfer/paper/README.md`).
+- *What the correction needed.*
+  - The paper's "S's seeds" rows hold S's seed 31 (`warm_nao_r1_s31_sym`), which W13 had
+    replaced with the incumbent.
+  - Its decomposition reads the adopted model's true-state runs.
+  - `transfer/scripts/w14_paper.sh` captures both on the pinned path:
+    `ZS_OWN_TRUTH=1` in `zero_shot_ladder.sh` adds the true-state run and keeps the deployed
+    capture already on disk.
+  - Added after W14's reading. It enters no W14 reading.
+- *What the wrong figures affected.*
+  - **The paper's tables:** the NAO's zero-shot rows of M, S, B1–B3, B and SE, the "minus
+    zero-shot" column of SE on the NAO, the NAO rows of T, and the NAO rows of A.
+    - B1, B2 and B3 themselves are not affected. B1 trained in the task's units and is
+      read in them, and B2 and B3 have no contract.
+    - So every NAO baseline's distance from the zero-shot model widens by the zero-shot
+      model's correction: 0.008 on rough and 0.001 on flat over S's seeds. No comparison
+      changes sign.
+    - The NAO rows of A (the ablations) are not re-read, and the table says so.
+  - **The NAO arms of W8 and W9, and W13's NAO rows.** Both arms of each pair were read on
+    the current path, so their differences carry the bias on both sides. W14 measures how
+    much a paired difference moves for W13 (+0.207 → +0.212). W8 and W9 were not re-read.
+    Their NAO arms were screens (W8 failed, W9 failed), and their verdicts are not revisited
+    on this basis.
+
+### 10.16 The family's share alone, on the NAO; pre-registered (W15)
+
+**Context.** W13's NAO decoder regresses on flat by +0.212 ± 0.004 on the pinned path, and
+W14 shows the regression is learned (10.15). Against S, W13 made two changes:
+- it added the base tasks' plans (flat and jog, beside the walk contract);
+- it lowered the procedural family's share from 0.7 to 0.5 to make room for them.
+
+The training logs (instrumentation; `python transfer/scripts/training_errors.py nao
+mt_nao_s31 warm_nao_r1 mt_nao_s32 warm_nao_r1_s32 mt_nao_s33 warm_nao_r1_s33 --output
+transfer/results/training_errors_w13_nao.json`). These are the means over the last 50
+iterations, at the same episode length (972–979 steps; the errors are summed over an
+episode).
+
+| Error over the episode | W13's NAO (s31, s32, s33) | S's NAO (s31, s32, s33) |
+| --- | --- | --- |
+| On its task plans | 15.3, 15.6, 15.6 (walk, flat and jog) | 3.4, 3.9, 4.3 (walk only) |
+| On the procedural family | 13.6, 13.5, 14.1 | 18.0, 18.6, 20.2 |
+
+- On the G1 (`training_errors_w13_g1.json`), W13's error on its task plans is 1.0–3.1 times
+  S's, and S's own moves from 7 to 38 within one run. The G1 gives no clean contrast.
+- *Read, not tested.* The NAO tracks the mixture that includes the G1's task plans about
+  four times worse than its own walk plans, and the family slightly better.
+
+**The question.** Which of W13's two changes is the regression: the task plans, or the
+family's share?
+
+**The arm** (`transfer/scripts/w15_family.sh`, `fam05_nao_s31`).
+- S's NAO recipe (`paper_queue.sh`: the incumbent `model_3498` continued 1000 iterations,
+  seed 31), with the family's share at 0.5 and no task plans (`HUMANOID_TASKS` unset).
+- Against S's seed 31 (`warm_nao_r1_s31_sym`), it changes only the family's share.
+- Against W13's seed 31 (`mt_nao_s31_sym`), it lacks only the task plans. The walk's share
+  is therefore 0.5 here against W13's 0.18.
+
+**Evaluation.**
+- As W13's `ladder()`: the encoder refit and S0's walk.
+- Then on the NAO's pinned path (W14): flat's L4 at the three commands, with the true-state
+  run, and jog's at its middle command.
+
+**Reading** (`transfer/scripts/w15_compare.py` → `transfer/results/w15_family.json`).
+- *A screen on one seed.* W13 − S on flat is 0.21, about fifteen times the SE of S's three
+  seeds, so one seed separates thirds of it.
+- *The quantities.* `d` is the arm's pinned flat largest deviation, the mean over the three
+  commands. `s` is S's seed 31, pinned (`w14_paper.sh`). `w` is W13's seed 31, pinned
+  (0.375). The gap is `g = w − s`.
+- **Task plans** if `d ≤ s + g/3`: the family's share does not regress the NAO.
+- **Family share** if `d ≥ w − g/3`.
+- **Both** otherwise.
+- *Reported beside it, not read:* falls, S0's walk, the body's duty on flat on both paths,
+  and jog's largest deviation.
+
+**What each outcome leads to.**
+- **Task plans.** As they are, the G1's task plans cost the NAO's decoder the fidelity they
+  were meant to give it. Step 5's multi-body generator is meant to address exactly this:
+  plans that hold each body's own execution. But step 4 needs the NAO executing the base
+  tasks first, through some decoder. Which decoder, W13's or S's, departs from the agreed
+  design either way. It is reframed at review, not settled here.
+- **Family share.** W13 is rerun for the NAO with the family at 0.7 and the task plans,
+  three seeds, pre-registered then.
+- **Both.** Reported with its figures and reframed at review.
+
+**Budget.** About 2.5 h of training (W13's NAO trainings took 2 h 33 min each) and
+about 30 min of evaluation. It waits for `w14_paper.sh`'s "done". One Isaac process at a
+time.
+
+**Stopped before its reading (2026-11-07, 18:19).** W15's training was stopped at about 100 of
+its 1000 iterations, by PID, and its status file says so.
+- *Why.* The plan's next steps are not held for a step whose working depends
+  on them. W15 asks why the NAO's decoder regresses, and the theory of 10.17 puts the
+  likely cure in the next step's generator.
+- *What happens next.* W16 runs now instead of after W15.
+- *No verdict is read.* The partial run `fam05_nao_s31` is kept. A resumption removes it
+  first, because `w15_family.sh` skips training when the run exists.
+
+### 10.17 The multi-task generator, with the bodies' executions; rough held out; pre-registered (W16)
+
+Steps 4–6 of `method_revision.md` §6. Pre-registered 2026-11-07, before any of its runs. Each
+choice below is stated with its reason.
+
+**What the generator does with a body's history** (`python transfer/scripts/w16_compare.py
+--asked`). The same generator asks each body for a different gait. On S's three trackers per
+body, at the three L4 commands, task units, the duty factor is:
+
+| Generator | Teacher | Asked of the G1 | G1 executes | Asked of the NAO | NAO executes |
+| --- | --- | --- | --- | --- | --- |
+| `flat_dagger2` | 0.496 | 0.515 | 0.468 | 0.550 | 0.580 |
+| `rough_b4` | 0.544 | 0.542 | 0.469 | 0.571 | 0.590 |
+
+- *What this shows.* A generator reads the history of the body executing its plans, and it
+  has only ever seen its teacher's. On the NAO's history it continues what it reads: longer
+  stance. The NAO then holds stance longer than it is asked. The deviation goes round a loop:
+  body → history → plan → body.
+- *Why it matters for the NAO.* Every intervention that lengthened stance (W8, W9) or showed
+  it the G1's faster plans (W13) made the NAO worse. The loop is a mechanism, read here and
+  not yet tested, by which its deviation feeds itself.
+
+**Step 4: the bodies execute the base tasks.**
+- *Which decoders.* W13's: trained once on the base tasks and frozen, as the design says.
+  The NAO's W13 decoder fails W13's criterion (10.14), but its failure is learned (10.15). It
+  is the decoder the design deploys, so its execution is the NAO's data. S's decoder never
+  saw the tasks, and using it would leave the design.
+- *Which captures.* One tracker per body (G1 `mt_g1_s41_sym`, NAO `mt_nao_s31_sym`), on walk,
+  flat and jog: the tasks with a generator and a decoder that executes them (10.14).
+  - Three commands per task, in the G1's units and scaled to the NAO's:
+    - walk: 0.1, 0.18 and 0.25 m/s, inside its expert's range;
+    - flat: L4's forward, fast and turning;
+    - jog: 1.0, 1.25 and 1.5 m/s.
+  - 64 environments, 900 steps, the deployed path, observing in each tracker's own units.
+  - 18 captures (`{g1,nao}/rollouts/w16_<tag>_<task>_<command>.npz`).
+- *What is excluded.* No rough. Backward and sidestep stay in the G1 set only: no generator
+  of theirs passed its gate (10.13), so no body executes their plans.
+
+**Step 5: the generators.** Each is trained on the G1 experts' DART captures of the five base
+tasks (walk, flat, backward, sidestep, jog), with the per-task recipe of W12: the G1 body's
+encoder and its noise, horizon 20, commit 13, midpoint with 8 flow steps, log-warped loads,
+noise-conditional.
+- *Training length.* 200 epochs, the number of steps a per-task generator took (1000 epochs
+  on one capture), on five captures.
+- *The arms.*
+  - `mt16_c`: the experts only. This is the control, the G1-only multi-task generator.
+  - `mt16_m`: `mt16_c`, then the bodies' histories, each paired with the future its teacher
+    went on to from the window most like it, in phase and command. This is DAgger in `z*`
+    without an expert on the body (`latent/body_data.py`, `phase_targets`).
+  - `mt16_d`: `mt16_c`, then the bodies' histories paired with their own futures, the
+    bodies' executions as demonstrations.
+  - `mt16_l`: as `mt16_m`, with the learned part trained to carry no body (below).
+- *How the body stage trains.* It is a constrained problem, as the chains are: it minimises
+  the loss on the bodies' pairs while the teacher's held-out loss stays within 2 SE of its
+  value before. It runs 100 epochs on up to 200 000 pairs. The arms differ only in that
+  stage, because all start from `mt16_c` (`--init-from`).
+- *Why `mt16_m` is the main arm and `mt16_d` its contrast.*
+  - The design says the generator "trains on the base tasks as each body executes them".
+    Read literally, that is `mt16_d`.
+  - The loop above predicts it fails. The generator would learn to continue each body's
+    deviation, and the body would enter the plans.
+  - `mt16_m` uses the same executions for what they are evidence of: the states each body
+    reaches. It learns where the teacher goes from them.
+- *The learned part beside `z*`* (the design's "parte aprendida en el latente").
+  - *What it is.* The generator conditions on `z*` itself (the latest state), the command,
+    the noise level, and a learned 64-dimensional summary of the history. That summary is
+    the learned part.
+  - *What it carries.* In the `z*`-only arms it is free to carry the body, which is the
+    loop's path into the plans.
+  - *What `mt16_l` changes.* An adversary is trained to tell the bodies apart from the
+    summary, counting the teacher's windows as the G1's. Through a reversed gradient
+    (weight 1.0), the summary is trained to make that impossible.
+  - *Why only multi-body data make it testable.* With one body there is nothing to be
+    invariant to.
+  - *The decoders are untouched.* They still read `z*` alone, so "trained once" holds.
+- *Leakage test, for every arm* (`body_data.leakage`). A fresh probe reads the summary on
+  50 000 held histories of both bodies, trained on 70 % and scored on 30 %, by balanced
+  accuracy, against the same probe on shuffled labels.
+  - **Gate for `mt16_l`.** It is evaluated in the simulator only if the probe beats its
+    control by at most 3 SE.
+  - For the other arms the leakage is reported, and the prediction is that it is there.
+
+**Step 6: rough, held out of everything.**
+- *Where.* On the six W13 trackers (G1 s41–s43, NAO s31–s33), frozen, with each arm's
+  generator moved to each tracker's encoder.
+- *How.* Rough's L4 at its three commands, on the deployed path, in each tracker's own units
+  (W14's pinned path, for both bodies).
+- *Reference.* `rough_b4`, a generator that saw rough, gives what zero-shot costs.
+- *Zero-shot status.* No rough capture, generator or plan enters steps 4–5, so this is the
+  zero-shot test of the design.
+
+**Readings** (`transfer/scripts/w16_compare.py` → `transfer/results/w16_multibody.json`). Per
+body, paired by tracker, as mean ± SE over three, on rough's largest gate C deviation (the
+mean over the commands):
+1. **What the bodies' data add:** `mt16_m − mt16_c`. "Help" below −2 SE, "hurt" above +2 SE,
+   "none" otherwise.
+2. **The theory.**
+   - `mt16_d − mt16_m` above +2 SE: "demonstrations worse", as predicted.
+   - The asked duty's distance from the teacher's, `mt16_m` against `mt16_c`: "closer"
+     below −2 SE, as predicted for the NAO.
+3. **The learned part:** `mt16_l − mt16_m`, read as 1.
+4. **What zero-shot costs:** each arm minus `rough_b4`, reported.
+5. **No regression,** per arm against `mt16_c`: at most two more falls over the three
+   trackers, and every command's speed ratio at least 0.9.
+
+Also reported: each generator's own calibration gate and chain fidelity, as W12 reports them.
+- *A generator that fails its own gate is still evaluated, and marked.* This is a
+  multi-task model checked on held-out walking, and the step-6 comparison is the question.
+
+**What each outcome leads to.**
+- *The bodies' data help the NAO* (`mt16_m`). The loop is the NAO's problem, and step 5 is
+  the method. Then the third body's question, body zero-shot, is next.
+- *Neither helps, and `mt16_d` is worse.* The loop is real, but its cure is not in the
+  data. Realisation 2's guidance or the hybrid `z*` of `method_revision.md` §4 are next.
+- *`mt16_l` helps beyond `mt16_m`.* The learned part does what `z*` alone does not, and is
+  the candidate.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the
+  reading.
+
+**Budget.** About 45 min of captures, about 45 min of generator training (four arms), and
+about 3 h of rough L4 (five arms × six trackers × three commands). It waits for W15's
+"done". One Isaac process at a time.
+
+**Result (2026-11-07, 18:21–21:58): neither the bodies' data nor demonstrations help; the
+cost of zero-shot is the task's, and an order larger.** `bash transfer/scripts/w16_multibody.sh`
+ran with no failure. Its compare (`python transfer/scripts/w16_compare.py --output
+transfer/results/w16_multibody.json`) printed "g1: bodies none, demonstrations demonstrations
+worse; nao: bodies none, demonstrations demonstrations worse".
+
+*The generators* (`contract_mt16_*.json`):
+
+| Arm | Calibration error | Own gate | Chain fidelity | Leakage (control 0.50) |
+| --- | --- | --- | --- | --- |
+| `mt16_c` | 0.046 / 0.043 | passes | 0.239 | 0.998 |
+| `mt16_m` | 0.056 / 0.047 | fails (marked, evaluated) | 0.343 | 0.999 |
+| `mt16_d` | 0.022 / 0.011 | passes | 0.374 | 1.000 |
+| `mt16_l` | 0.420 / 0.388 | fails | 0.718 | 0.943 |
+
+*The readings* (paired over three trackers, rough's largest deviation):
+
+| Reading | G1 | NAO | Verdict |
+| --- | --- | --- | --- |
+| 1. Bodies' data, `m − c` | −0.0037 ± 0.0047 | −0.0135 ± 0.0071 | none, none |
+| 2. Demonstrations, `d − m` | +0.0071 ± 0.0024 | +0.0343 ± 0.0079 | worse, worse (predicted) |
+| 2. Asked duty's distance, `m − c` | −0.0087 ± 0.0026 | −0.0282 ± 0.0090 | closer, closer (predicted) |
+| 3. Learned part, `l − m` | not evaluated | not evaluated | leakage gate fails |
+| 4. Zero-shot cost, `c − rough_b4` | +0.140 ± 0.031 | +0.061 ± 0.013 | reported |
+| 4. Zero-shot cost, `m − rough_b4` | +0.136 ± 0.032 | +0.047 ± 0.013 | reported |
+| 4. Zero-shot cost, `d − rough_b4` | +0.143 ± 0.031 | +0.082 ± 0.011 | reported |
+
+5. **No regression fails for every arm.** The lowest speed ratio over the trackers and commands
+   is `c` 0.820 / 0.820, `m` 0.794 / 0.818 and `d` 0.793 / 0.841 (G1 / NAO), all below 0.9.
+   `m` also falls 8 times on the G1 and 9 on the NAO, against none for `c`. `rough_b4` passes
+   (1.005 / 0.999, no falls).
+
+- *The branch that applies.* "Neither helps, and `mt16_d` is worse": the loop is real, both of
+  its predictions hold, and its cure is not in the data. `mt16_m` moves what the generator
+  asks toward the teacher's duty, but not enough to move the deviation, and it adds falls.
+- *The learned part failed as realised, not as an idea.* The reversed gradient broke the
+  generator: its data-loss multiplier reached 305, its held-out data loss rose from 0.452 to
+  1.557, and its calibration error is eight times the gate's 0.05.
+  The summary still told the bodies apart (0.943), so it is not evaluated. A reversed gradient
+  has no bounded objective to settle at. W17 realises the same part differently.
+
+**Where the cost is** (read after the result; instrumentation, not pre-registered).
+- *Per command* (`python transfer/scripts/w16_compare.py --per-command`). Most of it is at
+  rough's forward command, 0.25 m/s:
+  - G1, `mt16_c`: largest 0.370, asked duty 0.817 and stride period 1.28, against `rough_b4`'s
+    0.079, 0.575 and 0.93.
+  - NAO, `mt16_c`: largest 0.495, asked duty 0.919 and period 2.34, against 0.258, 0.604 and
+    1.07.
+  - Speed ratios at forward and turning are 0.81–0.87 for every multi-task arm on both bodies.
+- *The generator alone* (`python transfer/scripts/held_out_chains.py --output
+  transfer/results/held_out_chains_w16.json`). Each generator is chained on its own plans from
+  the rough teacher's histories, at rough's commands: what a perfect tracker would walk. Rough's
+  captures are read there and trained on nowhere.
+  - `mt16_c`: mean largest 0.302, speed 0.83–0.88 of the teacher's.
+  - `flat_dagger2`, a generator of a seen base task: 0.247, speed 0.82–0.88.
+  - `rough_b4`: 0.097, speed 1.00–1.05.
+  - So the multi-task generator misses rough before any body, by a speed deficit the size of
+    flat's. In that chain its duty is 0.538 at forward, near the teacher's 0.571; the
+    closed loop through a body takes it to 0.82.
+- *Why the speed* (`python transfer/scripts/w16_task_region.py --output
+  transfer/results/w16_task_region.json`; one plan per window of the teachers' own histories,
+  open loop).
+  - The base experts do not walk their commands. Flat's expert walks 0.73 of the forward command
+    and 0.81 of fast and turning. The walk expert, at 0.22–0.25 m/s, walks 0.88 of it, with a
+    duty factor of 0.88.
+  - The rough expert walks its commands (1.01, 0.97, 0.98).
+  - On rough's histories, `mt16_c` plans 0.63–0.77 of the command and `rough_b4` 0.96–1.01.
+  - So a generator trained on the command its expert was *given* learns the expert's tracking
+    error as part of what the command means. At rough's commands, the base experts' meaning
+    is a slower gait. Closed through a body, the slower history moves the plans toward the walk
+    expert's long stance at 0.25 m/s.
+
+**Reframed.** The loop body → history → plan → body exists and is measured, but on the
+held-out task it is an order smaller than the task term, and the task term is in the command,
+not the body. W17 (10.18) tests that before anything else.
+
+### 10.18 The command a future achieved; rough held out; pre-registered (W17)
+
+Pre-registered 2026-11-07, 22:25, before any of its runs, on W16's result (10.17).
+
+**Hypothesis.** W16's zero-shot cost is mainly the base experts' tracking error, which the
+generator inherits through the command they were given. Relabelling every training command
+with the velocity its future achieved removes it (`latent/hindsight.py`).
+- *The relabel.* Each step's command becomes the mean, over its next 50 samples inside the
+  episode, of the CoM velocity in the heading frame and the base's yaw rate, in the command's
+  own dimensionless units. 50 samples is 1.0 s on the G1, one stride of every expert (0.93–1.29
+  s), so it does not follow the oscillation within a stride. It applies to the data and to the
+  gait the calibration chain starts from.
+- *What it defines and what it does not.* A command then means what the plan does: the task
+  is "track the command", so this states the task. It says nothing about how to walk.
+- *What stays.* The decoders, encoders and trackers are W13's, frozen. At inference the
+  generator is given the task's command, as before. Nothing of rough enters training: the
+  rough captures are read only by the offline pre-check and by L4.
+- *Hindsight relabelling* is the goal-conditioned idea of Andrychowicz et al. (2017), applied
+  here to the command of a generative model of plans.
+
+**The arms** (W16's recipe, 200 epochs, plus `--relabel-span 50`).
+- `mt17_c`: the experts only.
+- `mt17_m`: `mt17_c`, then the bodies' histories (W16's 18 step-4 captures) with the teacher's
+  phase-matched futures, each trained with the command its target achieved
+  (`--pair-command target`). The design's multi-body generator.
+- `mt17_l`: as `mt17_m`, with the history summary trained to carry no body by a constraint
+  instead of an adversary (`--invariance-kind mmd --invariance 1.0`).
+  - *The constraint.* MMD²(NAO's summaries, G1's and teacher's) ≤ MMD²(two halves of the
+    G1's and teacher's), on each batch: the bodies may differ no more than one body differs
+    from itself. It has its own dual ascent, starting at 1.0 (`latent/body_data.py`, `mmd2`).
+  - *Why.* The MMD is bounded and is zero exactly when the two distributions agree, which is
+    what the leakage probe tests. The adversary of W16 had nothing to settle at and broke the
+    generator.
+  - *Gate,* as W16's: evaluated in the simulator only if the leakage probe beats its control by
+    at most 3 SE.
+
+**Offline pre-check, a gate before any Isaac run** (`held_out_chains.py --generators mt17_c`).
+`mt17_c`, chained on its own plans from rough's histories, must walk a speed ratio within
+0.9–1.1 at all three commands, and its mean largest deviation must be below `mt16_c`'s 0.302.
+If it fails, no L4 is run and the result is reported.
+
+**Readings** (`transfer/scripts/w17_compare.py` → `transfer/results/w17_relabel.json`). Per body,
+paired over W13's three trackers, rough's largest deviation (mean over the commands), on the
+same deployed path and pinned units as W16. W16's `mt16_c` and `rough_b4` captures are reused.
+1. **Relabelling:** `mt17_c − mt16_c`. "Help" below −2 SE, "hurt" above +2 SE.
+2. **What zero-shot still costs:** `mt17_c − rough_b4`, and the share of W16's cost closed,
+   `1 − (mt17_c − rough_b4) / (mt16_c − rough_b4)` on the means. Reported.
+3. **The bodies' data:** `mt17_m − mt17_c`, read as 1.
+4. **The learned part:** `mt17_l − mt17_m`, read as 1, if the gate lets it in.
+5. **No regression,** per arm against `mt17_c`: at most two more falls over the three trackers,
+   and every command's speed ratio at least 0.9.
+
+Also reported: the chains of every arm (`held_out_chains.py`), each generator's own gate,
+chain fidelity and leakage, and the per-command figures.
+
+**What each outcome leads to.**
+- *Relabelling helps both bodies.* It is adopted as the definition of the command for every
+  multi-task generator; no tracker changes. What remains is the held-out gait's style, and on
+  the NAO its own W13 regression (10.14–10.15).
+- *It helps the G1 only.* The NAO's cost is its body. Its decoder is next (W15's question, or
+  realisation 2).
+- *It helps neither.* The speed is not the cost; the style is. Then the base tasks themselves
+  are the question: leave-one-task-out among them, to measure how far a style generalises.
+- *`mt17_l` helps beyond `mt17_m`.* The learned part is the candidate.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the reading.
+
+**Budget.** About 20 min of training (three arms), 5 min of pre-check, and about 2 h of rough
+L4 (three arms × six trackers). One Isaac process at a time.
+
+**Result (2026-11-07, 22:27 – 2026-11-08, 00:07): relabelling fixes the speed and hurts the
+deviation on both bodies. The pre-check passed a generator the deployed path then failed.**
+`bash transfer/scripts/w17_relabel.sh` ran with no failure. Its compare (`python
+transfer/scripts/w17_compare.py --output transfer/results/w17_relabel.json`) printed "g1: relabel
+hurt, closed -0.90, bodies help; nao: relabel hurt, closed -1.12, bodies help".
+
+*The generators* (`contract_mt17_*.json`):
+
+| Arm | Calibration error | Own gate | Chain fidelity | Leakage (control 0.50) |
+| --- | --- | --- | --- | --- |
+| `mt17_c` | 0.055 / 0.040 | fails (marked, evaluated) | 0.226 | 0.998 |
+| `mt17_m` | 0.067 / 0.051 | fails (marked, evaluated) | 0.284 | 0.999 |
+| `mt17_l` | 0.056 / 0.047 | fails | 0.399 | 0.996 |
+
+*The pre-check passed* (`held_out_chains_w17_pre.json`): `mt17_c` chained from rough's histories
+walks speed ratios 0.942 / 1.039 / 0.975, with a mean largest deviation of 0.185 against `mt16_c`'s
+0.302.
+
+*The readings* (paired over three trackers, rough's largest deviation):
+
+| Reading | G1 | NAO | Verdict |
+| --- | --- | --- | --- |
+| 1. Relabelling, `mt17_c − mt16_c` | +0.125 ± 0.006 | +0.068 ± 0.007 | hurt, hurt |
+| 2. Zero-shot cost, `mt17_c − rough_b4` | +0.265 ± 0.026 | +0.128 ± 0.008 | reported |
+| 2. Share of W16's cost closed | −0.90 | −1.12 | reported |
+| 3. Bodies' data, `mt17_m − mt17_c` | −0.156 ± 0.063 | −0.011 ± 0.005 | help, help |
+| 4. Learned part, `mt17_l − mt17_m` | not evaluated | not evaluated | leakage gate fails |
+
+5. **No regression.**
+   - `mt17_c` passes on both bodies: no falls, and its lowest speed ratio is 0.915 (G1) and
+     0.925 (NAO). It is the first multi-task arm to clear 0.9; W16's were all at 0.79–0.84.
+   - `mt17_m` fails on falls: 21 on the G1 (15 on s41, 6 on s42) and 11 on the NAO, against
+     none for `mt17_c`.
+
+- *The branch that applies.* Literally, "it helps neither". Its premise, "the speed is not the
+  cost; the style is", holds: the closed-loop speed went from 0.82 to 0.92 while the deviation
+  grew.
+- *The learned part failed as realised, a second time.* The MMD constraint was not met at the
+  end: MMD² was 0.0011 against a reference of −0.0001, and its multiplier was still rising, at
+  8.8. The probe still told the bodies apart (0.996), and chain fidelity fell to 0.399. It was
+  not evaluated.
+
+**Where the deviation came from** (read after the result; instrumentation, not pre-registered).
+`python transfer/scripts/w17_mechanism.py --output transfer/results/w17_mechanism.json`.
+
+- *Rough's forward command is the walk task's.* Within 0.02 of it in the dimensionless command
+  space, 100 % of the base experts' steps are the walk expert's under the given command, and
+  84 % under the relabelled one (flat 5 %, jog 11 %).
+  - The walk expert walks tall and almost always loaded: height 0.943 L and loaded share 0.934,
+    against the rough teacher's 0.843 and 0.571.
+  - At 0.25 m/s the base tasks therefore define a gait that is not rough's, and a generator that
+    reproduces them is scored against rough's teacher.
+- *Relabelling moved the walk expert into turning.* Near rough's turning command the given
+  commands are flat's alone. The relabelled ones are 20 % walk.
+  - The G1's `mt17_c` asks a height of 0.934 and a loaded share of 0.80 there, where `mt16_c`
+    asked 0.877 and 0.60.
+  - Per command, the G1's largest deviation at turning went from 0.140 (`mt16_c`) to 0.420
+    (`mt17_c`); at forward from 0.370 to 0.456; at fast it held, at 0.134 against 0.144.
+- *The posture at the start chooses the style.*
+  - `python transfer/scripts/held_out_chains.py --start body --start-capture
+    "g1/rollouts/zs_mt_g1_s41_sym_rough_b4_own_auto_kin_{command}_encoder.npz" --generators
+    mt16_c mt17_c mt17_m --output transfer/results/held_out_chains_w17_crouched_start.json`.
+    From the crouched state `rough_b4`'s plans leave the G1 in (height 0.85), `mt17_c` walks
+    rough's style: mean largest 0.176, loaded share 0.565 at turning.
+  - `--start-capture "<body>/rollouts/zs_<tag>_{arm}_own_auto_kin_{command}_encoder.npz"`
+    (`held_out_chains_w17_own_start_{g1,nao}.json`) starts each arm from the state its own
+    deployed run reached. There, `mt17_c` stays tall (0.93) and walks the walk expert's style:
+    mean largest 0.468 (G1) and 0.526 (NAO).
+  - The same generator gives 0.176 or 0.468 according to the start alone. From that start, the
+    chain orders the four arms as L4 does on each body:
+    - G1, chain: `rough_b4` 0.097 < `mt17_m` 0.269 < `mt16_c` 0.291 < `mt17_c` 0.468.
+    - G1, L4: 0.075 < 0.184 < 0.215 < 0.340.
+    - NAO, chain: `mt16_c` 0.398 < `mt17_m` 0.458 < `mt17_c` 0.526, with `rough_b4` 0.098.
+    - NAO, L4: 0.337 < 0.394 < 0.405, with `rough_b4` 0.277. The NAO's `rough_b4` gap is its
+      body: it executes a loaded share of 0.69 where the plans ask 0.60.
+- *Why the pre-check was blind.* It started from rough's teacher histories, which already show
+  rough's gait (height 0.84), and a multi-task generator continues a gait it is shown. The
+  deployed path starts from the body's state after a reset and chooses there. The ladder's 100
+  settle steps run under the deployed generator, so they are not recorded and its first
+  recorded state is already that choice. The state after a reset has not been captured yet.
+- *The bodies' data* moved the G1's `mt17_m` into the crouched mode: it asks 0.85–0.86 at every
+  command. That is its −0.156. They did not move the NAO's (0.92–0.94).
+
+**Reframed.**
+- The method did what the base tasks define. At rough's forward command they define the walk
+  expert's gait, and the deployed path keeps whichever mode the start selects.
+- So the rough test, as scored, measures two things together:
+  - how a generator generalises to a command it has not seen;
+  - which of two experts' styles it picks at a command both define.
+
+  Zero-shot, the second has no right answer, because nothing in the command or the start says
+  which style rough wants.
+- The next step tests the first alone: a held-out task whose commands no base task covers
+  (10.19).
+- Relabelling is not adopted; the pre-registered criterion was not met. W18 keeps it as the
+  command's definition for its arms, because its speed effect is measured in closed loop and its
+  harm was the turning mode above, which a task with its own commands does not have.
+
+### 10.19 Leave one task out where no other task defines its commands; pre-registered (W18)
+
+Pre-registered 2026-11-08, 00:32 (commit 5640154), before any of its runs, on W17's result (10.18), whose
+pre-registered next step this is ("leave-one-task-out among them, to measure how far a style
+generalises").
+
+**Hypothesis.**
+- A generator trained on the base tasks generalises to a held-out task as far as its commands
+  lie between theirs.
+- Sidestep's three commands are its own: 98–100 % of the base experts' steps near each are the
+  sidestep expert's (`w17_mechanism.json`).
+- Leaving sidestep out therefore tests generalisation to unseen commands, with no other expert's
+  style at the same command.
+- It is also a task neither body's W13 decoder ever trained on (their tasks were walk, flat and
+  jog, 10.14), so it is held out of every gradient step.
+
+**Steps** (`transfer/scripts/w18_loto.sh`, status `logs/contract/w18_loto.status`).
+1. **The state after a reset.**
+   - 40 recorded steps with no settle steps, on G1 s41 and NAO s31, at rough's forward command,
+     under `mt17_c`. They are copied as `w18_reset` so that no W17 capture is overwritten
+     (`ZS_SETTLE=0 ZS_STEPS=40` in `zero_shot_ladder.sh`).
+   - Then the proxy is calibrated: `held_out_chains.py --start body` from those states, for
+     `mt16_c`, `mt17_c`, `mt17_m` and `rough_b4` on rough, against their L4.
+2. **The generators**, W17's recipe with relabelling (span 50), 200 epochs.
+   - `mt18_no_sidestep`: the walk, flat, backward and jog experts.
+   - `mt18_no_sidestep_m`: from it, plus the bodies' histories (W16's 18 captures of walk, flat
+     and jog) with the teacher's phase-matched futures and their achieved commands. This is the
+     design's multi-body generator.
+   - The references saw sidestep: `mt17_c` and `mt17_m`.
+3. **Sidestep L4,** on the six W13 trackers, in each tracker's own units, on the deployed path.
+   - Commands: `left` (0, 0.25, 0), `left_fast` (0, 0.45, 0) and `right` (0, −0.35, 0) m/s in G1
+     units, Froude-scaled for the NAO, read against `base_sidestep_play_<command>.npz`.
+   - Four arms.
+4. **Offline leave-one-task-out,** for the other four base tasks (`mt18_no_walk`, `_no_flat`,
+   `_no_backward`, `_no_jog`, the same recipe).
+   - Each is chained on its held-out task's teacher captures: flat's, backward's training-variant,
+     jog's, and sidestep's, from the teacher's history and from the state after a reset.
+   - `mt17_c` is chained on the same.
+   - The walk task has no per-command teacher capture, so its generator is trained and reported
+     on its gate only.
+5. **Compare:** `transfer/scripts/w18_compare.py` → `transfer/results/w18_loto.json`.
+
+**Readings.** Per body, paired over W13's three trackers, sidestep's largest gate C deviation (the
+mean over its three commands):
+1. **Proxy calibration** (from step 1).
+   - "Calibrated" if, on each body, the reset-start chain orders the four arms as L4 does.
+   - On the G1 only, the chain's duty factor must also be within 0.05 of the one L4's plans asked
+     for in at least 10 of the 12 arm × command cells. The NAO's plans pass through its body's
+     resyncs.
+   - If calibrated, this start replaces the teacher's history as every later pre-check's.
+2. **What leaving sidestep out costs:** `mt18_no_sidestep − mt17_c`. "Costs" above +2 SE, "no
+   detectable cost" otherwise.
+3. **The open objective on the held-out task,** per arm. It passes if:
+   - every command's directed speed ratio is at least 0.9: the CoM velocity along the commanded
+     direction, body over teacher, after the 100 settle steps, from the captures;
+   - the arm has at most two more falls than `mt17_c` over the three trackers.
+4. **The bodies' data on the held-out task:** `mt18_no_sidestep_m − mt18_no_sidestep`. "Help"
+   below −2 SE, "hurt" above +2 SE. Reading 3 applies to it as well.
+5. **Offline, per base task:** the leave-one-out generator's chain deviation minus `mt17_c`'s, on
+   that task, from both starts. Reported: how far each style generalises.
+
+Each generator's own gate, chain fidelity and leakage are also reported. A generator that fails
+its own gate is still evaluated, and marked.
+
+**What each outcome leads to.**
+- *No detectable cost on both bodies, or the open objective passes on both.* Task zero-shot
+  holds where the task is defined by its own commands. Rough's cost is the walk task's claim on
+  its forward command. Which held-out task the program scores is left open, with this
+  evidence. Body zero-shot (a third body) is next.
+- *It costs, and the directed speed fails.* The generator does not compose a gait for commands it
+  has not seen. Zero-shot claims are then bounded by the base tasks' command coverage, and that
+  coverage is the next question.
+- *The bodies' data help on the held-out task.* The multi-body generator is the method, and its
+  falls (10.18) are the next fix.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the reading.
+
+**Budget.**
+- About 10 min of reset captures and calibration.
+- About 50 min of generator training (six generators).
+- About 2.6 h of sidestep L4 (four arms × six trackers).
+- About 20 min of offline chains.
+- One Isaac process at a time.
+
+**Result** (2026-11-08, 04:25).
+`python transfer/scripts/w18_compare.py --output transfer/results/w18_loto.json`.
+
+*The generators.* Each was trained, then evaluated whatever its gate said, as pre-registered.
+
+| Generator | Experts | Gate (calibration error, per foot) | Chain fidelity |
+| --- | --- | --- | --- |
+| `mt18_no_sidestep` | walk, flat, backward, jog | fails (0.070, 0.046) | 0.222 |
+| `mt18_no_sidestep_m` | the same, plus the bodies | fails (0.075, 0.051) | 0.325 |
+| `mt18_no_walk` | flat, backward, sidestep, jog | passes (0.009, 0.006) | 0.563 |
+| `mt18_no_flat` | walk, backward, sidestep, jog | fails (0.068, 0.049) | 0.171 |
+| `mt18_no_backward` | walk, flat, sidestep, jog | passes (0.038, 0.043) | 0.228 |
+| `mt18_no_jog` | walk, flat, backward, sidestep | passes (0.046, 0.038) | 0.238 |
+
+The reference `mt17_c` fails the same gate (0.055, 0.040).
+
+*The readings* (paired over three trackers, sidestep's largest deviation):
+
+| Reading | G1 | NAO | Verdict |
+| --- | --- | --- | --- |
+| 1. Proxy, order of the four arms | as L4's | as L4's | calibrated, calibrated |
+| 1. Proxy, duty cells within 0.05 | 12 of 12 | (12 of 12, not required) | |
+| 2. Cost, `mt18_no_sidestep − mt17_c` | +0.0186 ± 0.0021 | +0.0129 ± 0.0046 | costs, costs |
+| 3. Objective, `mt18_no_sidestep`: falls (`mt17_c`'s) | 265 (24) | 394 (0) | fails, fails |
+| 3. Objective, `mt18_no_sidestep`: lowest directed ratio | 1.09 | 0.82 | |
+| 3. Objective, `mt18_no_sidestep_m`: falls, lowest ratio | 711, 1.10 | 367, 0.89 | fails, fails |
+| 4. Bodies' data, `m − c` | +0.0132 ± 0.0006 | −0.0275 ± 0.0010 | hurt, help |
+
+- `mt17_c` and `mt17_m` pass reading 3 on both bodies.
+- *Where the falls are.*
+  - On the G1, under `mt18_no_sidestep`: 148 at `right`, 74 at `left_fast` and 43 at `left`.
+  - On the NAO, every fall is at `right` (63, 97 and 234 on s31–s33). The NAO's 0.82 is s33's
+    `right`.
+- *The level is shared.*
+  - `mt17_c`, which saw sidestep, scores 0.34–0.35 (G1) and 0.40–0.42 (NAO). On s41 and s31, at
+    `left` and `right`, its stride period and length differ from the teacher's by 0.29–0.53; at
+    `left_fast` by 0.03–0.08.
+  - Under `mt17_c` the bodies sidestep faster than the teacher (directed ratio 1.10–1.26). The
+    teacher reaches only 0.79–0.89 of its command. Relabelled commands ask for the command (10.18).
+  - That part is common to every arm, and the pairing removes it.
+
+*5. Offline,* each leave-one-out generator minus `mt17_c` on its held-out task's teacher captures.
+`held_out_chains_w18_<task>_{teacher,reset}.json`.
+
+| Held out | From the teacher's history | From the reset | Held-out speed ratio, from the reset |
+| --- | --- | --- | --- |
+| sidestep | +0.014 (0.410 against 0.396) | +0.019 (0.411 against 0.392) | 1.04–1.09 |
+| jog | +0.207 (0.347 against 0.140) | +0.208 (0.353 against 0.145) | 0.95–1.00 |
+| backward | +0.308 (0.468 against 0.161) | +0.242 (0.415 against 0.173) | 0.55–0.66 |
+| flat | +5.31: the chain diverges (forward speed 0.42) | +0.158 (0.615 against 0.457) | 1.06–1.20 |
+
+The walk has no per-command teacher capture, so `mt18_no_walk` is reported by its gate alone.
+
+*The branch that applies.* None literally.
+- It costs on both bodies.
+- The directed speed holds on the G1 (1.09). It fails on the NAO only at s33's `right`, where
+  that tracker falls 234 times.
+- What fails is the falls, which no branch names.
+- The bodies' data help on the NAO alone. On the G1 they hurt and nearly triple the falls.
+
+**What the plans asked** (read after the result; instrumentation, not a criterion).
+`python transfer/scripts/w18_mechanism.py --output transfer/results/w18_mechanism.json`, from the
+L4 captures after the settle steps, averaged over three trackers.
+- *The plans never ask the feet to cross. The bodies cross them.*
+  - G1 at `right`: the 5th percentile of the lateral foot separation is 0.19 `L` in the body,
+    0.36 asked. Under `mt17_c` it is 0.33, asked 0.35.
+  - With the bodies' data, the G1's body reaches −0.05: the feet cross.
+  - NAO at `right`: 0.15, asked 0.32. Under `mt17_c`: 0.33, asked 0.35.
+- *The style differs.*
+  - The G1's held-out plans ask for less double support (0.08–0.14 of the time against
+    0.15–0.28), more flight (0.06–0.07 against 0.03–0.05) and a lower CoM (0.86–0.88 `L`
+    against 0.90–0.91).
+  - The NAO's plans at `right` ask for a narrower stance: median 0.42 `L` against 0.47.
+- *Two checks of the plans' physics separated nothing.* The teacher's own sidestep fails them as
+  often as either generator's plans:
+  - the lateral DCM beyond the leading foot in single support: teacher 0.10–0.67 of the time,
+    plans 0.05–0.51;
+  - the CoP implied by the CoM's acceleration, outside the loaded feet: teacher 0.36–0.80, plans
+    0.57–0.76.
+
+**Reframed.**
+- *The gait generalises to commands the task owns.* The generator that never saw sidestep moves
+  the body along the commanded direction at the commanded speed. Its signature costs
+  0.013–0.019 against the generator that did see it. The offline proxy predicted that cost
+  (+0.014 and +0.019).
+- *That cost is measured against a reference that misses sidestep's style too* (0.39–0.40
+  offline). Where the reference reproduces a task (jog 0.14, backward 0.16), leaving the task
+  out costs +0.21 to +0.31 offline.
+- *Backward's speed falls to 0.55–0.66 when it is left out.* A negative forward command is the
+  one no other expert approaches. That is the coverage bound the second branch names, seen
+  offline.
+- *What fails at the held-out task is execution.* Each decoder trained on base-task plans drawn
+  by generators that had seen those tasks, so it never executed a plan composed for unseen
+  commands. Deployed zero-shot, those are the only plans it gets. The next step (10.20) puts
+  that condition into the decoder's training without any held-out data.
+- *The proxy is calibrated on both bodies.* The state after a reset replaces the teacher's
+  history as every later pre-check's start.
+
+### 10.20 Decoders that practise cross-fitted plans; sidestep held out; pre-registered (W19)
+
+Pre-registered 2026-11-08, 04:40, before any of its runs, on W18's result (10.19).
+
+**Why** (W18's figures, `transfer/results/w18_loto.json`; the plan and body measures below are
+instrumentation read after W18, from its captures).
+- *The gait generalises.* Leaving sidestep out costs +0.019 ± 0.002 (G1) and +0.013 ± 0.005
+  (NAO) on sidestep's largest deviation. The bodies move along the commanded direction faster
+  than the teacher does (directed ratio at least 1.09 on the G1).
+- *The bodies fall.* Over three trackers, 265 falls on the G1 and 394 on the NAO under
+  `mt18_no_sidestep`, against 24 and 0 under `mt17_c`.
+- *The plans do not cross the feet; the bodies do.*
+  - At `right`, the G1's 5th-percentile lateral foot separation is 0.19 `L` under the held-out
+    generator's plans, which ask for 0.36. Under `mt17_c`'s plans it is 0.33, asked 0.35.
+  - The NAO's is 0.15 at `right`, asked 0.32.
+- *The held-out plans have another style.*
+  - On the G1 they ask for less double support (0.08–0.14 of the time against 0.15–0.28), more
+    flight (0.06–0.07 against 0.03–0.05), and a lower CoM (0.86–0.88 `L` against 0.90–0.91).
+  - At the NAO's `right` they ask for a narrower stance (median 0.42 `L` against 0.47).
+- *Two checks of the plans' physics separated nothing.* The lateral DCM beyond the leading foot
+  and the CoP implied by the CoM's acceleration are outside the support as often in the teacher's
+  own sidestep as in either generator's plans.
+
+**Hypothesis.**
+- Each W13 decoder trained on base-task plans drawn by generators that had seen those tasks.
+- Deployed on a held-out task, it receives plans that a generator composes for commands it has
+  not seen, and those are the plans it falls under.
+- Cross-fitting brings that condition into training without any held-out data. Each base task is
+  also drawn by a generator trained without it, so the decoder practises composed plans on tasks
+  it may train on.
+- The falls under the held-out generator should then drop.
+
+**What stays out.**
+- Sidestep and rough are in no generator and no decoder.
+- The cross-fitted generators are `mt19_xf_flat`, trained on the walk, backward and jog experts,
+  and `mt19_xf_jog`, trained on the walk, flat and backward ones.
+- `transfer/scripts/crossfit_task_set.py` refuses a task set in which a cross-fitted generator's
+  report lists its own task's capture or a held-out one.
+
+**Steps** (`transfer/scripts/w19_crossfit.sh`, status `logs/contract/w19_crossfit.status`).
+1. **Generators.**
+   - The two cross-fitted generators, trained with W18's recipe (relabelled, 200 epochs, no
+     bodies' data).
+   - Then `transfer/results/base_tasks_xf.json`: W13's task set with `flat_xf` and `jog_xf` beside
+     flat and jog (same ranges and starts). The five tasks have uniform weights.
+2. **Signal** (instrumentation, not a gate).
+   - W13's G1 s41 tracker deployed under `mt19_xf_flat` at flat's three commands and under
+     `mt19_xf_jog` at jog's.
+   - Its falls are read beside its falls under the in-distribution generators (W16's captures).
+   - If it does not fall more there, cross-fitting carries no fall signal on these tasks, and the
+     prediction becomes "no effect". The run still goes on.
+3. **Screen.**
+   - W13's G1 s41 and NAO s31 trackers are each continued 300 iterations in W13's training
+     conditions (family 0.5, the checkpoint's learning rate, same seed), in two arms:
+     - `xf`, with `base_tasks_xf.json`;
+     - `ctl`, with W13's `base_tasks.json`.
+   - Both arms deploy with their W13 tracker's refitted encoder, copied, so the estimator is the
+     same and only the tracker differs.
+   - Sidestep L4 (W18's commands, pinned units, the deployed path) is run under
+     `mt18_no_sidestep` and `mt18_no_sidestep_m`.
+4. **Full.** If the screen's rule holds: seeds 42 and 43 (G1) and 32 and 33 (NAO), the same.
+5. **Regression.** Rough L4 under `rough_b4` on every new tracker.
+6. **Compare:** `transfer/scripts/w19_compare.py` → `transfer/results/w19_crossfit.json`.
+
+**Screen rule.**
+- The run continues to step 4 if, on either body, under `mt18_no_sidestep`:
+  - `ctl` falls more than twice on sidestep, and
+  - `xf` falls at most half as often.
+- Otherwise it stops after the screen and the regression check. The readings are then reported
+  on one seed per body, without SE.
+
+**Readings,** per body, over the seeds run:
+1. **Signal**, as in step 2.
+2. **Falls** on sidestep under `mt18_no_sidestep`: `xf` against `ctl`, summed and paired per seed.
+3. **Open objective**, W18's reading 3, per arm and held-out generator:
+   - every command's directed speed ratio is at least 0.9;
+   - falls are at most two more than `mt17_c`'s on W13's trackers of the same seeds (W18's runs).
+4. **Deviation:** sidestep's largest, `xf − ctl` paired. "Help" below −2 SE, "hurt" above +2 SE.
+5. **No regression** on rough under `rough_b4`:
+   - `xf − ctl` paired, "regresses" above +2 SE;
+   - `xf`'s falls at most two more than `ctl`'s.
+
+**What each outcome leads to.**
+- *`xf` fixes the falls* (reading 3 passes for `mt18_no_sidestep`) on both bodies, with no
+  regression.
+  - Cross-fitted plans become the decoder's recipe.
+  - Which held-out task the program scores is left open, with W17's and W18's evidence.
+  - Body zero-shot (a third body) is next.
+- *It reduces the falls* (paired, below −2 SE) without fixing them.
+  - Coverage is the mechanism.
+  - The next question is the share and the length: a W13-length training from S with the
+    cross-fitted plans.
+- *No effect.*
+  - The falls are not a coverage gap the base tasks can expose.
+  - The next question is on the generator's side: whether its composed plans are executable at
+    all.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the reading.
+
+**Budget.**
+- About 15 min of generators and 15 min of signal.
+- The screen: about 3 h of training and 1 h of L4.
+- The full run: about 6 h of training and 1.7 h of L4.
+- About 1.5 h of rough L4.
+- One Isaac process at a time.
+
+**Screen** (2026-11-08, 08:38; `python transfer/scripts/w19_compare.py` with only the screen
+seeds on disk, beside W13's rows in `transfer/results/w18_loto.json`).
+
+- *Generators.* Both cross-fitted generators fail the generators' calibration gate (chain
+  fidelity 0.161 and 0.195). The pre-registration does not gate on it, since they only draw
+  training plans.
+- *Signal* (step 2).
+  - Under `mt19_xf_flat`'s plans, W13's G1 s41 tracker falls at forward (12 of 64 episodes)
+    and turning (118 of 150), not at fast.
+  - Under the in-distribution plans it fell at none of the three.
+  - Under `mt19_xf_jog`'s plans it falls at no command.
+  - The signal exists on flat, not on jog.
+
+Sidestep falls under `mt18_no_sidestep`, seeds 41 (G1) and 31 (NAO). The W13 rows are W18's
+runs of the trackers both arms continue.
+
+| Body | Tracker | left | left_fast | right | Total | Directed ratio, min |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 | W13 | 8 | 21 | 32 | 61 | 1.10 |
+| G1 | `ctl` | 25 | 4 | 10 | 39 | 1.11 |
+| G1 | `xf` | 7 | 0 | 6 | **13** | 1.10 |
+| NAO | W13 | 0 | 0 | 63 | 63 | 1.00 |
+| NAO | `ctl` | 0 | 0 | 229 | 229 | 0.81 |
+| NAO | `xf` | 0 | 0 | 1 | **1** | 1.10 |
+
+Under `mt18_no_sidestep_m` the totals are:
+- G1: W13 265, `ctl` 39, `xf` 16;
+- NAO: W13 94, `ctl` 158, `xf` 6.
+
+The rule holds on both bodies, and the full run started at 08:38.
+
+What one seed shows (no verdict; that needs the three seeds):
+- *The continuation alone moves the falls, in both directions.* From W13 to `ctl`, the G1 goes
+  from 61 to 39 and the NAO from 63 to 229. `xf` falls less than both, on both bodies.
+- *G1.* `xf`'s 13 falls are above `mt17_c`'s 4 + 2 on this seed, so the open objective is still
+  missed. Its largest deviation is 0.010 above `ctl`'s.
+- *NAO.*
+  - `xf`'s one fall is within `mt17_c`'s 0 + 2. Its largest deviation is 0.026 below `ctl`'s.
+  - Under `ctl` at `right`, the held-out generator, continuing the body's history, asks for a
+    duty factor of 0.87 (0.60 under `xf`). The body's directed ratio drops to 0.81.
+
+**Result** (2026-11-08, 18:19). The reading comes from
+`python transfer/scripts/w19_compare.py --output transfer/results/w19_crossfit.json`. The
+instrumentation comes from `python transfer/scripts/w18_mechanism.py --prefix <arm> --arms
+mt18_no_sidestep mt18_no_sidestep_m --output transfer/results/w19_mechanism_<arm>.json`, with
+W13's rows from W18's run of the same script.
+
+Sidestep under `mt18_no_sidestep`, three seeds per body. The W13 column is W18's run of the
+trackers both arms continue.
+
+| Body | W13 falls | `ctl` falls | `xf` falls | Falls, `xf − ctl` paired | Bar (`mt17_c` + 2) | `xf` directed, min | Deviation, `xf − ctl` | Reading |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| G1 | 265 | 252 | 67 | −61.7 ± 26.3 | 26 | 1.09 | +0.024 ± 0.009, hurt | reduces the falls |
+| NAO | 394 | 662 | **1** | −220.3 ± 7.2 | 2 | 1.09 | −0.008 ± 0.011, none | **fixes the falls** |
+
+- *Under `mt18_no_sidestep_m`:*
+  - G1: `xf` 147 falls, `ctl` 436.
+  - NAO: `xf` 14, `ctl` 468. The NAO's `xf` misses the bar under this generator.
+- *Rough under `rough_b4` holds on both bodies.* `xf − ctl` is −0.0039 ± 0.0041 (G1) and
+  +0.0025 ± 0.0174 (NAO), with no falls in either arm.
+- *The branch that applies.* The G1 reduces and the NAO fixes, so "fixes on both bodies" does
+  not apply. W20 (§10.21), pre-registered at 11:40 on the G1's three seeds, applies. It has been
+  running since 18:21.
+
+What the plans asked and the bodies did at `right` (instrumentation; means over the three
+trackers):
+
+| Body | Tracker | Falls | Separation p05, asked / body (`L`) | Double support asked | Height asked |
+| --- | --- | --- | --- | --- | --- |
+| G1 | W13 | 148 | 0.362 / 0.191 | 0.142 | 0.878 |
+| G1 | `ctl` | 156 | 0.370 / 0.270 | 0.135 | 0.877 |
+| G1 | `xf` | 52 | 0.379 / 0.365 | 0.084 | 0.871 |
+| NAO | W13 | 394 | 0.319 / 0.153 | 0.348 | 0.895 |
+| NAO | `ctl` | 661 | 0.308 / 0.025 | 0.549 | 0.916 |
+| NAO | `xf` | 1 | 0.395 / 0.370 | 0.074 | 0.866 |
+
+What it shows:
+- *The cross-fitted decoders keep the feet apart on the held-out task.* Their bodies' separation
+  is within 0.014 `L` (G1) and 0.025 `L` (NAO) of the asked one, where W13's and `ctl`'s close.
+- *In the autonomous loop the plans follow the body.*
+  - Where the NAO's feet close under `ctl`, the generator, reading that history, asks for more
+    double support (0.55) and a taller CoM (0.916). That is a standing gait.
+  - The body then slows (directed ratio 0.81–0.83) and falls.
+  - The decoder's error compounds through the plans.
+- *Training longer on the base tasks alone does not bring the held-out task along.* The NAO's
+  `ctl` falls more than W13 did (662 against 394).
+- *The G1's remaining falls have another cause.* 52 of `xf`'s 67 are at `right`, with the feet
+  apart. That cause is not measured.
+- *Against the generator that saw sidestep,* `xf`'s falls are 67 against `mt17_c`'s 24 on the G1,
+  and 1 against 0 on the NAO.
+
+### 10.21 Cross-fitted decoders trained once from S; pre-registered (W20)
+
+Pre-registered 2026-11-08, 11:40, before any of its runs, while W19's NAO seeds 32 and 33 run.
+
+**Why.** The readings come from `python transfer/scripts/w19_compare.py`, run with the G1's three
+seeds and the NAO's seed 31 on disk.
+- *G1, three seeds* (sidestep under `mt18_no_sidestep`):
+  - `xf` falls 67 times and `ctl` 252, paired −61.7 ± 26.3, so W19 reads "reduces the falls".
+  - The open objective is still missed: the bar is `mt17_c`'s 24 falls plus 2.
+  - The largest deviation is hurt: +0.024 ± 0.009.
+- *Mechanism* (instrumentation, `python transfer/scripts/w18_mechanism.py --prefix xf` and
+  `--prefix ctl`):
+  - At `right`, `ctl`'s feet close: the 5th-percentile separation is 0.27 `L`, against 0.37
+    asked.
+  - `xf`'s stay apart: 0.365 against 0.379.
+  - Most of `xf`'s remaining falls are at `right` (52 of 67).
+- *NAO, seed 31:* `xf` falls once, `ctl` 229 times.
+- *W19's outcome tree.* The G1 alone rules out "fixes the falls on both bodies". "Reduces"
+  names the next step: a W13-length training from S with the cross-fitted plans. That is W20.
+
+**Hypothesis.**
+- W19 practised cross-fitted plans for 300 iterations on top of W13, and that reduced the falls.
+- W20 practises them for the whole of the decoder's base-task training (1000 iterations from S),
+  from its start, with the share unchanged.
+- The falls should then drop further, within the open objective's bar.
+
+**Design** (`transfer/scripts/w20_from_s.sh`, status `logs/contract/w20_from_s.status`; it
+starts when W19 is done).
+- *Arm `xs`.*
+  - S's incumbent is continued 1000 iterations in W13's conditions, with W19's
+    `base_tasks_xf.json` in place of `base_tasks.json`.
+  - That set is walk, flat, jog, `flat_xf` and `jog_xf`, with uniform weights and the family
+    at 0.5.
+  - Seeds 41–43 (G1) and 31–33 (NAO).
+- *Control.* W13's trackers: the same incumbent, seed, conditions and length, without the
+  cross-fitted plans. Their rows are on disk.
+- *Evaluation,* per `xs` tracker:
+  - its own refitted encoder and S0's walk (W13's ladder stages);
+  - flat's L4 and jog's at its middle command. The G1 is read in the task's units, as W13
+    read it; the NAO in its own, as W14 did;
+  - sidestep's L4 under `mt18_no_sidestep` and `mt18_no_sidestep_m`;
+  - rough's L4 under `rough_b4`, in its own units.
+- *Screen.* Seeds 41 and 31 run first. The others run if, on either body, under
+  `mt18_no_sidestep`:
+  - W13's tracker falls more than twice on sidestep (it fell 61 and 63 times), and
+  - `xs` falls at most half as often.
+- Sidestep and rough stay out of every gradient step.
+
+**Readings** (`transfer/scripts/w20_compare.py` → `transfer/results/w20_from_s.json`), per body,
+over the seeds run, `xs` against `mt` (W13):
+1. **Falls** on sidestep under `mt18_no_sidestep`, summed and paired per seed.
+2. **Open objective,** W18's reading 3, per arm and held-out generator:
+   - every command's directed speed ratio is at least 0.9;
+   - falls are at most two more than `mt17_c`'s on W13's trackers of the same seeds.
+3. **Deviation:** sidestep's largest, paired. "Help" below −2 SE, "hurt" above +2 SE.
+4. **No regression on rough** under `rough_b4`:
+   - paired, "regresses" above +2 SE;
+   - `xs`'s falls at most two more than `mt`'s.
+5. **No regression on the base tasks:**
+   - flat's L4 (the mean over its three commands) and jog's at its middle command, paired,
+     "regresses" above +2 SE;
+   - `xs`'s falls at most two more than `mt`'s;
+   - S0's walk passes on every `xs` tracker.
+- Beside the readings, as instrumentation: W19's `xf` continuation of the same seeds.
+
+**What each outcome leads to.**
+- *`xs` fixes the falls* (reading 2 passes under `mt18_no_sidestep`) on both bodies, with no
+  regression (readings 4 and 5).
+  - `xs` replaces W13 as each body's decoder.
+  - Which held-out task the program scores is left open, with W17–W20's evidence.
+  - Body zero-shot (a third body) is next.
+- *It reduces the falls* (paired, below −2 SE) without fixing them on both bodies.
+  - Length helps but is not enough.
+  - The next lever is coverage: every base task cross-fitted, the walk included (generators
+    trained without the walk and sidestep), in W20's recipe.
+- *No effect,* where W19's continuation reduced them.
+  - Then the effect depends on practising composed plans after the base tasks, not with them.
+  - The decoder's recipe becomes W13 followed by W19's continuation: still trained once, in two
+    phases.
+- *A regression on the base tasks or on rough.*
+  - It is reported, and the recipe is not adopted as it stands.
+  - The share of cross-fitted plans is the next lever.
+- *Any failure* is reported with its figures and reframed. Nothing is tuned after the reading.
+
+**Budget** (W19's trainings took about 6.6 s per iteration on the G1 and 10 s on the NAO, wall
+clock from its status file).
+- Per tracker:
+  - about 1.9 h of training (G1) or 2.9 h (NAO);
+  - about 45 min of L4.
+- The screen takes about 6.5 h, the full run about 13 h more.
+- One Isaac process at a time.
+
+**Result** (2026-11-09, 20:33). The reading comes from
+`python transfer/scripts/w20_compare.py --output transfer/results/w20_from_s.json`. The
+instrumentation comes from
+`python transfer/scripts/w20_starts.py --output transfer/results/w20_starts.json`, read after the
+screen.
+
+Sidestep under `mt18_no_sidestep`, three seeds per body:
+
+| Body | W13 falls | W19 `xf` falls | `xs` falls | Falls, `xs − mt` paired | Bar (`mt17_c` + 2) | `xs` directed, min | Deviation, `xs − mt` | Reading |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| G1 | 265 | 67 | **15** | −83.3 ± 18.2 | 26 | 1.10 | +0.030 ± 0.005, hurt | fixes the falls |
+| NAO | 394 | 1 | **0** | −131.3 ± 52.3 | 2 | 1.09 | −0.004 ± 0.015, none | fixes the falls |
+
+Elsewhere, `xs − mt` paired (largest deviation; flat is the mean of its three commands, jog its
+middle one):
+
+| Body | Rough (`rough_b4`) | Flat | Jog | Walk | Falls |
+| --- | --- | --- | --- | --- | --- |
+| G1 | −0.003 ± 0.007 | **+0.011 ± 0.005, regresses** | +0.000 ± 0.002 | passes | none in either arm |
+| NAO | +0.014 ± 0.015 | −0.047 ± 0.008 | −0.011 ± 0.004 | passes | none in either arm |
+
+- *Under `mt18_no_sidestep_m`:* G1 `xs` 31 falls (`mt` 711), NAO `xs` 4 (`mt` 367). Both miss
+  that generator's bar.
+- *Runs completed without a fall* (32 per command and seed, 288 per body): G1 206 (W13), 259
+  (W19), 282 (W20); NAO 203, 287, 288.
+- *The branch that applies.* Both bodies fix the falls, but the G1 regresses on flat
+  (+0.011 ± 0.005, every seed positive), so the pre-registered branch is "a regression on the
+  base tasks":
+  - the recipe is reported and not adopted as it stands;
+  - the share of cross-fitted plans is the next lever.
+- *On the NAO alone every reading passes,* with flat and jog closer to the teacher than W13's.
+  W21 uses the NAO's `xs` decoders, as its own rule says (§10.22); adoption for the NAO is
+  decided at review. On the G1, W21 uses W19's `xf`.
+- "Fixes on both bodies with no regression" does not apply, so the choice of held-out task and
+  the third body stay open.
+
+When the bodies fall, and what the plan asked then (instrumentation):
+- *Falls happen at the start.* 73–97 % of them come within 200 steps of a reset (G1: W13 0.93,
+  W19 0.87, W20 0.73; NAO: W13 0.97).
+- *Why a start is special.* At a reset the autonomous loop fills the generator's history with
+  the body at rest. Until a resynchronisation the generator then reads its own plans, which
+  therefore do not depend on the tracker. In 18–24 % of the G1's starts and 35–44 % of the
+  NAO's, the plan stays in double support (more than 0.4 of the first recorded steps): a
+  stalled start.
+- *Who survives a stalled start* (episodes begun before the recording):
+
+  | Body | Tracker | Stalled share | Falls, stalled start | Falls, walking start |
+  | --- | --- | --- | --- | --- |
+  | G1 | W13 | 0.24 | 0.57 | 0.16 |
+  | G1 | W19 | 0.19 | 0.29 | 0.03 |
+  | G1 | W20 | 0.18 | 0.12 | 0.00 |
+  | NAO | W13 | 0.44 | 0.42 | 0.20 |
+  | NAO | W19 | 0.36 | 0.00 | 0.01 |
+  | NAO | W20 | 0.35 | 0.00 | 0.00 |
+
+- *Reading.* How often a start stalls is the generator's; whether the body survives it is the
+  tracker's. Cross-fitted plans make the trackers survive stalled starts. A hypothesis, not
+  measured: the generator never saw a start from rest, since the teachers' captures begin after
+  100 settle steps.
+- *Correction to §10.20.*
+  - "The G1's remaining falls ... with the feet apart" read the separation over living steps
+    after the first 100 recorded ones, which leave out most falls' context. The falls are
+    start-up failures, as above.
+  - "In the autonomous loop the plans follow the body" holds only after a resynchronisation
+    (`resync_error`, 25 tolerances for 6 steps); before it, the generator reads its own plans.
+  - No run or criterion depended on either statement.
+
+### 10.22 The learned latent, from free to collapsed, on the best decoders; pre-registered (W21)
+
+Pre-registered 2026-11-08, 19:15, before any of its runs, while W20 runs. It puts the learned
+latent on the best decoders so far, with a bottleneck in its loss.
+
+**A correction first: the leakage gate of W16 and W17 was mis-specified.**
+- *What the gate read.* A probe told the bodies apart from the generator's history summary,
+  and the gate compared it with the same probe on shuffled labels.
+- *What it missed.* The summary is a function of the `z*` history, so it cannot tell the
+  bodies apart better than the history does. And the history already tells them apart.
+  `python transfer/scripts/w21_leakage.py --generators mt18_no_sidestep mt18_no_sidestep_m
+  mt17_l mt16_l --output transfer/results/w21_leakage_existing.json` gives, on one set of
+  probe pairs:
+
+  | Generator | Summary | `z*` window (reference) | Beyond the window |
+  | --- | --- | --- | --- |
+  | `mt18_no_sidestep` | 0.9985 | 0.9981 | +0.0004 |
+  | `mt18_no_sidestep_m` (free summary) | 0.9991 | 0.9981 | +0.0010 |
+  | `mt17_l` (MMD) | 0.9961 | 0.9981 | −0.0021 |
+  | `mt16_l` (adversary) | 0.9545 | 0.9981 | −0.0436 |
+
+- *What it means.* The bodies execute the tasks differently in `z*` itself. To pass the old
+  gate, a summary had to erase gait state the contract carries. That is why the adversary broke
+  its generator (W16) and the MMD constraint was never met (W17).
+- *The corrected gate* (`latent/body_data.leakage`, reference `window_*`). A summary leaks the
+  body beyond the contract when it beats the `z*` window by more than 3 SE of the difference.
+  Every generator above passes it.
+- *What the wrong gate affected.*
+  - W16's and W17's reading "learned part: not evaluated, leakage gate fails".
+  - Under the corrected gate, `mt17_l` would have been deployed. `mt16_l` passes it too, but its
+    generator was broken (calibration error 0.42 against the gate's 0.05) and is not deployed.
+- *Also corrected.* In W16 and W17 the arms called "`z*` only" still had a free learned summary
+  of the history, so they were learned latents too. A generator without one is arm `z` below.
+
+**Hypothesis.**
+- In the autonomous loop the generator follows the body's history, and on the held-out task
+  that loop compounds a decoder's error (W19: closed feet, then a standing gait asked).
+- The history summary is where the body's deviations enter the plans.
+- A bottleneck on it (a Gaussian information bottleneck, `ContractDims.summary_beta`) keeps only
+  what is worth its cost in predicting the plan. With the bodies' data paired to the teacher's
+  phase-matched futures, that is phase and command, not how a body deviates.
+- The plans should then follow the body less where it deviates, and the held-out task should
+  fall less, at some cost in deviation.
+- At the extreme (beta 1.0) the summary collapses: `z*` and the command alone. That is the
+  design's `z*`-only arm, now realised.
+
+**Steps** (`transfer/scripts/w21_latent.sh`, status `logs/contract/w21_latent.status`; it starts
+when W20 is done).
+0. **The correction.** `mt17_l` on rough's L4 on W13's six trackers, beside `mt17_m`'s rows.
+   This is W17's reading 4 as the corrected gate would have let it run.
+1. **Generators.**
+   - W18's recipe on the walk, flat, backward and jog experts; no sidestep, no rough.
+   - For each beta, the experts first (`mt21_<arm>_c`), then W16's bodies' histories, as for
+     `mt18_no_sidestep_m` (`mt21_<arm>`).
+   - The arms are `b1` (beta 0.001), `b2` (0.01) and `z` (1.0).
+   - The betas were set before training from the free summary's scale (mean squared norm
+     230–300 on 64 dimensions, against a data loss of about 0.45): about a quarter, three times,
+     and three hundred times the loss.
+   - The references, on the same data, are `c` (`mt18_no_sidestep`) and `m`
+     (`mt18_no_sidestep_m`, beta 0).
+2. **Leakage** (`w21_leakage.py` → `transfer/results/w21_leakage.json`), with the corrected gate.
+   An arm that fails is reported and not deployed.
+3. **Decoders,** per body (`w21_compare.py --decoders`).
+   - W20's `xs` if all three of its seeds are read, it regresses neither on rough nor on the
+     base tasks, and it falls less on sidestep under `mt18_no_sidestep` than W19's `xf`.
+   - Otherwise W19's `xf`.
+   - This reads sidestep, so the chosen decoders' absolute sidestep figures are not a clean
+     zero-shot estimate. The contrasts below compare generators on the same decoders, which
+     this choice does not favour.
+4. **L4** on the chosen decoders (deployed path, own units):
+   - sidestep under each deployed new arm (`c`'s and `m`'s rows exist from W19 and W20);
+   - rough under `c`, `m` and each deployed new arm. Rough is held out of every generator here.
+5. **Compare** (`w21_compare.py` → `transfer/results/w21_latent.json`).
+
+**Readings,** per body, paired over the three decoders. Each contrast is read on sidestep
+(falls summed and paired, largest deviation paired) and on rough (largest deviation paired,
+falls). "Help" is below −2 SE, "hurt" above +2 SE.
+0. **The correction:** `mt17_l − mt17_m` on rough, on W13's trackers.
+1. **Leakage** beyond the `z*` history, per arm.
+2. **The learned latent:** `m − z`, the free summary against `z*` alone.
+3. **The bottleneck:** `b1 − m` and `b2 − m`.
+4. **The bodies' data:** `m − c`, the design's control.
+5. **Open objective** on sidestep per arm: W18's reading 3, with `mt17_c`'s falls on W13's
+   trackers as the bar.
+
+**What each outcome leads to.**
+- *A bottleneck helps over `m`* on the held-out falls or deviation, passes the leakage gate and
+  hurts neither task.
+  - The multi-body generator with that bottlenecked latent becomes the design's generator.
+  - Body zero-shot is next, and needs a third body; that is left open.
+- *The learned latent helps over `z*` alone* (`m − z`), and no bottleneck helps beyond it.
+  - The free summary stays. Under the corrected gate it carries no more body than the contract.
+- *Neither helps.*
+  - `z*` and the command suffice, and the learned latent is dropped as unneeded.
+  - The held-out falls are then not in the generator's history pathway, and the next question
+    returns to the decoders.
+- *If W17's `mt17_l` helps on rough* where `mt17_m` did not, the MMD summary is a candidate
+  beside the bottleneck, read on the same footing.
+- *Any failure,* including a generator that breaks, is reported with its figures and reframed.
+  Nothing is tuned after the reading.
+
+**Budget.**
+- About 40 min of generator training (six trainings).
+- L4 runs, about 7 min each, roughly 6.3 h in all:
+  - 6 for the correction;
+  - 18 on sidestep (three arms, six decoders);
+  - 30 on rough (five arms, six decoders).
+- One Isaac process at a time.
+
+**Result** (2026-11-10, 05:14). The reading comes from
+`python transfer/scripts/w21_compare.py --output transfer/results/w21_latent.json`, the leakage
+from `w21_leakage.py` (`transfer/results/w21_leakage.json`), both run by `w21_latent.sh`.
+- *An interruption, not a deviation.* The first pass (2026-11-09, 20:34–22:20) trained the
+  generators and read the leakage, but ran no L4: the decoders' names carried a carriage return
+  from Python's output on Windows, so no tracker run was found. The fix (6fbc377) strips it and
+  keeps the first leakage reading; the resumed pass ran the 48 L4 runs. Nothing was tuned.
+- *Decoders* (step 3): W20's `xs` on the NAO; W19's `xf` on the G1, where W20 regresses on flat.
+
+Leakage beyond the `z*` window (window 0.9982 on these pairs):
+
+| Generator | Summary | Beyond | 3 SE | Gate |
+| --- | --- | --- | --- | --- |
+| `c` | 0.9971 | −0.0011 | 0.0017 | passes |
+| `m` (free summary) | 0.9994 | +0.0012 | 0.0012 | fails, at the edge |
+| `b1` (beta 0.001) | 0.9744 | −0.0238 | | passes |
+| `b2` (beta 0.01) | 0.9894 | −0.0088 | | passes |
+| `z` (beta 1.0) | 0.8192 | −0.1790 | | passes |
+
+- `m` passed on W21's earlier set of pairs (+0.0010 against 0.0013,
+  `w21_leakage_existing.json`). It sits on the gate's edge, within the pairs' noise.
+- The new generators' chain fidelity is 0.39–0.42, against `m`'s 0.33 and `c`'s 0.22. Like
+  W18's, they fail the training script's chain gate, which does not decide deployment.
+
+Contrasts, paired over the three decoders ("help" below −2 SE, "hurt" above +2 SE):
+
+| Body | Contrast | Sidestep falls | Sidestep, largest | Rough, largest | Rough falls |
+| --- | --- | --- | --- | --- | --- |
+| G1 | `m − z` (learned latent) | −32.0 ± 17.5, none | +0.011 ± 0.008, none | **−0.210 ± 0.022, help** | 0 / 10 |
+| G1 | `b1 − m` | +329.7 ± 21.9, hurt | +0.109 ± 0.012, hurt | +0.161 ± 0.013, hurt | 47 / 0 |
+| G1 | `b2 − m` | +55.7 ± 21.2, hurt | −0.011 ± 0.005, none | +0.163 ± 0.002, hurt | 20 / 0 |
+| G1 | `m − c` (bodies' data) | +26.7 ± 12.3, hurt | −0.010 ± 0.005, none | −0.018 ± 0.004, help | 0 / 0 |
+| NAO | `m − z` (learned latent) | +0.7 ± 0.3, none | **−0.024 ± 0.002, help** | +0.010 ± 0.007, none | 3 / 15 |
+| NAO | `b1 − m` | +166.0 ± 23.6, hurt | −0.006 ± 0.020, none | −0.018 ± 0.010, none | 34 / 3 |
+| NAO | `b2 − m` | −1.0 ± 0.6, none | +0.017 ± 0.001, hurt | −0.030 ± 0.014, help | 14 / 3 |
+| NAO | `m − c` (bodies' data) | +1.3 ± 0.3, hurt | −0.024 ± 0.001, help | −0.014 ± 0.003, help | 3 / 0 |
+
+Open objective on sidestep (bar: `mt17_c`'s falls plus 2, i.e. 26 on the G1 and 2 on the NAO):
+- G1, on W19's `xf`: `c` 67, `m` 147, `b1` 1136, `b2` 314, `z` 243 falls. No arm passes.
+- NAO, on W20's `xs`: `c` 0, `b2` 1 and `z` 2 pass; `m` 4 and `b1` 502 miss.
+
+The correction (reading 0), `mt17_l − mt17_m` on rough on W13's trackers:
+- G1: −0.022 ± 0.033, none; falls 20 against 21.
+- NAO: −0.019 ± 0.002, help on the deviation, but 59 falls against 11 and a speed ratio down
+  to 0.80. On the bottleneck's footing (it must hurt neither task) the MMD summary is not a
+  candidate.
+
+**The branch that applies:** the learned latent helps over `z*` alone, and no bottleneck helps
+beyond it.
+- `m − z` helps on the G1's rough (−0.210 ± 0.022, and 0 falls against 10) and on the NAO's
+  sidestep deviation (−0.024 ± 0.002), and hurts nowhere.
+- `b1` hurts both bodies on sidestep's falls; `b2` hurts the G1 on sidestep's falls and on
+  rough, and the NAO on sidestep's deviation.
+- The free summary stays. Its leakage beyond the contract is at the gate's edge (passed on one
+  set of pairs, failed by a rounding margin on the other), which this result reports rather
+  than resolves.
+
+What it shows:
+- *The history summary is not where the held-out falls come from.* Collapsing it (`z`) does not
+  reduce them on either body (G1 243 against `m`'s 147; NAO 2 against 4). This agrees with
+  §10.21: the falls are start-up failures, before the plans depend on the body.
+- *The summary carries useful gait state.* Removing it costs the G1 0.21 of largest deviation on
+  rough, a task no generator here saw.
+- *The bodies' data help the deviation on rough (both bodies) and on the NAO's sidestep, and cost
+  sidestep falls on both* (G1 +27, NAO 4 against 0), as in W18.
 
 ## What this stage hands to the next
 

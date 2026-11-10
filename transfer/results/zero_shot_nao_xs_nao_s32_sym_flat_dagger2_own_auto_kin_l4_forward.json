@@ -1,0 +1,270 @@
+{
+  "criteria": {
+    "speed_ratio_min": 0.9,
+    "fall_rate_excess_max": 0.02,
+    "signature_tolerance": 0.1
+  },
+  "use_ratio_max": 0.5,
+  "settle_steps": 100,
+  "runs": {
+    "teacher": {
+      "file": "g1/rollouts/flat_play_forward.npz",
+      "driver": "teacher",
+      "steps_by_envs": [
+        900,
+        32
+      ],
+      "episodes": 64,
+      "falls": 0,
+      "fall_rate": 0.0,
+      "forward_speed": 0.18323447079431657,
+      "commanded_speed": 0.25,
+      "on_policy_disagreement_mse": 0.0,
+      "teacher_action_variance": 0.11186334490776062,
+      "signature": {
+        "speed": 0.07742934471064328,
+        "froude": 0.005995303422319622,
+        "stride_period": 0.9819591306845767,
+        "stride_length": 0.0760324520215397,
+        "duty_factor": [
+          0.47065972222222224,
+          0.5278819444444445
+        ],
+        "dcm_at_touchdown": [
+          [
+            0.0562937258790169,
+            -0.20390794933391948
+          ],
+          [
+            0.002453512607091558,
+            0.14872357324017027
+          ]
+        ],
+        "asymmetry": 0.040460965511078396,
+        "touchdowns": 4544,
+        "contact_threshold": 0.05
+      },
+      "stride_period_by_threshold": {
+        "0.01": 0.9819591306845767,
+        "0.05": 0.9819591306845767,
+        "0.10": 0.9819591306845767,
+        "0.20": 0.9819591306845767
+      },
+      "weight_shift_rhythm": {
+        "period": 0.9831842704590942,
+        "power_share": 0.5706475307593033
+      },
+      "velocity_unit": 2.534040251251619
+    },
+    "encoder": {
+      "file": "nao/rollouts/zs_xs_nao_s32_sym_flat_dagger2_own_auto_kin_forward_encoder.npz",
+      "driver": "logs\\rsl_rl\\nao_track\\2026-11-09_06-09-59_xs_nao_s32\\exported\\model_4497_sym.pt",
+      "steps_by_envs": [
+        900,
+        32
+      ],
+      "episodes": 64,
+      "falls": 0,
+      "fall_rate": 0.0,
+      "forward_speed": 0.11929600810896991,
+      "commanded_speed": 0.15388473868370056,
+      "on_policy_disagreement_mse": 0.0,
+      "teacher_action_variance": 0.7329573631286621,
+      "signature": {
+        "speed": 0.08396801539559966,
+        "froude": 0.007050627609475661,
+        "stride_period": 0.88560301273598,
+        "stride_length": 0.0743623274078042,
+        "duty_factor": [
+          0.6469444444444444,
+          0.6805208333333334
+        ],
+        "dcm_at_touchdown": [
+          [
+            0.09773250562722909,
+            -0.1852521361062633
+          ],
+          [
+            0.026612862978356633,
+            0.16069222409919007
+          ]
+        ],
+        "asymmetry": 0.039565223169862704,
+        "touchdowns": 8169,
+        "contact_threshold": 0.05
+      },
+      "stride_period_by_threshold": {
+        "0.01": 0.8898717309907742,
+        "0.05": 0.88560301273598,
+        "0.10": 0.884199408588748,
+        "0.20": 0.8958494127954937
+      },
+      "weight_shift_rhythm": {
+        "period": 0.9675792387258999,
+        "power_share": 0.13020598715995574
+      },
+      "velocity_unit": 1.5598006603409296,
+      "contract_use": {
+        "median_error_own_plan": 0.2094450145959854,
+        "median_error_other_plan": 0.6989161372184753,
+        "mean_error_own_plan": 0.24341173470020294,
+        "ratio": 0.2996711730957031,
+        "rule": "median own / median other < 0.5",
+        "passes": true
+      },
+      "asked": {
+        "forward_speed": 0.12153695680742298,
+        "signature": {
+          "speed": 0.08378049673021142,
+          "froude": 0.007019171632360966,
+          "stride_period": 0.9604196711685715,
+          "stride_length": 0.08046443711996923,
+          "duty_factor": [
+            0.525896829810901,
+            0.5779338153503893
+          ],
+          "dcm_at_touchdown": [
+            [
+              0.06606329130415993,
+              -0.20346987401828934
+            ],
+            [
+              0.009011999634228437,
+              0.15653625064322743
+            ]
+          ],
+          "asymmetry": 0.05503340092519053,
+          "touchdowns": 7524,
+          "contact_threshold": 0.05
+        },
+        "median_error_by_field": {
+          "height": 0.006819802802056074,
+          "com_velocity": 0.13898974657058716,
+          "gravity": 0.06714855879545212,
+          "base_angular_velocity": 0.6346875429153442,
+          "foot_position": 0.0728389248251915,
+          "foot_velocity": 0.20243337750434875,
+          "foot_load": 0.02054881677031517,
+          "angular_momentum": 0.17690643668174744,
+          "progress": 0.044372688978910446
+        },
+        "generator_share": {
+          "stride_length": 0.058290703253578664,
+          "stride_period": 0.021935189401405028,
+          "duty_factor_0": 0.1173610253451825,
+          "duty_factor_1": 0.09481641005664752
+        }
+      },
+      "verdict": {
+        "speed_ratio": 1.0577015541088721,
+        "fall_rate_excess": 0.0,
+        "signature_deviation": {
+          "stride_length": 0.021965944400456294,
+          "stride_period": 0.09812640357182861,
+          "duty_factor_0": 0.37454813721873836,
+          "duty_factor_1": 0.2891534565546273
+        },
+        "passes": false,
+        "supplementary_rhythm_deviation": 0.015871929812208616
+      },
+      "verdict_at_body_rate": {
+        "speed_ratio": 1.0577015541088721,
+        "fall_rate_excess": 0.0,
+        "signature_deviation": {
+          "stride_length": 0.01891573499484336,
+          "stride_period": 0.09795369413872514,
+          "duty_factor_0": 0.22036934572367645,
+          "duty_factor_1": 0.16901873385012933
+        },
+        "passes": false,
+        "supplementary_rhythm_deviation": 0.015871929812208616,
+        "teacher_signature": {
+          "speed": 0.07720339709831674,
+          "froude": 0.005960364523520381,
+          "stride_period": 0.9817711208189087,
+          "stride_length": 0.07579606570024171,
+          "duty_factor": [
+            0.5301218411552346,
+            0.5821299638989169
+          ],
+          "dcm_at_touchdown": [
+            [
+              0.06028877913442393,
+              -0.20214393550917062
+            ],
+            [
+              0.008528975050877057,
+              0.14799169640361232
+            ]
+          ],
+          "asymmetry": 0.04052348195619672,
+          "touchdowns": 4544,
+          "contact_threshold": 0.05
+        },
+        "body_dt_star": 0.125785301034367,
+        "teacher_dt_star": 0.07742576129865368
+      },
+      "verdict_at_body_rate_unbiased": {
+        "speed_ratio": 1.0577015541088721,
+        "fall_rate_excess": 0.0,
+        "signature_deviation": {
+          "stride_length": 0.019504587446115676,
+          "stride_period": 0.09849510754969723,
+          "duty_factor_0": 0.35567743630154974,
+          "duty_factor_1": 0.27354305218339836
+        },
+        "passes": false,
+        "supplementary_rhythm_deviation": 0.015871929812208616,
+        "teacher_signature": {
+          "speed": 0.07720339709831674,
+          "froude": 0.005960364523520381,
+          "stride_period": 0.9823607394175075,
+          "stride_length": 0.07584158625904588,
+          "duty_factor": [
+            0.4772111913357401,
+            0.5343524368231047
+          ],
+          "dcm_at_touchdown": [
+            [
+              0.06233759271477306,
+              -0.20662353567667663
+            ],
+            [
+              0.007626976697098902,
+              0.15134429807923838
+            ]
+          ],
+          "asymmetry": 0.042250042356007295,
+          "touchdowns": 4544,
+          "contact_threshold": 0.05
+        },
+        "teacher_signature_nearest": {
+          "speed": 0.07720339709831674,
+          "froude": 0.005960364523520381,
+          "stride_period": 0.9824062345636336,
+          "stride_length": 0.0758450986388783,
+          "duty_factor": [
+            0.4703294223826715,
+            0.5285988267148014
+          ],
+          "dcm_at_touchdown": [
+            [
+              0.06391075639637528,
+              -0.208999190054932
+            ],
+            [
+              0.007735516489338059,
+              0.15312726446610586
+            ]
+          ],
+          "asymmetry": 0.04138953946039764,
+          "touchdowns": 4542,
+          "contact_threshold": 0.05
+        },
+        "loads": "log",
+        "body_dt_star": 0.125785301034367,
+        "teacher_dt_star": 0.07742576129865368
+      }
+    }
+  }
+}

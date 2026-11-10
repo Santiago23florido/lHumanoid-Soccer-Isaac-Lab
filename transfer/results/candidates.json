@@ -1,5 +1,5 @@
 {
-  "note": "Candidates from feat/contact-fidelity that met incumbents.json's adoption rule. incumbents.json is not changed: the assignment keeps the original incumbents, and adoption is the user's decision at review. Every figure is read from the evidence files named here, not copied.",
+  "note": "Candidates from feat/contact-fidelity and docs/method-theory that met incumbents.json's adoption rule. incumbents.json is not changed: the assignment keeps the original incumbents, and adoption is decided at review. Every figure is read from the evidence files named here, not copied.",
   "candidates": {
     "g1_plan_contact_ground": {
       "body": "g1",
@@ -18,6 +18,27 @@
       "evidence": [
         "transfer/results/w8_plan_contact.json",
         "transfer/results/zero_shot_g1_warm_r3_*_ground_*_auto_kin_*.json"
+      ],
+      "status": "meets the rule; not adopted"
+    },
+    "g1_plan_contact_stick": {
+      "body": "g1",
+      "change": "HUMANOID_PLAN_CONTACT=stick at deployment (ReferenceCommandCfg.plan_contact, latent/plan_contact.stick_loaded_feet): each foot the task's plan loads above the contact threshold is put on the ground, as ground does, and its sole velocity is set to zero. Trackers, generators and encoders unchanged; the default stays as_drawn, so every earlier command reproduces.",
+      "trackers": ["warm_r3_logload_sym", "warm_r3_s42_log_sym", "warm_r3_s43_log_sym"],
+      "pre_registration": "transfer/docs/skill_space.md section 10.11 (W9)",
+      "target": "g1.target_met in transfer/results/w9_stick.json (rough's L4 largest deviation below g1_plan_contact_ground's, seed-paired, by more than 2 SE; flat no worse by 2 SE)",
+      "regression_suite": {
+        "pytest_and_ruff": "passed at d7f881a (2026-11-06)",
+        "chains": "rough_b3, rough_b4, flat_b4 byte-identical to transfer/results/chain_fidelity_<name>_x1.json (regression_s0.sh's chain loop, at d7f881a); plan_contact acts in the command, not the generator",
+        "flat_l4_g1": "w9_stick.json g1.difference.flat_dagger2.largest",
+        "walk": "w9_stick.json g1.no_regression.walk and g1.pairs[*].after.walk",
+        "nao": "unaffected: the NAO's deployment keeps as_drawn"
+      },
+      "relation": "an alternative to g1_plan_contact_ground, compared against it; at most one of the two would be adopted",
+      "not_for": "nao: W9's NAO target failed (w9_stick.json nao.target_met; the duty deviation over both skills rises)",
+      "evidence": [
+        "transfer/results/w9_stick.json",
+        "transfer/results/zero_shot_g1_warm_r3_*_stick_*_auto_kin*.json"
       ],
       "status": "meets the rule; not adopted"
     }

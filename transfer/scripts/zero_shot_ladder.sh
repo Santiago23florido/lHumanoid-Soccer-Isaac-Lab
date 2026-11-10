@@ -54,6 +54,19 @@ else
 fast 0.6 0 0
 turning 0.3 0.2 0.3"
 fi
+# ZS_COMMANDS: another task's L4 commands, one "name vx vy wz" per line (G1 units), read
+# against g1/rollouts/${task}_${ZS_TEACHER_ROLLOUT}_<name>.npz -- a base task's
+# (method_revision.md §6). ZS_TEACHER_ROLLOUT is "play" unless a task's references were
+# captured elsewhere (backward's in its training variant, skill_space.md §10.12).
+commands="${ZS_COMMANDS:-$commands}"
+teacher_rollout="${ZS_TEACHER_ROLLOUT:-play}"
+# ZS_OBSERVE=own: in L4 the tracker observes each z* in the units of the walk contract it
+# trained under, not the task's (HUMANOID_OBSERVE_UNITS, skill_space.md §10.15). Its captures
+# and results carry "_own" after the generator's name, and only the deployed run is captured
+# unless ZS_OWN_TRUTH=1.
+observe="${ZS_OBSERVE:-task}"
+own=""
+if [ "$observe" = own ]; then own="_own"; fi
 if [ "$body" = g1 ]; then
   # ZS_TASK_ID: another tracking task of the same body (the physics tracker's, say).
   task_id="${ZS_TASK_ID:-G1Track-Play-v0}"
@@ -98,6 +111,8 @@ assets_online() {
   done
 }
 
+# ZS_STEPS / ZS_SETTLE: recorded and unrecorded steps of every capture (900 and 100). With
+# ZS_SETTLE=0 a capture holds the body's state after a reset (skill_space.md §10.19).
 capture() {
   local name="$1" attempt log
   shift
@@ -105,7 +120,7 @@ capture() {
   for attempt in 1 2 3; do
     until assets_online; do sleep 60; done
     "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task_id" \
-      --driver-policy "$policy" --steps 900 --settle-steps 100 "$@" \
+      --driver-policy "$policy" --steps "${ZS_STEPS:-900}" --settle-steps "${ZS_SETTLE:-100}" "$@" \
       --output "$rollouts/zs_${tag}_${name}.npz" > "$log" 2>&1
     grep -aqE "Unable to open the usd file at path: https|USD file not found at path at: 'https" "$log" || break
     echo "capture $name: an asset could not be opened (attempt $attempt); retrying"
@@ -182,6 +197,35 @@ if want l3; then
 fi
 if want l4; then
   export HUMANOID_CONTRACT="$root/$task_zs"
+  if [ -n "$own" ]; then
+    export HUMANOID_OBSERVE_UNITS="$root/$walk"
+    while read -r name vx vy wz; do
+      vx=$("$python" -c "print($vx * $speed_scale)")
+      vy=$("$python" -c "print($vy * $speed_scale)")
+      wz=$("$python" -c "print($wz * $turn_scale)")
+      encoder="$rollouts/zs_${tag}_${generator_name}${own}${mode}${est}_${name}_encoder.npz"
+      # ZS_OWN_TRUTH=1 adds the true-state run (the paper's decomposition reads it), and keeps a
+      # deployed capture already on disk, so a reading taken from it is scored again unchanged.
+      if [ "${ZS_OWN_TRUTH:-0}" != 1 ] || [ ! -f "$encoder" ]; then
+        capture "${generator_name}${own}${mode}${est}_${name}_encoder" --num-envs 32 \
+          --reference "$reference" --estimator "$estimator" --command "$vx" "$vy" "$wz"
+      fi
+      truth_run=()
+      if [ "${ZS_OWN_TRUTH:-0}" = 1 ]; then
+        truth="$rollouts/zs_${tag}_${generator_name}${own}${mode}_${name}_truth.npz"
+        [ -f "$truth" ] || capture "${generator_name}${own}${mode}_${name}_truth" --num-envs 32 \
+          --reference "$reference" --contract-from-truth --command "$vx" "$vy" "$wz"
+        truth_run=(--run "truth=$truth")
+      fi
+      "$python" transfer/scripts/evaluate_contract.py \
+        --run "teacher=g1/rollouts/${task}_${teacher_rollout}_${name}.npz" \
+        --run "encoder=$encoder" "${truth_run[@]}" \
+        --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${own}${mode}${est}_l4_${name}.json" \
+        | grep -v "^  [^a]"
+    done <<< "$commands"
+    unset HUMANOID_OBSERVE_UNITS
+    exit 0  # l4 is the ladder's last stage
+  fi
   while read -r name vx vy wz; do
     vx=$("$python" -c "print($vx * $speed_scale)")
     vy=$("$python" -c "print($vy * $speed_scale)")
@@ -195,7 +239,7 @@ if want l4; then
         --contract-from-truth --command "$vx" "$vy" "$wz"
     fi
     "$python" transfer/scripts/evaluate_contract.py \
-      --run "teacher=g1/rollouts/${task}_play_${name}.npz" \
+      --run "teacher=g1/rollouts/${task}_${teacher_rollout}_${name}.npz" \
       --run "encoder=$rollouts/zs_${tag}_${generator_name}${mode}${est}_${name}_encoder.npz" \
       --run "truth=$truth" \
       --output "transfer/results/zero_shot_${body}_${tag}_${generator_name}${mode}${est}_l4_${name}.json" \

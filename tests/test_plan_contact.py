@@ -1,4 +1,4 @@
-"""A plan's loaded feet put on the ground (``latent/plan_contact.py``)."""
+"""A plan's loaded feet put on the ground, and held still (``latent/plan_contact.py``)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,17 @@ torch = pytest.importorskip("torch")
 from humanoid_transfer.common.contact import foot_height  # noqa: E402
 from humanoid_transfer.common.skill_state import SKILL_LAYOUT  # noqa: E402
 from humanoid_transfer.transfer.latent.model import Normaliser  # noqa: E402
-from humanoid_transfer.transfer.latent.plan_contact import ground_loaded_feet  # noqa: E402
+from humanoid_transfer.transfer.latent.plan_contact import (  # noqa: E402
+    apply_plan_contact,
+    ground_loaded_feet,
+    stick_loaded_feet,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 LOADS = SKILL_LAYOUT.slice_of("foot_load")
 FEET = SKILL_LAYOUT.slice_of("foot_position")
 HEIGHT = SKILL_LAYOUT.slice_of("height")
+VELOCITY = SKILL_LAYOUT.slice_of("foot_velocity")
 
 
 def _norm() -> Normaliser:
@@ -84,3 +89,41 @@ def test_both_tasks_read_the_switch_with_the_plan_as_drawn_by_default(cfg):
         and node.args[0].value == "HUMANOID_PLAN_CONTACT"
     ]
     assert len(calls) == 1 and calls[0].args[1].value == "as_drawn"
+
+
+def test_stick_grounds_and_stills_loaded_feet_and_nothing_else_moves():
+    norm = _norm().double()
+    physical = _plan()
+    physical[..., VELOCITY] = 0.1  # every foot moving, loaded or not
+    rows = norm(physical)
+    stuck = stick_loaded_feet(rows, norm)
+    out = norm.inverse(stuck)
+    left_velocity = slice(VELOCITY.start, VELOCITY.start + 3)
+    assert out[..., :3, left_velocity] == pytest.approx(0.0, abs=1e-12)  # loaded: still
+    assert foot_height(out.numpy())[..., :3, 0] == pytest.approx(0.0, abs=1e-12)  # and grounded
+    grounded = ground_loaded_feet(rows, norm)
+    assert torch.equal(stuck[..., 3:, :], grounded[..., 3:, :])  # unloaded rows: as grounding
+    changed = torch.zeros(SKILL_LAYOUT.size, dtype=torch.bool)
+    changed[FEET.start + 2] = True
+    changed[left_velocity] = True
+    assert torch.equal(stuck[..., ~changed], rows[..., ~changed])  # bit for bit
+    right_velocity = slice(VELOCITY.start + 3, VELOCITY.start + 6)
+    assert torch.equal(stuck[..., right_velocity], rows[..., right_velocity])  # never loaded
+
+
+def test_stick_is_idempotent():
+    norm = _norm().double()
+    physical = _plan()
+    physical[..., VELOCITY] = 0.1
+    once = stick_loaded_feet(norm(physical), norm)
+    assert torch.allclose(stick_loaded_feet(once, norm), once, atol=1e-12)
+
+
+def test_the_modes_dispatch_and_as_drawn_is_the_plan_itself():
+    norm = _norm().double()
+    rows = norm(_plan())
+    assert apply_plan_contact(rows, norm, "as_drawn") is rows
+    assert torch.equal(apply_plan_contact(rows, norm, "ground"), ground_loaded_feet(rows, norm))
+    assert torch.equal(apply_plan_contact(rows, norm, "stick"), stick_loaded_feet(rows, norm))
+    with pytest.raises(ValueError):
+        apply_plan_contact(rows, norm, "slide")

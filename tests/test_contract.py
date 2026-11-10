@@ -159,6 +159,59 @@ def test_a_saved_contract_samples_the_same_plans(tmp_path, kind: str) -> None:
     assert loaded.encoder is None
 
 
+def test_without_a_bottleneck_the_conditioning_and_the_loss_are_as_before() -> None:
+    torch.manual_seed(0)
+    generator = ContractGenerator(SMALL, CLOCK).train()
+    window, command = torch.randn(5, CLOCK.history, 27), torch.randn(5, 3)
+    assert SMALL.summary_beta == 0.0
+    assert torch.equal(generator.condition(window, command), generator.condition(window, command))
+    loss = contract_loss(generator, window, command, torch.randn(5, CLOCK.horizon, 27), 0.0)
+    assert set(loss) == {"total", "flow"} and torch.equal(loss["total"], loss["flow"])
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_bottleneck_adds_noise_in_training_only_and_its_cost_to_the_loss(kind: str) -> None:
+    torch.manual_seed(0)
+    dims = replace(SMALL, kind=kind, summary_beta=0.5)
+    generator = ContractGenerator(dims, CLOCK)
+    window, command = torch.randn(5, CLOCK.history, 27), torch.randn(5, 3)
+    generator.train()
+    assert not torch.equal(
+        generator.condition(window, command), generator.condition(window, command)
+    )
+    generator.eval()
+    with torch.no_grad():
+        clean = generator.condition(window, command)
+        assert torch.equal(clean, generator.condition(window, command))
+        summary = generator.memory(window)
+        assert torch.equal(clean[:, 27 : 27 + dims.memory], summary)
+    generator.train()
+    future = torch.randn(5, CLOCK.horizon, 27)
+    torch.manual_seed(1)
+    loss = contract_loss(generator, window, command, future, 0.0)
+    kl = 0.5 * generator.memory(generator.warp(window)).pow(2).sum(dim=-1).mean()
+    assert torch.allclose(loss["summary_kl"], kl)
+    base = loss["flow"] if kind == "flow" else loss["nll"] + loss["kl"]  # free bits 0
+    assert torch.allclose(loss["total"], base + 0.5 * kl)
+
+
+def test_a_saved_contract_keeps_its_bottleneck(tmp_path) -> None:
+    torch.manual_seed(0)
+    dims = replace(SMALL, summary_beta=0.01)
+    generator = ContractGenerator(dims, CLOCK).eval()
+    path = tmp_path / "generator.pt"
+    save_contract(path, Contract(generator, None, torch.rand(27), {}), dims, CLOCK, 120)
+    loaded = load_contract(path)
+    assert loaded.generator.summary_beta == 0.01 and not loaded.generator.training
+    window, command = torch.randn(3, CLOCK.history, 27), torch.randn(3, 3)
+    noise = torch.randn(3, generator.noise_size)
+    with torch.no_grad():
+        assert torch.allclose(
+            loaded.generator.sample(window, command, noise),
+            generator.sample(window, command, noise),
+        )
+
+
 def test_a_plans_integrals_are_its_distance_and_turn() -> None:
     from humanoid_transfer.transfer.latent.contract import plan_integrals
 

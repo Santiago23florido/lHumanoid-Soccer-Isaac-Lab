@@ -36,6 +36,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 
 from humanoid_transfer.common.similarity import TIME, UnitSystem  # noqa: E402
+from humanoid_transfer.transfer.latent.body_data import (  # noqa: E402
+    body_pairs,
+    leakage,
+    load_body_streams,
+    train_on_bodies,
+)
 from humanoid_transfer.transfer.latent.contract import (  # noqa: E402
     Contract,
     ContractClock,
@@ -44,6 +50,7 @@ from humanoid_transfer.transfer.latent.contract import (  # noqa: E402
     save_contract,
 )
 from humanoid_transfer.transfer.latent.events import contact_events  # noqa: E402
+from humanoid_transfer.transfer.latent.hindsight import relabel  # noqa: E402
 from humanoid_transfer.transfer.latent.model import G1_OBSERVATION  # noqa: E402
 from humanoid_transfer.transfer.latent.sequences import load_streams  # noqa: E402
 from humanoid_transfer.transfer.latent.train_contract import (  # noqa: E402
@@ -123,6 +130,13 @@ def main() -> int:
         help="Model foot loads as log(load + 0.01): forces are never negative.",
     )
     parser.add_argument("--memory", type=int, default=64, help="Width of the history summary.")
+    parser.add_argument(
+        "--summary-beta",
+        type=float,
+        default=0.0,
+        help="Weight of a Gaussian bottleneck on the history summary (latent/contract.py, "
+        "ContractDims.summary_beta); 0: none.",
+    )
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--flow-hidden", type=int, default=1024)
     parser.add_argument(
@@ -178,6 +192,57 @@ def main() -> int:
     )
     parser.add_argument("--samples", type=int, default=32)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--body-data",
+        type=Path,
+        action="append",
+        help="A body's capture (capture_contract.py) of a base task; repeat. Its histories are "
+        "trained on as --body-targets says (latent/body_data.py). Bodies are told apart by "
+        "leg length, the teacher's first (group 0).",
+    )
+    parser.add_argument("--body-targets", choices=("teacher", "own"), default="teacher")
+    parser.add_argument(
+        "--pair-command",
+        choices=("body", "target"),
+        default="body",
+        help="The command a body pair is trained with: the body's given one, or (teacher "
+        "targets) the teacher's at the step its target future came from.",
+    )
+    parser.add_argument(
+        "--relabel-span",
+        type=int,
+        default=0,
+        help="Train on the command each future achieved, its mean over this many samples "
+        "(latent/hindsight.py; the data and the gait); 0: the command the expert was given.",
+    )
+    parser.add_argument(
+        "--init-from",
+        type=Path,
+        default=None,
+        help="Start from this generator (generator.pt) trained on the same --data, and skip "
+        "training on the data: arms that differ only in what follows start from one model.",
+    )
+    parser.add_argument("--body-pairs", type=int, default=200000, help="Histories drawn.")
+    parser.add_argument(
+        "--body-epochs",
+        type=int,
+        default=100,
+        help="Epochs on the bodies' pairs; 0 only measures the summary's leakage on them.",
+    )
+    parser.add_argument(
+        "--invariance",
+        type=float,
+        default=0.0,
+        help="Weight of the reversed gradient that trains the history summary to carry no "
+        "body (an adversary on the bodies' and the teacher's windows); 0: none. With "
+        "--invariance-kind mmd, the initial multiplier of the MMD constraint.",
+    )
+    parser.add_argument(
+        "--invariance-kind",
+        choices=("adversary", "mmd"),
+        default="adversary",
+        help="How the summary is trained to carry no body (latent/body_data.py).",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--logdir", type=Path, default=REPO_ROOT / "logs/contract")
     parser.add_argument("--results", type=Path, default=None)
@@ -194,6 +259,9 @@ def main() -> int:
 
     streams = load_streams(paths).to(args.device)
     gait = load_streams([args.gait]).to(args.device)
+    if args.relabel_span > 0:
+        streams = relabel(streams, args.relabel_span)
+        gait = relabel(gait, args.relabel_span)
     envs = int(archive["done"].shape[1])
     held_out = (streams.capture == 0) & (streams.env >= envs - args.val_envs)
 
@@ -208,6 +276,7 @@ def main() -> int:
             warp_loads=args.warp_loads,
             noise_conditional=args.noise_conditional,
             memory=args.memory,
+            summary_beta=args.summary_beta,
             channels=args.channels,
             flow_hidden=args.flow_hidden,
         ),
@@ -291,7 +360,11 @@ def main() -> int:
         return float(max(block["calibration_error"]))
 
     started = time.time()
-    history = train_generator(streams, train_steps, generator, args.noise_scale * sigma, config)
+    if args.init_from is None:
+        history = train_generator(streams, train_steps, generator, args.noise_scale * sigma, config)
+    else:
+        generator.load_state_dict(load_contract(args.init_from, args.device).generator.state_dict())
+        history = [{"init_from": _display(args.init_from)}]
     chain = ChainConfig(
         rounds=args.chain_rounds,
         plans=args.chain_plans,
@@ -299,6 +372,66 @@ def main() -> int:
         epochs=args.chain_epochs,
         targets=args.chain_targets,
     )
+    bodies = None
+    if args.body_data:
+        lengths = [float(np.load(p)["leg_length"]) for p in args.body_data]
+        ranked = sorted({units.length, *lengths}, reverse=True)
+        body, capture = load_body_streams(args.body_data)
+        body = body.to(args.device)
+        groups = torch.as_tensor([ranked.index(x) for x in lengths], device=args.device)
+        groups = groups[capture.to(args.device)]
+        pairs = body_pairs(
+            generator,
+            body,
+            groups,
+            streams,
+            train_steps,
+            args.body_targets,
+            args.body_pairs,
+            seed=args.seed,
+            command_from=args.pair_command,
+        )
+        body_log = []
+        if args.body_epochs > 0:
+            body_log = train_on_bodies(
+                streams,
+                train_steps,
+                val_steps,
+                generator,
+                args.noise_scale * sigma,
+                config,
+                pairs,
+                args.body_epochs,
+                args.invariance,
+                args.seed,
+                args.invariance_kind,
+            )
+            print(f"[bodies] {body_log[-1]}")
+        probe_pairs = body_pairs(
+            generator,
+            body,
+            groups,
+            streams,
+            train_steps,
+            "own",
+            min(args.body_pairs, 50000),
+            seed=args.seed + 1,
+        )
+        leak = leakage(generator, probe_pairs, sigma, seed=args.seed)
+        print(f"[leakage] {leak}")
+        bodies = {
+            "captures": [_display(p) for p in args.body_data],
+            "groups": [ranked.index(x) for x in lengths],
+            "leg_lengths": lengths,
+            "targets": args.body_targets,
+            "pairs": len(pairs),
+            "epochs": args.body_epochs,
+            "invariance": args.invariance,
+            "invariance_kind": args.invariance_kind,
+            "pair_command": args.pair_command,
+            "log": body_log,
+            "leakage": leak,
+        }
     chain_log = []
     if chain.rounds and args.chain_objective == "rhythm":
         chain_log = train_on_rhythm(
@@ -370,6 +503,7 @@ def main() -> int:
         "control_dt": float(archive["control_dt"]),
         "captures": [_display(p) for p in paths],
         "teacher_sha256": str(archive["teacher_sha256"]),
+        "relabel_span": args.relabel_span,
     }
     save_contract(
         path,
@@ -391,6 +525,7 @@ def main() -> int:
             "validation_envs": args.val_envs,
             "teacher_sha256": meta["teacher_sha256"],
             "dt_star": dt_star,
+            "relabel_span": args.relabel_span,
         },
         "clock": {
             "step": clock.step,
@@ -407,6 +542,7 @@ def main() -> int:
             "free_bits": config.free_bits,
             "intent": config.dims.intent,
             "kind": config.dims.kind,
+            "summary_beta": config.dims.summary_beta,
             "noise_scale": args.noise_scale,
             "memory": config.dims.memory,
             "channels": config.dims.channels,
@@ -441,6 +577,7 @@ def main() -> int:
             "passes": passes,
         },
         "chain_fidelity": chain_measured,
+        "bodies": bodies,
         "artifact": _display(path),
     }
     results.parent.mkdir(parents=True, exist_ok=True)

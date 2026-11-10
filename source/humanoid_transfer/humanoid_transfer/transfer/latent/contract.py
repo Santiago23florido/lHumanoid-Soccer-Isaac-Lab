@@ -113,6 +113,14 @@ class ContractDims:
     noise_conditional: bool = False
     """Read the history's noise level as an input (see :class:`ContractGenerator`)."""
 
+    summary_beta: float = 0.0
+    """A Gaussian bottleneck on the history summary (a variational information bottleneck
+    with a unit posterior variance, Alemi et al., 2017). In training the summary reaches the
+    rest of the generator with unit noise added, and ``summary_beta`` times half its squared
+    norm, the KL of ``N(summary, I)`` to ``N(0, I)``, joins the loss: the summary keeps only
+    what is worth its cost in predicting the plan. At inference it is used without noise.
+    0: none, the generator as before."""
+
 
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
 _LOAD_EPS = 0.01
@@ -179,6 +187,7 @@ class ContractGenerator(nn.Module):
         self.flow_solver = dims.flow_solver
         self.warp_loads = dims.warp_loads
         self.noise_conditional = dims.noise_conditional
+        self.summary_beta = dims.summary_beta
         if self.noise_conditional:
             # log of the history noise's scale, in units of the encoder's own error: zero is
             # what a deployed body's encoder reads with (see :meth:`condition`).
@@ -237,7 +246,11 @@ class ContractGenerator(nn.Module):
         self.warp_std.copy_(logged.std(dim=0).clamp(min=1e-3))
 
     def condition(
-        self, window: torch.Tensor, command: torch.Tensor, level: torch.Tensor | None = None
+        self,
+        window: torch.Tensor,
+        command: torch.Tensor,
+        level: torch.Tensor | None = None,
+        summary: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """``(B, history, skill)`` window in the generator's space -> conditioning.
 
@@ -248,8 +261,16 @@ class ContractGenerator(nn.Module):
         far as its noise allows -- reading the gait's phase where the noise is the
         encoder's, staying robust where a body or a state reads worse -- with no
         level fixed in training.
+
+        ``summary``: the history summary, if the caller has computed it (the loss needs it
+        for the bottleneck's cost); otherwise :attr:`memory` of ``window``. With
+        :attr:`summary_beta` > 0 it passes through the bottleneck's noise in training.
         """
-        parts = [window[:, -1], self.memory(window), self.command_norm(command)]
+        if summary is None:
+            summary = self.memory(window)
+        if self.summary_beta > 0.0 and self.training:
+            summary = summary + torch.randn_like(summary)
+        parts = [window[:, -1], summary, self.command_norm(command)]
         if self.noise_conditional:
             if level is None:
                 level = self.noise_level.expand(len(window), 1)
@@ -360,9 +381,14 @@ def contract_loss(
     matching on the straight path from noise to the standardised residual;
     for ``cvae``, the negative evidence lower bound, with ``free_bits`` a
     floor on the KL of each intent dimension so the intent cannot collapse.
+
+    With :attr:`ContractGenerator.summary_beta` > 0, the history bottleneck's cost
+    (``summary_beta`` times half the summary's squared norm, batch mean) joins ``total``
+    and is reported as ``summary_kl`` (the KL itself, without the weight).
     """
     window, future = generator.warp(window), generator.warp(future)
-    condition = generator.condition(window, command, level)
+    summary = generator.memory(window)
+    condition = generator.condition(window, command, level, summary=summary)
     residual = future - window[:, -1:]
     if generator.kind == "flow":
         target = generator.residual_norm(residual.flatten(1))
@@ -370,7 +396,7 @@ def contract_loss(
         t = torch.rand(target.shape[0], 1, device=target.device)
         moved = (1.0 - t) * source + t * target
         flow = (generator.flow_velocity(moved, t, condition) - (target - source)).pow(2).mean()
-        return {"total": flow, "flow": flow}
+        return _with_bottleneck(generator, summary, {"total": flow, "flow": flow})
     mean_q, log_std_q = generator.posterior_params(condition, residual)
     mean_p, log_std_p = generator.prior_params(condition)
     intent = mean_q + torch.exp(log_std_q) * torch.randn_like(mean_q)
@@ -381,11 +407,25 @@ def contract_loss(
     kl = gaussian_kl(mean_q, log_std_q, mean_p, log_std_p)
     per_dimension = kl.mean(dim=0)
     floored = per_dimension.clamp(min=free_bits).sum()
-    return {
-        "total": nll.mean() + floored,
-        "nll": nll.mean(),
-        "kl": per_dimension.sum(),
-    }
+    return _with_bottleneck(
+        generator,
+        summary,
+        {
+            "total": nll.mean() + floored,
+            "nll": nll.mean(),
+            "kl": per_dimension.sum(),
+        },
+    )
+
+
+def _with_bottleneck(
+    generator: ContractGenerator, summary: torch.Tensor, loss: dict[str, torch.Tensor]
+) -> dict[str, torch.Tensor]:
+    """``loss`` with the history bottleneck's cost added to its total, if the generator has one."""
+    if generator.summary_beta <= 0.0:
+        return loss
+    kl = 0.5 * summary.pow(2).sum(dim=-1).mean()
+    return {**loss, "total": loss["total"] + generator.summary_beta * kl, "summary_kl": kl}
 
 
 @dataclass

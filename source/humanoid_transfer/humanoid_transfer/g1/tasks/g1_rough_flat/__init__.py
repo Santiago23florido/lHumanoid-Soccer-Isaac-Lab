@@ -1,6 +1,6 @@
 """Isaac Lab's rough-terrain G1 policy on flat ground: ``G1RoughOnFlat-v0`` / ``-Play-v0``.
 
-The blind task of the zero-shot study (``transfer/docs/skill_space.md`` §8):
+The blind task of the zero-shot study:
 the published ``Isaac-Velocity-Rough-G1-v0`` checkpoint drives it through
 ``g1/scripts/capture_rollouts.py --checkpoint``. Registration is guarded like
 the teacher's, so importing the package without Isaac Lab degrades to

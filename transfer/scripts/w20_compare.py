@@ -1,4 +1,4 @@
-"""W20's pre-registered reading (``skill_space.md`` §10.21): W13's decoder recipe with W19's
+"""W20's reading: W13's decoder recipe with W19's
 cross-fitted plans, trained once from S.
 
 Arms, per seed, both S's incumbent continued 1000 iterations in W13's conditions:

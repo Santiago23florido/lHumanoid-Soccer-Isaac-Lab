@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W14 of skill_space.md §10.15: the NAO's frozen trackers observing each z* in the units of the
+# W14: the NAO's frozen trackers observing each z* in the units of the
 # walk contract they trained under (ZS_OBSERVE=own -> HUMANOID_OBSERVE_UNITS), L4 on the
 # deployed path, paired with the same trackers' captures in the task's units (w14_compare.py).
 # Nothing is trained, and the G1 is not run: its map is the identity.

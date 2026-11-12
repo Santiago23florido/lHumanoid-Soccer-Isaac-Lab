@@ -13,7 +13,7 @@ In the body's own units and its heading frame, per foot, left then right:
   while the foot carries less than :data:`LOADED` of the body's weight;
 * the ground force, ``/ m g``, ``(x, y, z)``.
 
-What a critic and a tracker's physics heads read (decoder v2, skill_space.md §9);
+What a critic and a tracker's physics heads read (decoder v2);
 it is not part of the contract.
 """
 

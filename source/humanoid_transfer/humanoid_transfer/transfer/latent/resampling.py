@@ -11,7 +11,7 @@ the weight) and a swing sample (zero), a linear blend stays above 5 % for nine t
 the interval. On the NAO (step 0.126 ``T``) the plans it was asked to follow carried
 duty factors 0.03--0.06 above the same generator's on the G1, and the teacher's own gait
 read the same way when resampled -- although a duty factor, a fraction of time, does not
-depend on the rate it is sampled at (``skill_space.md`` §10). In the generator's own space
+depend on the rate it is sampled at. In the generator's own space
 (loads as ``log(load + 0.01)``, :meth:`~.contract.ContractGenerator.warp`) zero load is far
 from any stance, a blend crosses the threshold near the middle of the interval, and the
 duty is kept. ``resample_rows(..., space="generator")`` interpolates there.

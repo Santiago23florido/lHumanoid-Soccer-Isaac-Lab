@@ -1,4 +1,4 @@
-"""W21's leakage reading (``skill_space.md`` §10.22): how much body each generator's history
+"""W21's leakage reading: how much body each generator's history
 summary carries beyond the ``z*`` history it summarises.
 
 For every generator named, on one set of probe pairs (the bodies' own histories, as
@@ -6,7 +6,7 @@ For every generator named, on one set of probe pairs (the bodies' own histories,
 ``latent/body_data.leakage``, whose reference is the same probe on the same noisy ``z*``
 windows. Every generator is read on the same device and pairs, so their figures compare.
 
-The gate (pre-registered in §10.22): a summary passes when its balanced accuracy exceeds the
+The gate: a summary passes when its balanced accuracy exceeds the
 window's by at most 3 SE of the difference (the two binomial SE combined).
 
     python transfer/scripts/w21_leakage.py --generators mt18_no_sidestep mt18_no_sidestep_m \\

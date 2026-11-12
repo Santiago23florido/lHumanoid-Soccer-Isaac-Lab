@@ -66,8 +66,7 @@ keeps is a result to report (``transfer.feasibility.standing_margin``), so it
 cannot also be the reason the speed was picked.
 
 What would actually falsify this number: a student that cannot walk at
-0.15 m/s with ``lambda_im = 0``. That is the baseline in
-``transfer/docs/plan.md`` step 4, and if it fails the number is wrong and the
+0.15 m/s with ``lambda_im = 0``. If that baseline fails, the number is wrong and the
 teacher has to be retrained --- which is why the teacher is pinned and hashed
 rather than regenerated silently (see ``g1/policy/README.md``).
 """

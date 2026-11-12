@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# W13 of skill_space.md §10.14: each body's decoder trained once on the base tasks, step 3 of
-# method_revision.md §6. S's recipe exactly (paper_queue.sh: each body's incumbent continued
+# W13: each body's decoder trained once on the base tasks. S's recipe exactly (paper_queue.sh: each body's incumbent continued
 # 1000 iterations in its own conditions, one run per seed), with the base tasks' plans added
 # (HUMANOID_TASKS, transfer/results/base_tasks.json) and the family's share at 0.5. S's
 # trackers, the same continuation without the tasks, are the paired control.
@@ -28,8 +27,7 @@ g1_checkpoint=model_6194
 nao_incumbent=logs/rsl_rl/nao_track/2026-10-14_19-59-50_zs_nao_r1
 nao_checkpoint=model_3498
 declare -A middle=([backward]="mid -0.35 0 0" [sidestep]="left 0 0.25 0" [jog]="mid 1.25 0 0")
-# Each task's L4 references: its play rollouts, except backward's (skill_space.md §10.12,
-# second declared deviation: captured in its training variant by w11_backward_train.sh).
+# Each task's L4 references: its play rollouts, except backward's (# second declared deviation: captured in its training variant by w11_backward_train.sh).
 declare -A reference=([backward]=train [sidestep]=play [jog]=play)
 
 rate() {
@@ -149,7 +147,7 @@ for task in $(new_tasks); do
   done
 done
 
-# Beside W13, not a criterion (§10.14, added before it ran): the tasks W12's gate left out, on
+# Beside W13, not a criterion: the tasks W12's gate left out, on
 # the G1's W13 trackers at their middle command. A G1 decoder that executes their plans is the
 # precondition W12 names for their DAgger round.
 for task in $(gated_out); do

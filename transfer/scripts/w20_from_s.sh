@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W20 of skill_space.md §10.21: W13's decoder recipe with W19's cross-fitted plans, trained once
+# W20: W13's decoder recipe with W19's cross-fitted plans, trained once
 # from S. W13's trackers (the same incumbent, seed, conditions and length, without the
 # cross-fitted plans) are the paired control; their rows are already on disk.
 #

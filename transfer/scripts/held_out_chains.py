@@ -12,7 +12,7 @@ that only the simulator shows is the loop through a body.
 
 Where the chains start (``--start``):
 - ``teacher``: the teacher's own history. It already shows the teacher's gait, so the generator
-  is asked to continue a gait, not to choose one (W17, ``skill_space.md`` §10.18: this start
+  is asked to continue a gait, not to choose one (W17, : this start
   passed a generator that the deployed path then failed).
 - ``static``: the teacher's first captured state, repeated over the window.
 - ``body``: the first estimate of a deployed L4 capture (``--start-capture``, a path with

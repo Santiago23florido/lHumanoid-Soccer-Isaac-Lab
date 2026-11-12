@@ -1,5 +1,4 @@
-"""The bodies' executions as a generator's data (``latent/body_data.py``; ``skill_space.md``
-§10.17)."""
+"""The bodies' executions as a generator's data (``latent/body_data.py``)."""
 
 from __future__ import annotations
 

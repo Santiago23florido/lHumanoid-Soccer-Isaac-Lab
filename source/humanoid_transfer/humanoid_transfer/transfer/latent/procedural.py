@@ -1,7 +1,7 @@
 """Plans no task wrote: a point-mass biped on any contact schedule.
 
-A tracker trained by RL is an inverse model over the plans it practised
-(``transfer/docs/skill_space.md`` §7.3): trained on the walk's contract
+A tracker trained by RL is an inverse model over the plans it practised: trained on the walk's
+contract
 alone, the G1's tracker fell 120–240 times on the published policy's gait,
 and the NAO's shuffled. Whether a new task runs on a body zero-shot is a
 question of coverage -- whether its plans lie where the tracker practised --
@@ -576,7 +576,7 @@ class PointMassBiped:
         if not self.probe:
             self.probe = {key: self.next[key].clone() for key in GAIT_KEYS}
             self.probe["offset"] = self.offset.clone()
-        # A probe that names no load profile is the half-sine: the pre-registered maps stay
+        # A probe that names no load profile is the half-sine: the maps stay
         # the same gaits whatever the family's ranges.
         self.probe["load_shape"][ids] = 1.0
         for key, value in params.items():

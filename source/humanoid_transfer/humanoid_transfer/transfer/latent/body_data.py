@@ -1,9 +1,9 @@
-"""The bodies' executions of the base tasks as a generator's data (``method_revision.md`` §6).
+"""The bodies' executions of the base tasks as a generator's data.
 
 A generator reads the history of the body that executes its plans. Trained on its teacher
 alone, it has never seen a history like a second body's, and on one it continues what it
 reads: under the same flat generator the NAO is asked for a duty factor of 0.550, the G1 for
-0.515, the teacher walks at 0.496 (``skill_space.md`` §10.17). The body then overshoots what it
+0.515, the teacher walks at 0.496. The body then overshoots what it
 is asked, and the deviation goes round the loop body -> history -> plan -> body.
 
 A body's capture (``capture_contract.py``) can teach a generator two things about that loop:
@@ -387,8 +387,8 @@ def leakage(
     **The reference is the history itself** (``window_*``): the same probe on the same noisy
     ``z*`` windows the summary was computed from. The summary is a function of the window, so
     it cannot tell the bodies apart better than the window does, and the bodies' ``z*`` history
-    alone already tells them apart: 0.998 on W18's bodies (``w21_leakage.py``,
-    ``skill_space.md`` §10.22). A summary leaks the body *beyond* the contract when it beats the
+    alone already tells them apart: 0.998 on W18's bodies (``w21_leakage.py``). A summary leaks the
+    body *beyond* the contract when it beats the
     window, not when it beats the shuffled control, which every informative summary of these
     bodies does.
     """

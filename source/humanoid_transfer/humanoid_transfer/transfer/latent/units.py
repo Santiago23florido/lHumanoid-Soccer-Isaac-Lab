@@ -1,4 +1,4 @@
-"""What a tracker observes, in the units it trained in (``skill_space.md`` §10.15).
+"""What a tracker observes, in the units it trained in.
 
 A contract normalises ``z*`` with its generator's statistics, ``N(x) = (x - m) / s``. L4
 deploys a tracker under a task's contract, so the ``z*`` it observes is normalised with the
@@ -44,7 +44,7 @@ def tracker_view(
 
     ``upcoming`` ``(N, view, 27)`` and ``estimate`` ``(N, 27)`` are in the contract's
     normalised units; ``units`` (from :func:`change_of_units`) maps both into the tracker's.
-    Without it this is the view every run before §10.15 observed, operation for operation.
+    Without it this is the view in the generator's units, operation for operation.
     """
     relative = upcoming - estimate[:, None]
     if units is not None:

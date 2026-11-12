@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round 8 of the warm study (transfer/docs/skill_space.md §9.1): the physics arm from round 6's
+# Round 8 of the warm study: the physics arm from round 6's
 # distillation, which passed its gate (student 50, incumbent 58 terminations with PPO's noise),
 # and the control, both with PPO from the incumbent's adapted learning rate; then both ladders.
 #

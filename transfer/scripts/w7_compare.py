@@ -1,4 +1,4 @@
-"""W7's pre-registered reading (skill_space.md §10.9): faster NAO leg drives, frozen trackers.
+"""W7's reading: faster NAO leg drives, frozen trackers.
 
 For each frozen NAO tracker, its linear captures under the derived gains (the incumbent's
 W1 control re-run; S's seeds' records) against the same tracker with

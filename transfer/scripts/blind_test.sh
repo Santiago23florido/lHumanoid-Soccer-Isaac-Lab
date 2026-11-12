@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The blind test of the zero-shot study (transfer/docs/skill_space.md §8.4), end to end and once:
+# The blind test of the zero-shot study, end to end and once:
 # Isaac Lab's published rough-terrain G1 policy, on a plane, reaching both frozen bodies.
 #
 #   transfer/scripts/blind_test.sh [stage...]

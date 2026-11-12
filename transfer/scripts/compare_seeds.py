@@ -1,7 +1,7 @@
 """Two arms over several seeds: do they master different numbers of the family's probes?
 
-The adoption rule asks for more cells mastered by over two standard errors
-(``transfer/docs/skill_space.md`` §9). With one seed per arm the count moves by
+The adoption rule asks for more cells mastered by over two standard errors. With one seed per arm
+the count moves by
 the run's own luck as much as by the change. Here each arm is several
 competence reports (``evaluate_competence.py``), one per seed. The statistic is
 the difference in the mean number of probes passed per seed. Its standard error

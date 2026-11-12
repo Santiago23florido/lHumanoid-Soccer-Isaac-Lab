@@ -2,7 +2,7 @@
 
 Reflecting a motion left to right turns a plan the tracker follows into another
 plan it should follow, and its body's state into the mirrored body's. The
-procedural family is closed under this reflection (§8.2, tested), and so is a
+procedural family is closed under this reflection (tested), and so is a
 robot whose two sides are images of each other. The optimal tracker is then
 *equivariant*: its action for the reflected input is its action reflected,
 ``π(A o + b) = P π(o)``. A tracker trained without being told so need not be,

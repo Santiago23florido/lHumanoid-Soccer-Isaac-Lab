@@ -1,4 +1,4 @@
-"""The base tasks a decoder trains on, beside its walk (``method_revision.md`` §6, step 3).
+"""The base tasks a decoder trains on, beside its walk (step 3).
 
 Each entry is what ``ReferenceCommandCfg.tasks`` reads: the task's generator, its command
 ranges **dimensionless** (velocities over the G1's ``V``, yaw rates times its ``T``), its
@@ -8,7 +8,7 @@ heading range, and its expert's DART capture (starts on the G1, windows on the N
   (L4's). Ranges from Isaac Lab's source: ``G1FlatEnvCfg`` for the velocities, the base
   ``CommandsCfg`` for the heading.
 * **backward, sidestep, jog**: W11's experts, if accepted (``w11_experts.json``'s calibrated
-  reading, the deviation declared in ``skill_space.md`` §10.12), with their
+  reading, the deviation declared in), with their
   W12 generators, if gated (``contract_base_<task>_b4.json``). Ranges from the run's saved
   ``env.yaml``, what the expert trained on.
 

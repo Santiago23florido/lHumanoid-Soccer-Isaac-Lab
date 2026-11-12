@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# After the loads scored in log space lifted the G1's limiting check (skill_space.md §9.1):
+# After the loads scored in log space lifted the G1's limiting check:
 #
 # 1. the NAO: its incumbent continued exactly as its control (warm_nao_r1: its adapted rate,
 #    1000 iterations, seed 31) with only the load's space changed -- the NAO's rough stance is

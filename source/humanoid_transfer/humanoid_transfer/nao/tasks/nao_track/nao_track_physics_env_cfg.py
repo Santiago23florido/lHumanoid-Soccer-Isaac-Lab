@@ -1,4 +1,4 @@
-"""The NAO tracker with its body's physics in the action (decoder v2, skill_space.md §9).
+"""The NAO tracker with its body's physics in the action (decoder v2).
 
 :class:`~.nao_track_env_cfg.NaoTrackEnvCfg` with the action of
 :class:`~humanoid_transfer.transfer.tasks.tracking.physics_prior.PhysicsPriorAction`:

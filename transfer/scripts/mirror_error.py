@@ -3,7 +3,7 @@
 PPO's mirror loss (rsl-rl, ``use_mirror_loss``) is the mean of ``(π(M o) − P π(o))²``
 over a minibatch: the action means at the mirrored observation against the mirrored
 action means. The warm study's distilled physics trackers began PPO with it far above
-the incumbent's (0.67 against 0.05 in round 6, §9.1), and collapsed. This measures it
+the incumbent's (0.67 against 0.05), and collapsed. This measures it
 where PPO does -- the tracker run with its exploration noise, the env's own
 :class:`~humanoid_transfer.transfer.tasks.tracking.symmetry.TrackerMirror` -- and splits
 it by joint, and by observation term: for each term, the error left when only that

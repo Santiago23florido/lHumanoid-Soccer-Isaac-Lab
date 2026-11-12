@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W11 of skill_space.md §10.12: three new G1 experts for the generator's base tasks
+# W11: three new G1 experts for the generator's base tasks
 # (g1/tasks/g1_base: backward, sidestep, jog), each Isaac Lab's flat G1 recipe with only its
 # command range changed, trained as G1Walk-Teacher-v0 was. For each:
 #   train    scripts/train.py, G1FlatPPORunnerCfg, 1500 iterations, 4096 envs, seed 42

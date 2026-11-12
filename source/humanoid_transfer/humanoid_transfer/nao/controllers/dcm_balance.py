@@ -53,7 +53,7 @@ one foot, with normal load :math:`F` and the pressure centre a distance
 .. math:: m_y = d\\,F, \\qquad m_x = -e\\,F
 
 Both signs were checked against the simulator's own reported joint reaction
-wrench rather than derived and hoped for; see ``docs/stand_nao_dcm.md``.
+wrench rather than derived and hoped for;
 
 The actuators are implicit position PDs, so a torque is requested by displacing
 the target:

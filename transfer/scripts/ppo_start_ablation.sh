@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Why does PPO break a distilled tracker in its first update, and not the incumbent it was
-# distilled from? (transfer/docs/skill_space.md §9.1). Six PPO iterations from one distilled
+# distilled from?. Six PPO iterations from one distilled
 # checkpoint, one change at a time; the collapse shows by the second (base contact ends ~0.98
 # of the episodes):
 #

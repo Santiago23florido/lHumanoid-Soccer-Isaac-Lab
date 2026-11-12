@@ -4,8 +4,7 @@
 gait of the procedural family (``make_gait_probes.py``). For each probe the
 body's gait -- the same signature every capture is judged with -- is compared
 with the gait asked for, the plan's due states stitched in time. The criteria
-are the ones pre-registered for the twins (``transfer/docs/skill_space.md``
-§8.3):
+are the ones for the twins:
 
 * falls at most 5 % of the probe's episodes;
 * mean velocity within 10 % of the asked (a floor of 0.05 ``V`` for slow probes);

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The distillation's teacher, measured where it gives its labels (skill_space.md §9.1): the
+# The distillation's teacher, measured where it gives its labels: the
 # incumbent's terminations per 1000 steps, deterministic, in its own task and in the physics
 # task, shown the residual as the first two distillations did or its own last action.
 #

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Why W11's backward expert fails its play rollouts but not its DART capture (skill_space.md
-# §10.12, result). Same exported policy, same command (mid, -0.35 m/s), 32 environments,
+# Why W11's backward expert fails its play rollouts but not its DART capture . Same exported policy, same command (mid, -0.35 m/s), 32 environments,
 # 900 steps; a 2 x 2 of the two things the captures differ in:
 #   environment   the play variant (no observation noise, no pushes) or the training one
 #   action noise  0 (the play rollouts) or 0.1 (the DART capture)

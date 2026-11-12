@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The warm study's physics arm, gated (transfer/docs/skill_space.md §9.1): distil, then check
+# The warm study's physics arm, gated: distil, then check
 # that the student starts where the incumbent stands before spending PPO on it.
 #
 # 1. distil   -- distill_tracker.py (the teacher's own last action, labels cut where the drives

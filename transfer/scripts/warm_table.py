@@ -1,4 +1,4 @@
-"""The warm study's arms side by side, from their ladders' results (skill_space.md §9.1).
+"""The warm study's arms side by side, from their ladders' results.
 
 For each arm tag and each published task, over L4's three commands, on the deployed path
 (the kinematic estimator, ``encoder`` run): falls over episodes, how many commands pass

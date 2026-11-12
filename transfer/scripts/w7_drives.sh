@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W7 of skill_space.md §10.9: the NAO's frozen trackers with faster leg drives
+# W7: the NAO's frozen trackers with faster leg drives
 # (HUMANOID_NAO_LEG_GAIN: K g, D sqrt(g)), L4 on both skills and S0's walk, paired with
 # their linear captures under the derived gains. Nothing is trained.
 #

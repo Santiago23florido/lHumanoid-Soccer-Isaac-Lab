@@ -61,8 +61,8 @@ START_STATES = os.environ.get(
 """The task's generator; ``HUMANOID_CONTRACT`` points the same body at another task's."""
 
 PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
-"""Share of training episodes following the point-mass biped's plans instead of the task's
-(``transfer/docs/skill_space.md`` §8); 0 keeps the walk alone."""
+"""Share of training episodes following the point-mass biped's plans instead of the task's; 0 keeps
+the walk alone."""
 
 CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
 LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
@@ -80,7 +80,7 @@ LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1"
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_g1.json"
 TASKS = os.environ.get("HUMANOID_TASKS", "")
 """A task set (``transfer/scripts/base_task_set.py``): the decoder also trains on these tasks'
-plans (``ReferenceCommandCfg.tasks``, ``method_revision.md`` §6). Empty: the walk alone."""
+plans (``ReferenceCommandCfg.tasks``). Empty: the walk alone."""
 TASK_WEIGHTS = task_weights(os.environ.get("HUMANOID_TASK_WEIGHTS", ""))
 
 BASE_BODY = "pelvis"
@@ -166,7 +166,7 @@ class TrackPlayObservationsCfg(TrackObservationsCfg):
 @configclass
 class G1TrackRewards(G1Rewards):
     # One likelihood, its error's scale marginalised over octaves (1 to 128 tolerances);
-    # it replaced three kernels two decades apart, between which it was flat (§8.4).
+    # it replaced three kernels two decades apart, between which it was flat.
     contract = RewTerm(
         func=contract_likelihood,
         weight=1.0,

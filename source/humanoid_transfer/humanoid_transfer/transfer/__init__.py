@@ -39,5 +39,5 @@ Contents:
     every body shares, anchored to the analytic skill state of
     :mod:`~humanoid_transfer.common.skill_state`.
 
-See ``transfer/docs/plan.md`` for the research plan and the open questions.
+
 """

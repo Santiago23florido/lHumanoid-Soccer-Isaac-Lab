@@ -1,4 +1,4 @@
-"""W1's pre-registered verdict (skill_space.md §10.3), read from the L4 results it produced.
+"""W1's verdict, read from the L4 results it produced.
 
 For each frozen NAO tracker, the linear captures (recorded before) against the ones with
 ``HUMANOID_RESAMPLE=generator`` (``w1_resample.sh``), on the deployed path:

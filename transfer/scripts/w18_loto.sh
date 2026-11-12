@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W18 of skill_space.md §10.19: leave one base task out where no other task defines its commands
+# W18: leave one base task out where no other task defines its commands
 # (sidestep), on both bodies' frozen W13 decoders; and the same offline for the other base tasks.
 #
 #   1. reset       the state after a reset (no settle steps), G1 s41 and NAO s31, under mt17_c

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W21 of skill_space.md §10.22: the multi-body generator with a learned latent, from free to
+# W21: the multi-body generator with a learned latent, from free to
 # collapsed through a bottleneck on its history summary, deployed on the best decoders so far.
 #
 #   0. correction  mt17_l (W17's learned latent, refused by a leakage gate since corrected) on

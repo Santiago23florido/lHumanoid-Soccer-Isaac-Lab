@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W7c (skill_space.md §10.9): the RL arm W7b opened. r1_3498 continued 1000 iterations as S's
+# W7c: the RL arm W7b opened. r1_3498 continued 1000 iterations as S's
 # NAO seeds were, with the leg drives at gain 2 (HUMANOID_NAO_LEG_GAIN=2: K x 2, D x sqrt 2)
 # in training and evaluation; three seeds, laddered as S's were.
 #

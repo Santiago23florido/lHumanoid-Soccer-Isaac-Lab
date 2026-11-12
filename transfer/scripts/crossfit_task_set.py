@@ -1,4 +1,4 @@
-"""W19's task set (``skill_space.md`` §10.20): W13's base tasks, each also drawn by a generator
+"""W19's task set: W13's base tasks, each also drawn by a generator
 that never saw it.
 
 Every task in ``transfer/results/base_tasks.json`` (flat and jog; the walk is the decoder's own

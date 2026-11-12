@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# The pre-registered evaluation ladder of the zero-shot study (transfer/docs/skill_space.md §8.3).
+# The evaluation ladder of the zero-shot study.
 #
 #   [ZS_TASK=flat|rough] transfer/scripts/zero_shot_ladder.sh <g1|nao> <run dir> <checkpoint> <tag> [stage...]
 #
 # Stages, all of them by default:
 #   l1       random procedural schedules, as in training (true state):  competence_<body>_<tag>_random
-#   map      the pre-registered probes (true state):                    competence_<body>_<tag>
+#   map      the probes (true state):                    competence_<body>_<tag>
 #   corners  the family's corners, some beyond its ranges (true state):  competence_<body>_<tag>_corners
 #   encoder  the body's encoder refitted on its own new states -- walk (body's history,
 #            autonomous, starts) and procedural from the spawn pose: logs/contract/walk_zs_<body>_<tag>
@@ -56,12 +56,12 @@ turning 0.3 0.2 0.3"
 fi
 # ZS_COMMANDS: another task's L4 commands, one "name vx vy wz" per line (G1 units), read
 # against g1/rollouts/${task}_${ZS_TEACHER_ROLLOUT}_<name>.npz -- a base task's
-# (method_revision.md §6). ZS_TEACHER_ROLLOUT is "play" unless a task's references were
-# captured elsewhere (backward's in its training variant, skill_space.md §10.12).
+#. ZS_TEACHER_ROLLOUT is "play" unless a task's references were
+# captured elsewhere (backward's in its training variant).
 commands="${ZS_COMMANDS:-$commands}"
 teacher_rollout="${ZS_TEACHER_ROLLOUT:-play}"
 # ZS_OBSERVE=own: in L4 the tracker observes each z* in the units of the walk contract it
-# trained under, not the task's (HUMANOID_OBSERVE_UNITS, skill_space.md §10.15). Its captures
+# trained under, not the task's (HUMANOID_OBSERVE_UNITS). Its captures
 # and results carry "_own" after the generator's name, and only the deployed run is captured
 # unless ZS_OWN_TRUTH=1.
 observe="${ZS_OBSERVE:-task}"
@@ -112,7 +112,7 @@ assets_online() {
 }
 
 # ZS_STEPS / ZS_SETTLE: recorded and unrecorded steps of every capture (900 and 100). With
-# ZS_SETTLE=0 a capture holds the body's state after a reset (skill_space.md §10.19).
+# ZS_SETTLE=0 a capture holds the body's state after a reset.
 capture() {
   local name="$1" attempt log
   shift

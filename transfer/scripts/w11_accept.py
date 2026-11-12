@@ -1,4 +1,4 @@
-"""W11's pre-registered acceptance check (skill_space.md §10.12): does each new expert walk?
+"""W11's acceptance check: does each new expert walk?
 
 For each base task (``g1/tasks/g1_base``), its play rollouts at the three fixed commands of
 ``PLAY_COMMANDS`` (``g1/rollouts/base_<task>_play_<name>.npz``):
@@ -13,7 +13,7 @@ A task is accepted if every one of its commands passes all three. The checks sel
 experts enter the generator's task set; none is a training condition. A rejected task is
 reported with its figures and left out.
 
-**Calibrated reading** (a deviation declared in §10.12 before jog's play rollouts existed).
+**Calibrated reading** (declared before jog's play rollouts existed).
 The same check, applied to the published flat expert that is already in the task set
 (``g1/rollouts/flat_play_<forward|fast>.npz``: the same play variant, action noise 0, 32 x
 900), gives a speed ratio of 0.73 at 0.25 m/s: the 0.8 bound rejects a member of the set it
@@ -21,7 +21,7 @@ selects for. ``accepted_calibrated`` lowers the bound to the reference's smalles
 keeps every other criterion; ``accepted`` is the registered reading. The later stages read
 ``accepted_calibrated``.
 
-**Second declared deviation** (§10.12, the reading the 2 x 2 check pre-registered). Backward
+**Second declared deviation** (the reading the 2 x 2 check fixed beforehand). Backward
 passes at -0.35 m/s in its training variant without action noise and falls in the play
 variant, so its calibrated reading uses its fixed-command rollouts in the training variant,
 ``base_backward_train_<name>.npz`` (``w11_backward_train.sh``). The registered reading keeps

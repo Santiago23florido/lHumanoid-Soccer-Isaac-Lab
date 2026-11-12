@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The night's queue for transfer/docs/skill_space.md §9, one simulator at a time:
+# The night's queue, one simulator at a time:
 #
 #   1. decoder smoke   the reconstructed balance against Newton on both bodies, the prior alone,
 #                      five PPO iterations with the physics heads; stops the queue if any fails;

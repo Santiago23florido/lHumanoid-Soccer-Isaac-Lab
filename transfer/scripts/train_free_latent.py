@@ -1,6 +1,6 @@
 """Learn the free latent part from both bodies, and test what it carries across them.
 
-F5 of ``transfer/docs/skill_space.md`` §9 (:mod:`~humanoid_transfer.transfer.latent.free_latent`).
+F5 (:mod:`~humanoid_transfer.transfer.latent.free_latent`).
 The data are captures of each body's tracker following the same fixed gaits of
 the procedural family (``capture_contract.py --gait-probes``), which record each
 foot's measured balance and the biped's gait phase. Two states are a pair when
@@ -9,11 +9,11 @@ same planned gait at the same moment, each dynamically valid on its own body.
 
 **Round 2 (chosen after round 1).** Round 1 read both bodies' balance
 with one predictor; paired states are held up differently on the two bodies,
-so it could not pass (§9.1). Here ``ζ`` stays shared, aligned and blind to the
+so it could not pass. Here ``ζ`` stays shared, aligned and blind to the
 body -- what a plan carries from one body to another -- while each body reads
 its physics from ``(z*, ζ)`` with its own head, trained on its own procedural
 data (the body side; no task's data). Each foot's centre of pressure is
-measured as a fraction of its own support polygon. Pre-registered:
+measured as a fraction of its own support polygon. Criterion:
 
 1. **Shared.** Paired states' ``ζ`` agree, and a classifier tells the bodies apart
    on held-out pairs no better than chance, within twice its standard error.

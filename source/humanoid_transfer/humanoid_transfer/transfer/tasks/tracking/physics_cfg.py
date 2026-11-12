@@ -1,4 +1,4 @@
-"""What any body's tracking task adds to become decoder v2 (skill_space.md §9, F4).
+"""What any body's tracking task adds to become decoder v2 (F4).
 
 A body's physics variant replaces its action term with a
 :class:`~.physics_prior.PhysicsPriorActionCfg` and calls :func:`add_physics_observations`:
@@ -31,18 +31,18 @@ PLAN_TRUST = os.environ.get("HUMANOID_PLAN_TRUST", "0") == "1"
 PLAN_FUSION = os.environ.get("HUMANOID_PLAN_FUSION", "shrink")
 """How a trusted plan is fused (``PhysicsPriorActionCfg.plan_fusion``): ``shrink`` or ``mean``."""
 """The prior trusts a plan by its measured sampling noise and aims the trunk at its slow tilt;
-the biped's plans carry the generator's measured noise and the gait's trunk sway (§9.1)."""
+the biped's plans carry the generator's measured noise and the gait's trunk sway."""
 
 TARGET_RATE = os.environ.get("HUMANOID_TARGET_RATE", "0") == "1"
 """The smoothness cost on the joint targets, in the plain tracker's units, instead of on the
 residual (:func:`~.physics_prior.joint_target_rate_l2`). Off, the inherited ``action_rate_l2``
-reads the residual: the runs of §9 and §9.1 before the warm study's second round."""
+reads the residual."""
 
 FEEDFORWARD_OBS = os.environ.get("HUMANOID_FEEDFORWARD_OBS", "0") == "1"
 """The policy and critic also see the prior's feed-forward (over each joint's stiffness), not
 only its targets' offset: a residual that must correct the prior then sees all of it. Off,
 the earlier physics trackers' observation (a distilled student had to infer the feed-forward
-the teacher's labels were compensated for, §9.1)."""
+the teacher's labels were compensated for)."""
 
 SWAY = 0.035
 """Largest procedural trunk sway, radians: twice the walk teacher's (0.015 pitch, 0.017 roll),

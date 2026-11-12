@@ -1,5 +1,4 @@
-"""When the bodies fall on sidestep, and what the plan was asking then (``skill_space.md``
-§10.21, read after the screen; instrumentation, not a criterion).
+"""When the bodies fall on sidestep, and what the plan was asking then (instrumentation).
 
 From the L4 captures on sidestep under one held-out generator, per body and tracker arm
 (``<prefix>_<body>_s<seed>_sym``), over the seeds on disk:
@@ -20,8 +19,9 @@ From the L4 captures on sidestep under one held-out generator, per body and trac
 - **runs completed**: the environments (32 per command and seed) that never fall over the
   recorded 900 steps, and their share.
 
-Before the first resynchronisation the plans do not depend on the tracker, so the share of
-stalled starts is the generator's, and the fall rate given a stalled start is the tracker's.
+The trackers' configurations disable resynchronisation, so within an episode the generator
+reads only its own plans and they do not depend on the tracker: the share of stalled starts is
+the generator's, and the fall rate given a stalled start is the tracker's.
 
     python transfer/scripts/w20_starts.py --output transfer/results/w20_starts.json
 """

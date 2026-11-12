@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W5 (skill_space.md §10.7): robustness, reported beside the pre-registered metrics.
+# W5: robustness, reported beside the metrics.
 #
 #   bash transfer/scripts/w5_robust.sh
 #

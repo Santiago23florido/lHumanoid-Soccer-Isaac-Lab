@@ -1,6 +1,6 @@
 """Base tasks on the source robot, for a generator trained across several tasks.
 
-``transfer/docs/method_revision.md`` §6 sets the target design: a generator trained on about
+The target design is a generator trained on about
 five base tasks, each performed by an expert on the G1, evaluated by leaving one task out.
 The repository had three: the walk (``G1Walk-Teacher-v0``) and Isaac Lab's published flat
 and rough policies. These are three more.
@@ -19,7 +19,7 @@ Two candidates are left out, for reasons in the recipe:
 - *Stairs.* Terrain is outside ``z*``.
 
 The ranges are free parameters of the experiment, declared as such. Whether an expert walks
-is decided by its pre-registered acceptance check (``skill_space.md`` §10.12), not assumed.
+is decided by its acceptance check, not assumed.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W6 (skill_space.md §10.8): the NAO's sole point at its resting contact, after W5.
+# W6: the NAO's sole point at its resting contact, after W5.
 #
 #   bash transfer/scripts/w6_sole.sh
 #

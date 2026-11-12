@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# S0's walk as amended on 2026-10-24 (transfer/docs/skill_space.md §9): the deployed path under
+# S0's walk as amended on 2026-10-24: the deployed path under
 # the autonomous reference, for the incumbents and every warm-study arm. The ladder's walk stage
 # now captures it beside the physical reference; each arm runs from the tree it was trained with.
 #

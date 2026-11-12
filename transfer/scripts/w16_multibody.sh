@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W16 of skill_space.md §10.17: steps 4-6 of method_revision.md §6. The multi-task generator,
+# W16:. The multi-task generator,
 # with and without the bodies' executions, and rough -- held out of everything -- on both
 # bodies' frozen W13 decoders.
 #

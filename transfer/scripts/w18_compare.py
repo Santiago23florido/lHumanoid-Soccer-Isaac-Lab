@@ -1,4 +1,4 @@
-"""W18's pre-registered reading (``skill_space.md`` §10.19): leave one task out where no other
+"""W18's reading: leave one task out where no other
 task defines its commands.
 
 Sidestep is held out of every gradient step. Arms, each a generator (``logs/contract/<arm>``)

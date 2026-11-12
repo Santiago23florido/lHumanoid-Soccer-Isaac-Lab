@@ -1107,7 +1107,7 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     estimate_noise: float = 0.0
     """On the deployed path only, a robustness probe: Gaussian noise added to the deployed
     estimate, in multiples of the estimator's measured precision (the contract's ``sigma``).
-    0 in training and in every pre-registered evaluation."""
+    0 in training and in every evaluation."""
 
     flow_solver: str | None = None
     """Overrides the generator's integrator (``euler`` or ``midpoint``); None keeps it."""
@@ -1121,7 +1121,7 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     estimator's precision there (``load_precision``). In linear units a foot grazing the ground
     with 5 % of the weight where the plan lifts it costs under one tolerance; every tracker did
     so in ~19 % of its planned swing, and the duty factor fails 21-25 of its ~24 failing
-    probes of the family (skill_space.md §9.1)."""
+    probes of the family."""
 
     load_precision: str = ""
     """With ``load_space="log"``: a ``load_precision.py`` report; its ``log_rms`` is the scale."""
@@ -1131,7 +1131,7 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     history onto the grid, each plan back onto the body's steps): ``linear``, as every run
     before 2026-11-04, or ``generator`` -- in the generator's own space, the loads as
     ``log(load + 0.01)``. Linear blends of loads lengthen every stance a body is asked for,
-    by 0.02-0.03 of the duty on the NAO (``latent/resampling.py``, ``skill_space.md`` §10). A
+    by 0.02-0.03 of the duty on the NAO (``latent/resampling.py``). A
     body whose step equals the grid's (the G1) is bit-identical in either space."""
 
     plan_contact: str = "as_drawn"
@@ -1141,15 +1141,15 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     (:func:`~...latent.plan_contact.ground_loaded_feet`); or ``stick`` -- grounded, and each
     loaded foot's velocity set to zero (:func:`~...latent.plan_contact.stick_loaded_feet`).
     The generator's plans hold loaded feet above the ground and move them, where its
-    teachers never did (``skill_space.md`` §10.10, §10.11). The procedural biped's plans are
+    teachers never did. The procedural biped's plans are
     untouched."""
 
     observe_units: str | None = None
     """A contract whose statistics the tracker's view (:meth:`ReferenceCommand.observation`)
     is normalised with: the one the tracker trained under. ``None``, as every run before
     2026-11-07, observes in ``contract``'s. L4 makes a task's generator the contract, and the
-    NAO's walk contract normalises ``z*`` differently from the G1's (``latent/units.py``,
-    ``skill_space.md`` §10.15). Only the view changes; the generator and the encoder keep
+    NAO's walk contract normalises ``z*`` differently from the G1's (``latent/units.py``). Only the
+    view changes; the generator and the encoder keep
     the contract's units."""
 
     tolerance: str = "precision"
@@ -1201,8 +1201,7 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     procedural_load_shape: tuple[float, float] = (1.0, 1.0)
     """Range of the time warp of a walking stance's half-sine of load (``GaitRanges.load_shape``,
     ``latent/procedural.py``): ``(1, 1)``, the half-sine, as every tracker before 2026-11-04
-    practised; ``(0.5, 2)`` adds the slow load transfers of real stances (``skill_space.md``
-    §10.5)."""
+    practised; ``(0.5, 2)`` adds the slow load transfers of real stances."""
 
     plan_trust: bool = False
     """Measure each plan source's sampling noise online (``latent/plan_trust.py``): two plans a
@@ -1220,8 +1219,8 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     episode, either sign). The walk teacher's sways 0.015 and 0.017 rad."""
 
     tasks: list[dict] | None = None
-    """Further tasks for a decoder trained on several (``transfer/docs/method_revision.md``
-    §6). ``contract`` and ``ranges`` are task 0. Each further entry gives:
+    """Further tasks for a decoder trained on several. ``contract`` and ``ranges`` are task 0. Each
+    further entry gives:
 
     * ``name``;
     * ``contract``: a ``generator.pt``; only its generator is used, and it must share the

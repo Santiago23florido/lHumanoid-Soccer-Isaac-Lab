@@ -68,7 +68,7 @@ START_WINDOWS = os.environ.get(
 )
 """Demonstrations a start is seeded from; another task's, to start inside its motion."""
 PROCEDURAL = float(os.environ.get("HUMANOID_PROCEDURAL", "0"))
-"""Share of training episodes following the point-mass biped's plans (§8 of skill_space.md)."""
+"""Share of training episodes following the point-mass biped's plans."""
 
 CALIBRATION = REPO_ROOT / "transfer" / "results" / "procedural_calibration.json"
 LOAD_SPACE = os.environ.get("HUMANOID_LOAD_SPACE", "linear")
@@ -86,7 +86,7 @@ LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1"
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_nao.json"
 TASKS = os.environ.get("HUMANOID_TASKS", "")
 """A task set (``transfer/scripts/base_task_set.py``): the decoder also trains on these tasks'
-plans (``ReferenceCommandCfg.tasks``, ``method_revision.md`` §6). Empty: the walk alone."""
+plans (``ReferenceCommandCfg.tasks``). Empty: the walk alone."""
 TASK_WEIGHTS = task_weights(os.environ.get("HUMANOID_TASK_WEIGHTS", ""))
 SOLE = os.environ.get("HUMANOID_SOLE", "urdf")
 """Where ``z*`` puts each foot (:func:`sole_points`): ``urdf``, the URDF's sole frame, as
@@ -99,7 +99,7 @@ LEG_GAIN = float(os.environ.get("HUMANOID_NAO_LEG_GAIN", "1"))
 """The leg drives made faster as ``K g``, ``D sqrt(g)``
 (:func:`~humanoid_transfer.nao.assets.nao_kinematics.scaled_drive_gains`). The damping
 ratio against every inertia is kept, and the time constant ``D / K`` is divided by
-``sqrt(g)``. W7 (skill_space.md §10.9) probes it; 1, the derived gains, everywhere else."""
+``sqrt(g)``. W7 probes it; 1, the derived gains, everywhere else."""
 
 COMMAND = "base_velocity"
 BASE_BODY = "base_link"
@@ -228,7 +228,7 @@ class NaoTrackRewards(RewardsCfg):
         func=mdp.joint_deviation_l1, weight=-0.1, params={"asset_cfg": FREE_JOINTS}
     )
     # One likelihood, its error's scale marginalised over octaves (1 to 128 tolerances);
-    # it replaced three kernels two decades apart, between which it was flat (§8.4).
+    # it replaced three kernels two decades apart, between which it was flat.
     contract = RewTerm(
         func=contract_likelihood,
         weight=1.0,

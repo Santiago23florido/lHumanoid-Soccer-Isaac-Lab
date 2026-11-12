@@ -1,4 +1,4 @@
-"""W6's pre-registered reading (skill_space.md §10.8): the NAO's sole point at its contact.
+"""W6's reading: the NAO's sole point at its contact.
 
 The arm (``warm_nao_sole_s<seed>``: r1_3498 continued as S's NAO seeds, with
 ``HUMANOID_SOLE=contact``) against S's NAO seeds 31-33, on the L4 captures of the deployed

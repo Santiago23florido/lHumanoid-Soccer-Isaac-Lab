@@ -1,10 +1,10 @@
-"""A free part of the shared latent, learned from both bodies with attention (§9, F5).
+"""A free part of the shared latent, learned from both bodies with attention (F5).
 
 ``z*`` is fixed by physics: the centroidal state in body units. What it leaves
 out -- how the load sits under each foot, how close a body is to falling,
 whatever a later task needs -- has to be learned, and learned so that it means
 the same on every body, or it cannot carry a skill from one to another. The
-design follows what transferred in the literature (``transfer/docs/related_work.md``):
+design follows what transferred in the literature:
 
 * **Entity tokens, not joints.** Each body's sensors are grouped into the same
   functional entities -- trunk, left foot, right foot -- by a per-body stem, so

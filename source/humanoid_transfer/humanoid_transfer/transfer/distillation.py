@@ -29,7 +29,7 @@ Configuration and the feasibility weighting are implemented. The loss terms
 themselves are not: they need the student environment to exist first, and
 writing them against an environment that has not been built is how the
 zero-step task acquired a reward term that computed a number nobody had
-checked. See ``transfer/docs/plan.md`` for the order of work.
+checked.
 """
 
 from __future__ import annotations

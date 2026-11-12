@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Seeds for the log-load decision (transfer/docs/skill_space.md §9.1), as decided on
-# 2026-10-25: the pre-registered rule adopts a tracker that masters more of the family's probes
+# Seeds for the log-load decision, as decided on
+# The adoption rule adopts a tracker that masters more of the family's probes
 # by over two standard errors, and one seed of each arm gave +1 probe (+3 unsymmetrized) with the
 # duty six SE better. Seed 41 of both arms exists (warm_r3_r8, warm_r3_logload); this adds 42
 # and 43 of each, each the incumbent continued exactly as there (its adapted rate, 1000

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W19 of skill_space.md §10.20: each decoder also practises plans that a generator composes for
+# W19: each decoder also practises plans that a generator composes for
 # a base task it never saw (cross-fitted plans). Sidestep and rough stay out of every gradient step.
 #
 #   1. generators  mt19_xf_flat (walk, backward, jog experts) and mt19_xf_jog (walk, flat,

@@ -1,13 +1,13 @@
 """Does the flow sampler blur contact transitions? Plans at several integrators against the teacher.
 
 The task generators' plans ask for light contact (above the 5 % threshold, at most a
-quarter of the weight) three times as often as the flat teacher shows it (``skill_space.md``
-§10.2). A flow sampled with too few steps lands between modes -- a load half-way between
+quarter of the weight) three times as often as the flat teacher shows it. A flow sampled with too
+few steps lands between modes -- a load half-way between
 stance and swing -- so the first suspect is the integrator, which costs no training to
 change. For each integrator this measures, on the teacher's own play histories:
 
 * one plan from each window, against the future the teacher actually walked: the share of
-  light contact, the duty factor, and contact changes per plan (as calibrated in §7.1);
+  light contact, the duty factor, and contact changes per plan (as calibrated for the contract);
 * the generator's own chain at the G1's rate (``chain_at_rate.py``, autonomous reference):
   the same, plus stride period and length;
 * the time a plan takes, on this machine's CPU (relative cost only).

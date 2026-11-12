@@ -1,7 +1,7 @@
 """Start a physics tracker from a competent one: distil the incumbent into decoder v2 (DAgger).
 
 Decoder v2's from-scratch rounds left open whether its physics prior helps a tracker
-that already walks (``transfer/docs/skill_space.md`` §9.1): both from-scratch trackers
+that already walks: both from-scratch trackers
 stayed below the incumbent, which had three times the training. Here the question is
 asked at equal competence: the physics task's actor (a residual on the prior) is fitted
 to the incumbent's joint targets on the states it visits itself (DAgger, Ross et al.
@@ -30,7 +30,7 @@ to the incumbent's joint targets on the states it visits itself (DAgger, Ross et
   noise (``--explore``): the states PPO visits, and the noisy last actions it observes,
   are then the ones the student was fitted on. The incumbent's noise is large (median
   1.42 action units, 0.7 rad), and a student fitted on noiseless rollouts left its first
-  PPO episodes 27 times as often as the incumbent did (§9.1). The labels stay the
+  PPO episodes 27 times as often as the incumbent did. The labels stay the
   teacher's noiseless targets.
 
 * **Mirror.** PPO goes on with the mirror loss ``(π(M o) − P π(o))²``, which the

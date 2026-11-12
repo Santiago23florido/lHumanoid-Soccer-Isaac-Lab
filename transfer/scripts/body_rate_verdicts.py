@@ -1,7 +1,7 @@
 """Recompute gate C "at the body's rate" for existing results, loads resampled without bias.
 
 ``evaluate_contract.signature_at_rate`` resampled the teacher's loads linearly before
-thresholding them, which lengthens every stance (``skill_space.md`` §10). This script
+thresholding them, which lengthens every stance. This script
 leaves every result file as it is and writes, for each run that carries a
 ``verdict_at_body_rate``, three verdicts side by side: against the teacher on its own
 grid (the stored ``verdict``), at the body's rate as stored (linear loads), and at the

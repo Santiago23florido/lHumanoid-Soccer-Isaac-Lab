@@ -1,4 +1,4 @@
-"""The G1 tracker with its body's physics in the action (decoder v2, skill_space.md §9).
+"""The G1 tracker with its body's physics in the action (decoder v2).
 
 Everything of :class:`~.g1_track_env_cfg.G1TrackEnvCfg` -- command, rewards,
 terminations, randomisation -- with one change: the policy's output is a

@@ -1,6 +1,6 @@
 """Can each body's swing leg lift its foot as high, as fast, as its plans ask?
 
-Read with ``clearance_mechanism.py`` (research_report.md §2.2, item 4). The trackers'
+Read with ``clearance_mechanism.py``. The trackers'
 actions are joint position targets, held for a control step, that an implicit PD drive
 (stiffness K, damping D, effort limit) follows at the physics rate. In the air a leg joint
 moves only the leg below it -- its distal inertia I, not the whole body the NAO's leg gains

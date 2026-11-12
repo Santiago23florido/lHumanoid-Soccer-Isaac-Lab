@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# W11's second declared deviation (skill_space.md §10.12), the reading the 2 x 2 check
-# pre-registered: backward passes at -0.35 m/s in its training variant without action noise
+# W11's second declared deviation, the reading the 2 x 2 check
+# fixed beforehand: backward passes at -0.35 m/s in its training variant without action noise
 # (0 falls) and falls in the play variant (121). Its three fixed-command rollouts are captured
 # again in the training variant (G1Base-Backward-v0: observation noise and pushes on), with
 # action noise 0 and the play protocol otherwise (32 environments, 900 steps, settle 100):

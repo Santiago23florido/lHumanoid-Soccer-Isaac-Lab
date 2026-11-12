@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W8 of skill_space.md §10.10: frozen trackers of both bodies, each foot their plans load put
+# W8: frozen trackers of both bodies, each foot their plans load put
 # on the ground (HUMANOID_PLAN_CONTACT=ground), L4 on both skills and S0's walk, paired with
 # their own captures of the plans as drawn. Nothing is trained.
 #

@@ -1,6 +1,6 @@
 """Isaac Lab's rough-terrain G1 task on flat ground: the zero-shot study's blind task.
 
-``transfer/docs/skill_space.md`` §8 tests zero-shot transfer on a task whose
+Zero-shot transfer is tested on a task whose
 gait nobody looked at before the trackers were frozen. Isaac Lab publishes a
 checkpoint of ``Isaac-Velocity-Rough-G1-v0``; its policy reads, besides the
 123 numbers of the flat task, a height scan of the ground under the torso.

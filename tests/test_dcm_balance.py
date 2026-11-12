@@ -6,8 +6,7 @@ simulation: the sign of the feedback, when the angular-momentum strategy is
 allowed to engage, and the fact that a foot is never asked to carry pressure
 outside its own sole.
 
-Two of these tests exist because the mistake they catch was actually made. See
-``docs/stand_nao_dcm.md``.
+Two of these tests exist because the mistake they catch was actually made.
 """
 
 from __future__ import annotations

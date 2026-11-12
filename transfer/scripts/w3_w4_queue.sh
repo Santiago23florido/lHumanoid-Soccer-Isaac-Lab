@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W3 and W4 of skill_space.md §10.5-10.6, after W1 (w1_resample.sh) has finished.
+# W3 and W4, after W1 (w1_resample.sh) has finished.
 #
 #   bash transfer/scripts/w3_w4_queue.sh            # every stage, decisions by their criteria
 #   W34_STAGES="probes" bash transfer/scripts/w3_w4_queue.sh

@@ -9,7 +9,6 @@ the output shows.
 
     python transfer/scripts/training_errors.py nao mt_nao_s31 warm_nao_r1 mt_nao_s32 warm_nao_r1_s32
 
-``skill_space.md`` §10.15 reads it for W13's NAO trainings against S's.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# F2 of transfer/docs/skill_space.md §9: the deployed path reads the body's state with its
+# F2: the deployed path reads the body's state with its
 # kinematics -- every field of z* but the feet's loads -- instead of the learned encoder alone.
 #
 #   transfer/scripts/estimator_study.sh [g1|nao|both]

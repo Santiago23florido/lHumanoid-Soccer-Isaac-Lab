@@ -1,9 +1,9 @@
-"""Checks on the family's stance-load profiles (``GaitRanges.load_shape``, skill_space.md §10.5).
+"""Checks on the family's stance-load profiles (``GaitRanges.load_shape``).
 
 A walking stance's load, the half-sine on a warped clock (``load_profile``), must keep the
 half-sine's impulse, so that the biped's vertical dynamics -- and every gait it writes -- hold
 for any warp; a warp away from one must lengthen the light contacts of load transfer; a run
-must keep its half-sine; and the pre-registered probes, which name no warp, must stay
+must keep its half-sine; and the probes, which name no warp, must stay
 half-sines.
 """
 

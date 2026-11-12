@@ -3,7 +3,7 @@
 #
 #   transfer/scripts/held_out_task.sh <g1 body contract> [stage...]
 #
-# Stages (all by default), run only once both trackers are frozen (skill_space.md §8.3):
+# Stages (all by default), run only once both trackers are frozen:
 #   export   download and script Isaac-Velocity-Rough-G1-v0 (logs/published/...)
 #   capture  its rollouts on G1RoughOnFlat: DART with starts and stops for the generator, and
 #            play rollouts under the three test commands (its command has no sideways part, so

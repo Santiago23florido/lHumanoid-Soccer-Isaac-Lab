@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W7b of skill_space.md §10.9: W7's criteria at leg gain 2 (K x 2, D x sqrt 2) over the same
+# W7b: W7's criteria at leg gain 2 (K x 2, D x sqrt 2) over the same
 # three frozen NAO trackers. W7 at gain 4 read "both" but failed its falls criterion (rough_b4
 # at the fast command); the incumbent at gain 2, W7's dose, did not fall. This adds what the
 # dose lacked: the incumbent's walk, and S's seeds 32 and 33 through L4 of both skills and the

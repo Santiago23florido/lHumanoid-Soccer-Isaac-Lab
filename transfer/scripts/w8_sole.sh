@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W8n (skill_space.md §10.10): W8's grounded plans on W6's NAO trackers, whose sole point
+# W8n: W8's grounded plans on W6's NAO trackers, whose sole point
 # rests at the contact (HUMANOID_SOLE=contact). W8 missed on the NAO, whose loaded feet read
 # 0.012-0.013 L through the URDF sole point; this asks whether the miss was that offset.
 # L4 of both skills and S0's walk with HUMANOID_PLAN_CONTACT=ground, paired with W6's own

@@ -1,6 +1,6 @@
 """A tracker's action as a correction to what the body's physics already says (decoder v2).
 
-The tracker of §8 maps a plan of ``z*`` straight to joint targets, so it has to
+The plain tracker maps a plan of ``z*`` straight to joint targets, so it has to
 learn the body's inverse kinematics and the torques that hold it up -- on the
 plans it practised. Off them (a crouched gait, a high swing) it has nothing to
 extrapolate with. Here both come from the body's model, every step, and the
@@ -289,7 +289,7 @@ class PhysicsPriorActionCfg(JointPositionActionCfg):
     """With ``trust_plan``: ``shrink`` -- ``now + K (plan - now)``, K from the measured noise --
     or ``mean``, the two samples' average. Shrinking towards the body's state pulls every moving
     quantity back: the G1's forward foot targets came out at 0.82-0.85 of the plan's on the
-    walk, and the arm stepped 13 % short of its plans (skill_space.md §9.1)."""
+    walk, and the arm stepped 13 % short of its plans."""
 
     slow_tilt: bool = False
     """Aim the trunk at the plan's tilt averaged over its commitment, not its next step's."""

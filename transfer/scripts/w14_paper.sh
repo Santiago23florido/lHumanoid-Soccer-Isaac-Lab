@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # What correcting the paper's NAO figures to the pinned reading needs beyond W14's captures
-# (skill_space.md §10.15, reading 1 "corrected"). It enters no W14 reading.
+# (reading 1 "corrected"). It enters no W14 reading.
 #
 #   S's seed 31 (warm_nao_r1_s31_sym)  the paper's "S's seeds" rows hold it; W13 paired the
 #                                      incumbent instead. Pinned L4 on flat_dagger2 and rough_b4,

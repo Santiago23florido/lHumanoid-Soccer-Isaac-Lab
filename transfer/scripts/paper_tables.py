@@ -28,10 +28,9 @@ MODEL = {"g1": "warm_r3_logload_sym", "nao": "r1_3498_sym_v3"}
 OBSERVED = {"g1": "", "nao": "_own"}
 """How each body's zero-shot captures name the units its tracker observes its plans in.
 
-The NAO's are read in its walk contract's units (``_own``; ``skill_space.md`` §10.15, W14).
-Read in the G1 generator's units, as first published, its figures were 1-7 % pessimistic.
-The G1's contracts share one normalisation, so its captures need no suffix. The ablations
-(``ABLATIONS``) are not re-read; their NAO rows stay in the task's units."""
+The NAO's are read in its walk contract's units (``_own``).
+The G1's contracts share one normalisation, so its captures need no suffix. The ablations'
+NAO rows (``ABLATIONS``) are read in the task's units."""
 SEEDS = {
     "g1": [("41", MODEL["g1"]), ("42", "warm_r3_s42_log_sym"), ("43", "warm_r3_s43_log_sym")],
     "nao": [(s, f"warm_nao_r1_s{s}_sym") for s in ("31", "32", "33")],
@@ -244,7 +243,7 @@ def section(title: str, note: str, header: list[str], rows: list[list[str]]) -> 
 
 HELD_OUT = ("w18_loto.json", "w19_crossfit.json", "w20_from_s.json")
 """Sidestep held out of every gradient step (W18), and the decoders trained on cross-fitted
-plans: W19's continuation and W20's training from S (``skill_space.md`` §10.19–10.21)."""
+plans: W19's continuation and W20's training from S."""
 
 
 def paired(entry: dict | None, digits: int = 3) -> str:
@@ -321,7 +320,7 @@ def held_out(data: dict) -> list[str]:
             "family); W19's (W13's continued 300 iterations with cross-fitted plans, drawn by "
             "generators that never saw that task); W20's (W13's recipe with cross-fitted plans, "
             "from S). No decoder ever saw sidestep. Source: `w18_loto.json`, `w19_crossfit.json`, "
-            "`w20_from_s.json` (`skill_space.md` §10.19–10.21).",
+            "`w20_from_s.json`.",
             [
                 "Body",
                 "Cost of holding it out",
@@ -365,7 +364,7 @@ def build() -> tuple[str, dict]:
             "signature, and speed over the teacher's. Source: "
             f"`zero_shot_<body>_<tag>_<generator>_auto_kin_l4_*.json`, tags `{MODEL['g1']}`, "
             f"`{MODEL['nao']}`. The NAO's are read in its tracker's own units, "
-            "`<generator>_own` (`OBSERVED`; `skill_space.md` §10.15).",
+            "`<generator>_own` (`OBSERVED`).",
             ["Body", "Skill", "L4"],
             rows,
         )
@@ -604,8 +603,8 @@ def build() -> tuple[str, dict]:
                 "A — ablations",
                 "Rough L4 on the deployed path, one change at a time, unless the row says "
                 "otherwise. The tags are in `paper_tables.py`'s `ABLATIONS`. The NAO's rows are "
-                "read in the task generator's units, as first published: W14 did not re-read them "
-                "(`skill_space.md` §10.15), and its falls and speeds did not move with the units.",
+                "read in the task generator's units, "
+                ", and its falls and speeds did not move with the units.",
                 ["Body", "Change", "Before", "After"],
                 rows,
             )

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The task side's correction after the blind test (transfer/docs/skill_space.md §8.4).
+# The task side's correction after the blind test.
 #
 #   transfer/scripts/chain_study.sh <step1|stepA|c1|b1|b2|b3|l4>
 #

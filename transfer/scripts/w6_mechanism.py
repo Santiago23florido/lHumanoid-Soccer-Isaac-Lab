@@ -1,6 +1,6 @@
 """Where W6's swing went: the feet's stance level and swing peak, arm against control.
 
-W6 (skill_space.md §10.8) lowered the NAO's sole point to its resting contact. Its screen
+W6 lowered the NAO's sole point to its resting contact. Its screen
 reads the clearance ratio, which is measured above each foot's own stance level, so it
 cannot say whether the switch moved the stance level, the swing peak or both. This reads
 the L4 captures of the deployed path (both skills x three commands) of S's NAO seeds and
@@ -16,7 +16,7 @@ W6's arm. Per capture, plan ``contract_due[t]`` against the state at ``t + 1``
 * the duty and the lift-off and touchdown lags (``capture_fidelity``).
 
 Everything is the mean over the six captures, then per skill. Leg lengths throughout.
-``arm_s31_ground`` is the same tracker on W8n's grounded plans (§10.10).
+``arm_s31_ground`` is the same tracker on W8n's grounded plans.
 
     python transfer/scripts/w6_mechanism.py --output transfer/results/w6_mechanism.json
 """

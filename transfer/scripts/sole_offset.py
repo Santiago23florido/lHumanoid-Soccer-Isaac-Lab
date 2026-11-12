@@ -1,4 +1,4 @@
-"""Where a body's sole point sits when its foot is flat on the ground (research_report.md §2.2).
+"""Where a body's sole point sits when its foot is flat on the ground.
 
 ``z*`` places each foot at its *sole point*. On the G1 that is the underside of the foot's
 collision box, measured in the simulator (``g1/scripts/measure_body.py``), so a flat, loaded

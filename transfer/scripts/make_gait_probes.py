@@ -1,9 +1,9 @@
-"""Write the pre-registered gait probes: the family's grid, a few manoeuvres, and the twins.
+"""Write the gait probes: the family's grid, a few manoeuvres, and the twins.
 
 A tracker's competence is scored gait by gait (``evaluate_competence.py``):
 every environment of a capture follows one fixed gait of the procedural
 family. The probes are fixed here, before any tracker is trained on the
-family (``transfer/docs/skill_space.md`` §8.3):
+family:
 
 * **grid** -- forward speed {0, 0.08, 0.16, 0.25, 0.35} ``V`` × stride period
   {0.8, 1.2, 1.8, 2.6} ``T`` × duty {0.4, 0.55, 0.7, 0.85}, at a middling
@@ -16,7 +16,7 @@ family (``transfer/docs/skill_space.md`` §8.3):
   same gait written by the biped, to tell a tracker that cannot do a gait from
   one that cannot follow a task's plans of it.
 
-With ``--corners``, the family's corners instead (``transfer/docs/skill_space.md`` §9, F4),
+With ``--corners``, the family's corners instead (F4),
 fixed before the physics trackers are trained: CoM height {0.80, 0.85, 0.92} ``L`` × swing
 clearance {0.06, 0.10, 0.14} ``L`` × duty {0.55, 0.75} × forward speed {0.15, 0.30} ``V``,
 stride period 1.0 ``T``. The lowest height and the highest clearance lie beyond the family's
@@ -159,7 +159,7 @@ def corners(ranges: GaitRanges, min_swing: float) -> list[dict]:
 
 
 def transfer(min_swing: float) -> list[dict]:
-    """Walking schedules of the grid, each at three stance-load warps (``skill_space.md`` §10.5).
+    """Walking schedules of the grid, each at three stance-load warps.
 
     Forward speed {0.08, 0.16, 0.25} ``V`` × stride period {0.8, 1.2, 1.8} ``T`` × duty
     {0.55, 0.7} -- walks, with the double support a load transfer happens in -- at warp

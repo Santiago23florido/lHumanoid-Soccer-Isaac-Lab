@@ -1,4 +1,4 @@
-"""W9's pre-registered reading (skill_space.md §10.11): the plans' loaded feet grounded and still.
+"""W9's reading: the plans' loaded feet grounded and still.
 
 For each body's three frozen trackers, the captures with ``HUMANOID_PLAN_CONTACT=stick``
 (``w9_stick.sh``) against a baseline capture of the same tracker, deployed path, L4 of both

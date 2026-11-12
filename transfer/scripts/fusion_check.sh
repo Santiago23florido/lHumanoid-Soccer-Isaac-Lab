@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Does shrinking the plan towards the body's state shorten the physics arm's steps?
-# (transfer/docs/skill_space.md §9.1). Round 8's trained physics arm, deployed on the walk as S0
+#. Round 8's trained physics arm, deployed on the walk as S0
 # measures it (the walk's encoder, physical reference, kinematic estimator), with the prior's
 # plan fused each way: shrink (as trained) and the two samples' mean. No retraining.
 #

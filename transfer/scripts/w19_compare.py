@@ -1,4 +1,4 @@
-"""W19's pre-registered reading (``skill_space.md`` §10.20): decoders that also practised
+"""W19's reading: decoders that also practised
 cross-fitted plans.
 
 Arms, per seed, both W13's tracker continued 300 iterations in W13's conditions:

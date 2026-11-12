@@ -1,6 +1,6 @@
 """Why a tracker lifts its feet short of its plans: three checks on probe captures.
 
-Read with ``sole_offset.py`` (research_report.md §2.2, item 4). Per capture of the family's
+Read with ``sole_offset.py``. Per capture of the family's
 probes (grid and corners), on the samples between valid steps, plan ``contract_due[t]``
 against the state at ``t + 1`` (``common.contact.capture_fidelity``'s alignment):
 

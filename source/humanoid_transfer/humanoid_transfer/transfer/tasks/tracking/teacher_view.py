@@ -5,7 +5,7 @@ tracker can be run on them -- except one. Its ``actions`` term is the physics ta
 action: a residual on the prior, in the residual's units. The plain tracker was trained,
 and is deployed, on its own previous output there; shown the residual instead it acts
 on an input it never saw, and so do labels drawn from it (the first two distilled
-physics trackers, ``transfer/docs/skill_space.md`` §9.1).
+physics trackers).
 """
 
 from __future__ import annotations

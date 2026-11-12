@@ -1,4 +1,4 @@
-"""W16's pre-registered reading (``skill_space.md`` §10.17): rough, held out of everything, on
+"""W16's reading: rough, held out of everything, on
 both bodies' frozen W13 decoders, with the multi-task generators of step 5.
 
 Arms, each a generator (``logs/contract/<arm>``) deployed on the same six trackers (G1 s41-43,
@@ -28,7 +28,7 @@ deviation (the mean over the three commands):
     python transfer/scripts/w16_compare.py --per-command
 
 ``--per-command`` prints each arm's figures per command, averaged over the trackers.
-``--asked`` prints the context of §10.17: the duty factor the same generator asks of each
+``--asked`` prints the context: the duty factor the same generator asks of each
 body, and what the body does, on S's trackers' published captures (the task's units).
 """
 

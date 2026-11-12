@@ -1,8 +1,8 @@
 """How well does the incumbent walk through the physics task's action, and its distilled student?
 
 The distilled physics tracker exits the task several times as often as the incumbent it
-was fitted to, though its joint targets are within 0.01 rad of the labels
-(``transfer/docs/skill_space.md`` §9.1). This measures, in the physics task and on the
+was fitted to, though its joint targets are within 0.01 rad of the labels. This measures, in the
+physics task and on the
 same states, each controller's terminations per 1000 env steps:
 
 * ``teacher``: the incumbent's joint targets, sent through the residual as they are;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cycle B4 of the task side's correction (transfer/docs/skill_space.md §8.4): one generator per
+# Cycle B4 of the task side's correction: one generator per
 # task trained across history noise levels, reading the level as an input -- a denoiser built in,
 # with no level fixed in training -- and deployed at the body encoder's own error.
 #

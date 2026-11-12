@@ -1,4 +1,4 @@
-"""W17's pre-registered reading (``skill_space.md`` §10.18): the command a future achieved.
+"""W17's reading: the command a future achieved.
 
 Arms, each a generator (``logs/contract/<arm>``) deployed on W13's six trackers (G1 s41-43, NAO
 s31-33), rough's L4 at its three commands on the deployed path, in each tracker's own units, as

@@ -1,4 +1,4 @@
-"""W14's pre-registered reading (``skill_space.md`` §10.15): the NAO's trackers in their own units.
+"""W14's reading: the NAO's trackers in their own units.
 
 Each NAO tracker's L4 with every ``z*`` it observes mapped into the units of the walk contract
 it trained under (``_own``), against the same tracker's L4 in the task's units, paired by

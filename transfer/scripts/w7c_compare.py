@@ -1,4 +1,4 @@
-"""W7c's pre-registered reading (skill_space.md §10.9): NAO trackers trained on faster drives.
+"""W7c's reading: NAO trackers trained on faster drives.
 
 The arm (``warm_nao_g2_s<seed>``: r1_3498 continued 1000 iterations as S's NAO seeds were,
 with ``HUMANOID_NAO_LEG_GAIN=2`` in training and evaluation) against two controls, S's NAO

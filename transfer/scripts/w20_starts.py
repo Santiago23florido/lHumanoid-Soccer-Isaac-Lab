@@ -1,5 +1,4 @@
-"""When the bodies fall on sidestep, and what the plan was asking then (``skill_space.md``
-§10.21, read after the screen; instrumentation, not a criterion).
+"""When the bodies fall on sidestep, and what the plan was asking then (instrumentation).
 
 From the L4 captures on sidestep under one held-out generator, per body and tracker arm
 (``<prefix>_<body>_s<seed>_sym``), over the seeds on disk:

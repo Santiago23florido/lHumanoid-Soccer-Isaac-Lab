@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Decoder v2 at equal competence (transfer/docs/skill_space.md §9.1): does the physics prior help a
+# Decoder v2 at equal competence: does the physics prior help a
 # tracker that already walks? Both arms start from the incumbent and get the same PPO budget.
 #
 #   warm_v2t  the incumbent distilled into the physics task (distill_tracker.py: DAgger on its

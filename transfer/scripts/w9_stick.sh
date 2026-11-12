@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W9 of skill_space.md §10.11: frozen trackers of both bodies with each foot their plans load
+# W9: frozen trackers of both bodies with each foot their plans load
 # grounded and held still (HUMANOID_PLAN_CONTACT=stick), L4 on both skills and S0's walk. The
 # G1's are paired with their W8 grounded captures, the NAO's with the plans as drawn
 # (w9_compare.py). Nothing is trained.

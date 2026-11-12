@@ -11,7 +11,7 @@
 #   _truth    the same, from the true state: separates the tracker from the estimate;
 #   _auto     the generator reading its own committed plans, as in training.
 #
-# The pre-registered gates are applied by evaluate_contract.py, which writes
+# The gates are applied by evaluate_contract.py, which writes
 # transfer/results/contract_g1_closed_loop_<tag>.json.
 set -euo pipefail
 

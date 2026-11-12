@@ -4,7 +4,7 @@ The tracking reward scores the reached state against the plan in units of the en
 precision. For the loads it did so in linear units, where a foot left on the ground with
 5 % of the weight while the plan has it in the air costs under one tolerance -- and that
 much is already contact for the duty factor, the check that fails 21-25 of every tracker's
-~24 failing probes of the family (``transfer/docs/skill_space.md`` §9.1). Scored as the
+~24 failing probes of the family. Scored as the
 generator models loads, ``log(load + 0.01)``, the same miss costs several tolerances.
 
 This measures that space's precision on a capture of the deployed path (``estimate``, the

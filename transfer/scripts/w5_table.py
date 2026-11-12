@@ -1,4 +1,4 @@
-"""W5's robustness table (skill_space.md §10.7), read from the results ``w5_robust.sh`` wrote.
+"""W5's robustness table, read from the results ``w5_robust.sh`` wrote.
 
 For each tracker and skill at L4's forward command, deployed path: the nominal capture
 (L4's own) against each perturbation (pushes of up to 0.1 and 0.2 ``V`` every 20 ``T`` on

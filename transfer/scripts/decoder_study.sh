@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# F4 of transfer/docs/skill_space.md §9: the G1 tracker whose action is a residual on its body's
+# F4: the G1 tracker whose action is a residual on its body's
 # physics (G1TrackPhysics-v0), against the plain tracker (G1Track-v0), both from scratch under
 # the incumbent's conditions (the walk's contract, 0.7 procedural, mirror loss, autonomous).
 #
@@ -27,7 +27,7 @@ export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt"
 task_of() { if [ "$1" = v1 ]; then echo G1Track-v0; else echo G1TrackPhysics-v0; fi; }
 # v2h: the prior with the physics heads and the critic's balance; v2t: the same, the prior
 # trusting each plan by its measured sampling noise, the biped's plans carrying that noise and
-# the gait's trunk sway (HUMANOID_PLAN_TRUST, §9.1).
+# the gait's trunk sway (HUMANOID_PLAN_TRUST).
 variant_flags() {
   case "$1" in
     v2h) export HUMANOID_HEADS=1 HUMANOID_PLAN_TRUST=0 ;;

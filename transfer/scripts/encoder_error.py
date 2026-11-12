@@ -4,7 +4,7 @@ The encoder ``E_b`` estimates ``z*`` from what the body senses. Its error on the
 body's own states is the precision the tracker's reward and the generator's
 history noise assume (``sigma``). On states it never saw -- a crouched gait, a
 high swing -- it can err more, and a tracker fed that estimate reads a plan
-against a state the body is not in (condition (vi) of skill_space.md §8.1).
+against a state the body is not in (condition (vi).1).
 
 For each capture (``capture_contract.py``: ``encoder_input`` next to the true
 ``skill_state``), this reports the encoder's error in units of the contract's

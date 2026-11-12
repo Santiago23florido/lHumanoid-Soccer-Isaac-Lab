@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W5b (skill_space.md §10.7): W5's perturbations on flat_b4, the flat generator trained as
+# W5b: W5's perturbations on flat_b4, the flat generator trained as
 # rough_b4 was (history noise across levels, read as an input), on both incumbents.
 # W5 found the flat skill's incumbent generator, flat_dagger2, falling almost every episode
 # with the estimate read at twice its precision, where rough_b4 did not fall at four times.

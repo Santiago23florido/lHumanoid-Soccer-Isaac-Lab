@@ -81,7 +81,7 @@ def main() -> int:
         for skill, generator in SKILLS.items():
             rows = []
             for command in COMMANDS:
-                name = f"{generator}{OBSERVED[body]}"  # in the tracker's units (§10.15)
+                name = f"{generator}{OBSERVED[body]}"  # in the tracker's units
                 path = RESULTS / f"zero_shot_{body}_{tag}_{name}_auto_kin_l4_{command}.json"
                 if not path.exists():
                     continue

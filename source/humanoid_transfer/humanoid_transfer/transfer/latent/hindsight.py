@@ -4,8 +4,7 @@ A generator learns ``p(future | history, command)``. Trained on the command an e
 *given*, it learns the expert's tracking error as part of the task: the published flat expert
 walks 0.73 of a 0.25 m/s command, and the walk expert 0.88 with a duty factor of 0.88
 (``transfer/results/w16_task_region.json``). A multi-task generator asked for a held-out task
-at those commands then plans the base experts' speed, not the command (``skill_space.md``
-§10.17, W16).
+at those commands then plans the base experts' speed, not the command (W16).
 
 Relabelled, the command a training future is paired with is the one it achieved: the mean,
 over the next ``span`` samples inside its episode, of the CoM velocity in the heading frame

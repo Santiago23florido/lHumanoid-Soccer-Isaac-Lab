@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W1 of skill_space.md §10.3: the NAO's frozen trackers read the contract in the generator's
+# W1: the NAO's frozen trackers read the contract in the generator's
 # space (HUMANOID_RESAMPLE=generator), L4 on both skills and S0's walk, paired with their own
 # existing linear captures. Nothing is trained.
 #

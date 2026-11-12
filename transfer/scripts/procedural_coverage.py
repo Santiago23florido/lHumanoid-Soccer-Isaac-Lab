@@ -1,10 +1,10 @@
 """Does the plan family cover a task? Gait signatures against the ranges, and windows against both.
 
 Zero-shot transfer can only be expected for a task whose plans lie where the
-tracker practised (``transfer/docs/skill_space.md`` §8). Two measurements,
+tracker practised. Two measurements,
 neither of which trains anything:
 
-**Coverage (H1, pre-registered).** Each capture's gait is summarised by the
+**Coverage (H1).** Each capture's gait is summarised by the
 parameters the family is drawn in -- forward and sideways speed, turn, stride
 period, the two duties, step width, CoM height, foot clearance, lean -- and
 checked against :class:`~humanoid_transfer.transfer.latent.procedural.GaitRanges`

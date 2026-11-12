@@ -15,18 +15,18 @@ was held to, from ``evaluate_latent.py``: speed at least 0.90 of the
 teacher's, fall rate at most 2 points above it, and stride length, stride
 period and both duty factors within 10 %.
 
-**Across bodies** (pre-registered for the blind test, ``skill_space.md`` §8.4). When
+**Across bodies** (for the blind test). When
 a run's rate differs from the teacher's, ``verdict_at_body_rate`` also holds it to
 the teacher's gait resampled, in body time, to the run's rate. Both verdicts are
 reported; within one body they coincide.
 
-**Correction (2026-11-04, ``skill_space.md`` §10).** That resampling interpolates the
+**The unbiased verdict.** That resampling interpolates the
 feet's loads linearly and then thresholds them, which counts about nine tenths of
 every swing boundary as contact: on the teacher's captures resampled to the NAO's
 step it adds 0.03 to 0.06 to each duty factor, while a duty factor -- a fraction of
 time -- does not depend on the rate it is sampled at (nearest sampling and log-unit
-interpolation stay within 0.01). ``verdict_at_body_rate`` is kept as it was, for
-comparison with every earlier result; ``verdict_at_body_rate_unbiased`` resamples the
+interpolation stay within 0.01). ``verdict_at_body_rate`` is kept for comparison;
+``verdict_at_body_rate_unbiased`` resamples the
 loads in log units (the generator's own space) and records the nearest-sample
 signature beside it.
 

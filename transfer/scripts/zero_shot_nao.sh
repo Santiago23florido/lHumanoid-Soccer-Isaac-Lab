@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The NAO's round of the zero-shot study (transfer/docs/skill_space.md §8.4): the NAO's body side
+# The NAO's round of the zero-shot study: the NAO's body side
 # trained once on the procedural family, then the G1-side task, frozen, deployed on it. Nothing
 # of the G1 is trained, and no data of the published tasks reaches the NAO.
 #

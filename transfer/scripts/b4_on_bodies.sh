@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# F1 of transfer/docs/skill_space.md §9: the noise-conditional generators (B4) on both bodies.
+# F1: the noise-conditional generators (B4) on both bodies.
 #
 #   transfer/scripts/b4_on_bodies.sh
 #

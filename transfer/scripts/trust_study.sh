@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Decoder v2, round 2 (transfer/docs/skill_space.md §9.1): the prior trusts each plan by its
+# Decoder v2, round 2: the prior trusts each plan by its
 # measured sampling noise and aims the trunk at its slow tilt; the biped's plans carry that
 # noise and the gait's trunk sway. One simulator at a time:
 #

@@ -1,6 +1,6 @@
 """Where W7c's gait went: contact timing and swing height of the three NAO groups at gain 2.
 
-W7c (skill_space.md §10.9) trained S's NAO recipe at ``HUMANOID_NAO_LEG_GAIN=2`` and
+W7c trained S's NAO recipe at ``HUMANOID_NAO_LEG_GAIN=2`` and
 compared it with S's seeds frozen at gain 2 and at the derived gains. Its criterion reads
 gate C. This reads how each group's feet move, on the same L4 captures of the deployed
 path (both skills x three commands), with ``w6_mechanism.condition``: the stance level and

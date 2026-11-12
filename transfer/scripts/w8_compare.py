@@ -1,4 +1,4 @@
-"""W8's pre-registered reading (skill_space.md §10.10): the plans' loaded feet put on the ground.
+"""W8's reading: the plans' loaded feet put on the ground.
 
 For each body's three frozen trackers, the captures of the plans as drawn against the same
 tracker with ``HUMANOID_PLAN_CONTACT=ground`` (``w8_plan_contact.sh``), deployed path, L4

@@ -1,6 +1,6 @@
 """Where W1's asked duty went: the plan's contact events against the body's, both interfaces.
 
-W1 (skill_space.md §10.3) lowered the duty the NAO is asked for; this reads, from the
+W1 lowered the duty the NAO is asked for; this reads, from the
 contact-fidelity scores of its captures, whether the body's contact events moved with
 the plan's. Each linear capture is paired with the same tracker, skill and command under
 ``HUMANOID_RESAMPLE=generator``; per skill, the mean over trackers, commands and feet of

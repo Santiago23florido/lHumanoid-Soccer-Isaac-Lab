@@ -1,4 +1,4 @@
-"""W13's pre-registered reading (``skill_space.md`` §10.14): decoders trained on the base tasks.
+"""W13's reading: decoders trained on the base tasks.
 
 Each body's W13 trackers (``mt_<body>_s<seed>_sym``) against S's (the same continuation of the
 same incumbent without the tasks), paired by seed, on the deployed path:
@@ -10,7 +10,7 @@ same incumbent without the tasks), paired by seed, on the deployed path:
   ratio is the CoM's dimensionless speed along the task's commanded axis over the expert's
   own in its play rollout at that command, both once settled as L4 reads speed. (Amended
   before any W13 run: L4's own ``speed_ratio`` is forward-only, undefined for sidestep, and
-  W11's experts do not all reach their command; §10.14.)
+  W11's experts do not all reach their command.)
 * **no regression** -- flat's L4 largest deviation (three commands) rises by no more than
   2 SE, falls rise by at most two in total, and S0's walk passes on every W13 tracker
   (S0's check: speed ratio at least 0.9 and fall excess at most 0.02, as W1-W9 read it).

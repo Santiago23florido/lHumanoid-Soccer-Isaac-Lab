@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W17 of skill_space.md §10.18: the command a future achieved (latent/hindsight.py), with rough
+# W17: the command a future achieved (latent/hindsight.py), with rough
 # held out of everything, on both bodies' frozen W13 decoders.
 #
 #   1. mt17_c      the G1 experts' five base tasks, every command relabelled (span 50)

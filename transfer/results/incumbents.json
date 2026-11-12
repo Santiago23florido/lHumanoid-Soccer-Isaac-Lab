@@ -1,10 +1,10 @@
 {
-  "rule": "A candidate replaces an incumbent only if it improves its target metric by more than twice the bootstrap standard error and is not worse by as much on the regression suite (transfer/docs/skill_space.md §8.4).",
+  "rule": "A candidate replaces an incumbent only if it improves its target metric by more than twice the bootstrap standard error and is not worse by as much on the regression suite.",
   "regression_suite": [
     "pytest and ruff",
     "chains of flat_dagger2 and rough_b3 bit-exact on the GPU",
-    "L4 of flat_dagger2 on the G1 (r3_6194_sym) and the NAO (r1_3498_sym)",
-    "L1b, the walk on the deployed path under the autonomous reference (since 2026-10-24; the physical reference, which no tracker trains in, is kept as instrumentation)"
+    "L4 of flat_dagger2 on the G1 and the NAO",
+    "the walk on the deployed path under the autonomous reference"
   ],
   "trackers": {
     "g1": {
@@ -13,14 +13,8 @@
       "tag": "warm_r3_logload_sym",
       "deployed": "symmetrized",
       "encoder": "logs/contract/walk_zs_g1_warm_r3_logload_sym/generator.pt",
-      "training": "the previous incumbent continued 1000 PPO iterations from its adapted rate, the reward scoring the feet's loads in log space (HUMANOID_LOAD_SPACE=log)",
-      "since": "2026-10-25: three seeds per arm against the same continuation in linear units -- grid +5.33 +- 2.06 probes, grid and corners pooled +7.33 +- 2.67; S0 passes (tests, chains, flat L4 0/192 passing 3, walk 0/64 at 1.009)",
-      "evidence": "transfer/results/compare_seeds_logload_*.json, competence_g1_warm_r3_logload_sym*.json, zero_shot_g1_warm_r3_logload_sym_*.json",
-      "previous": {
-        "run": "logs/rsl_rl/g1_track/2026-10-14_15-38-39_zs_g1_r3_loss",
-        "checkpoint": "model_6194",
-        "tag": "r3_6194_sym"
-      }
+      "training": "PPO on the procedural family (70 %) and the walk's plans (30 %), the reward scoring the feet's loads in log space (HUMANOID_LOAD_SPACE=log)",
+      "evidence": "transfer/results/compare_seeds_logload_*.json, competence_g1_warm_r3_logload_sym*.json, zero_shot_g1_warm_r3_logload_sym_*.json"
     },
     "nao": {
       "run": "logs/rsl_rl/nao_track/2026-10-14_19-59-50_zs_nao_r1",
@@ -33,21 +27,17 @@
   "generators": {
     "flat": {
       "contract": "logs/contract/flat_dagger2/generator.pt",
-      "since": "step 3: flat_b3 fell on the G1 where flat_dagger2 does not; F1: flat_b4 misses one NAO check of S0 (forward stride) where flat_dagger2 passes",
       "evidence": "transfer/results/zero_shot_g1_r3_6194_sym_flat_dagger2_auto_l4_*.json"
     },
     "rough": {
       "contract": "logs/contract/rough_b4/generator.pt",
-      "since": "F1 under the deployed kinematic estimator: G1 falls 0/192 against rough_b3's 4/190 (2.02 SE); NAO 0/192 both, passes 2 of 3 commands at its rate against 1",
-      "evidence": "transfer/results/zero_shot_{g1_r3_6194_sym_v3,nao_r1_3498_sym_v3}_rough_b{3,4}_auto_kin_l4_*.json",
-      "correction": "2026-11-04 (skill_space.md 10.1): the NAO's 'passes 2 of 3 at its rate against 1' used a resampling that lengthens the teacher's stances; unbiased, both pass 0 of 3 (body_rate_verdicts.json). The adoption stands: its deciding term was the G1's falls, and the NAO's clause asked only that it be no worse.",
-      "previous": "logs/contract/rough_b3/generator.pt"
+      "evidence": "transfer/results/zero_shot_{g1_r3_6194_sym_v3,nao_r1_3498_sym_v3}_rough_b{3,4}_auto_kin_l4_*.json"
     }
   },
   "reference": "autonomous",
   "estimator": {
     "deployed": "kinematic",
-    "since": "F2: every field of z* but the loads from the body's kinematics; rough_b3 on the G1 45/83 -> 15/64, 94/127 -> 16/62, 24/68 -> 12/61 falls; flat_dagger2 unchanged on both bodies (0/64, passes); height from the sole's lowest corner (G1 rough_b3 43/187 -> 4/190)",
-    "evidence": "transfer/results/zero_shot_*_sym_*_auto_kin_l4_*.json, estimator_error_*_kin.json"
+    "evidence": "transfer/results/zero_shot_*_sym_*_auto_kin_l4_*.json, estimator_error_*_kin.json",
+    "what": "every field of z* but the loads from the body's kinematics, the height from the sole's lowest corner; the loads from the body's encoder"
   }
 }

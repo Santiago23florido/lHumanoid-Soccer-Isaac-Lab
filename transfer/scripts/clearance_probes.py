@@ -1,4 +1,4 @@
-"""How high a tracker lifts its feet against what the family's probes ask (skill_space.md §10.2).
+"""How high a tracker lifts its feet against what the family's probes ask.
 
 For each probe capture (the competence map's grid and corners), the swing clearance the body
 reaches against the plan's own (``common.contact``: the sole's highest point in each swing

@@ -1,4 +1,4 @@
-"""W15's pre-registered reading (``skill_space.md`` §10.16): the family's share alone, on the NAO.
+"""W15's reading: the family's share alone, on the NAO.
 
 One NAO tracker, S's recipe with the family's share at 0.5 and no task plans
 (``fam05_nao_s31_sym``), against the two seed-31 trackers it lies between: S's

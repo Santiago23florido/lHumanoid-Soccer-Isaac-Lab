@@ -1,4 +1,4 @@
-"""W21's pre-registered reading (``skill_space.md`` §10.22): the multi-body generator with a
+"""W21's reading: the multi-body generator with a
 learned latent, from free to collapsed through a bottleneck, on the best decoders so far.
 
 Generators, all trained without sidestep and rough, on W18's recipe and bodies' data:

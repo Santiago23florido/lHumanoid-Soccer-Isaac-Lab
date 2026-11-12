@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W15 of skill_space.md §10.16: the family's share alone, on the NAO. S's NAO recipe
+# W15: the family's share alone, on the NAO. S's NAO recipe
 # (paper_queue.sh: the incumbent continued 1000 iterations, seed 31) with the family's share
 # at 0.5 and no task plans, the one W13 change that is not the G1's task plans.
 #

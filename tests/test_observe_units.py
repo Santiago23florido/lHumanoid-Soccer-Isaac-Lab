@@ -1,5 +1,4 @@
-"""The tracker's view in the units it trained in (``latent/units.py``; ``skill_space.md``
-§10.15)."""
+"""The tracker's view in the units it trained in (``latent/units.py``)."""
 
 from __future__ import annotations
 
@@ -42,7 +41,7 @@ def _view_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
 def test_off_is_the_view_every_earlier_run_observed_bit_for_bit():
     upcoming, estimate, has_plan = _view_inputs()
-    # The body of ReferenceCommand.observation before §10.15, verbatim.
+    # The body of ReferenceCommand.observation in the generator's units, verbatim.
     relative = upcoming - estimate[:, None]
     relative = torch.where(~has_plan[:, None, None], 0.0, relative)
     view = torch.cat([relative.flatten(1), estimate], dim=-1)

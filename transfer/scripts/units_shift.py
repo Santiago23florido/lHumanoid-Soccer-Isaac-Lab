@@ -5,8 +5,7 @@ its contract's ``skill_norm``. L4 makes the task's generator the contract, so a 
 trained under one contract reads the task in that generator's units. A field ``x`` is seen
 as ``(x - m') / s'`` instead of ``(x - m) / s``: an offset ``(m - m') / s'`` and a scale
 ``s / s'`` in the tracker's own units. The G1's contracts share one ``skill_norm``; the
-NAO's walk contract (``walk_dagger2e``) does not (found by W13's smoke run, skill_space.md
-§10.14).
+NAO's walk contract (``walk_dagger2e``) does not (found by W13's smoke run).
 
     python transfer/scripts/units_shift.py --own logs/contract/walk_dagger2e/generator.pt \
         --other logs/contract/flat_dagger2/generator.pt logs/contract/rough_b4/generator.pt

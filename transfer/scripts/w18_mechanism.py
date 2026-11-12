@@ -1,5 +1,5 @@
-"""What W18's held-out generator asked on sidestep, and what the bodies did with it
-(``skill_space.md`` §10.19, read after the result; instrumentation, not a criterion).
+"""What W18's held-out generator asked on sidestep, and what the bodies did with
+it(instrumentation).
 
 From W18's L4 captures (after the 100 recorded settle steps, living environments), per body,
 command and arm, for the plans (``contract_due``) and the bodies (``skill_state``), averaged

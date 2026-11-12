@@ -12,7 +12,7 @@ paired with the half-sine schedule by schedule:
 * ``airborne_when_light``: the foot in the air where the plan asks for a light contact;
 * lift-off and touchdown lags.
 
-The prediction pre-registered in ``skill_space.md`` §10.5 holds if, at warp 0.5, the
+The prediction holds if, at warp 0.5, the
 shortfall is more negative and the airborne share larger than at the half-sine, each by
 more than twice the standard error of the twelve paired differences.
 

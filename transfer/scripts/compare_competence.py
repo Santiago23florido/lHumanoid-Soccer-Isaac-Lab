@@ -4,8 +4,8 @@
 tracker from another the same probes are paired instead, and each continuous
 measure's mean difference (candidate minus reference) is reported with its
 bootstrap standard error over probes -- no threshold decides it. A difference
-larger than twice its standard error is the adoption rule of
-``transfer/docs/skill_space.md`` §9. The probes each passes alone are counted too
+larger than twice its standard error is the adoption rule. The probes each passes alone are counted
+too
 (McNemar's discordant pairs).
 
 Usage::

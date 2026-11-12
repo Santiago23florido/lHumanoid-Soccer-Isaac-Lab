@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The regression suite S0 of transfer/docs/skill_space.md §9, for the incumbents under this code.
+# The regression suite S0, for the incumbents under this code.
 #
 #   transfer/scripts/regression_s0.sh
 #
@@ -10,7 +10,7 @@
 #    their own tag: those paths do not read the estimator). Since 2026-10-24 S0's check is the
 #    deployed path under the autonomous reference -- the one every tracker trains in and L4
 #    deploys with; the physical reference, which no tracker trains in and a body can steer
-#    towards a slower gait, is kept as instrumentation (skill_space.md §9).
+#    towards a slower gait, is kept as instrumentation.
 # (L4 of flat_dagger2 on both bodies, S0's third part, ran in the re-baseline.)
 set -uo pipefail
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# W12 of skill_space.md §10.13: one generator per new base task, step 2 of method_revision.md §6.
+# W12: one generator per new base task.
 # For each task W11 accepted (transfer/results/w11_experts.json, its calibrated reading: the
-# deviation declared in skill_space.md §10.12), its contract generator is
+# deviation declared in), its contract generator is
 # trained on its G1 expert's DART rollouts with rough_b4's and flat_b4's recipe:
 #   horizon 20, commit 13, midpoint solver with 8 flow steps, log-warped loads;
 #   the G1 body's encoder (walk_zs_g1_r3_6194_sym), trained under its noise and
@@ -26,7 +26,7 @@ body=logs/contract/walk_zs_g1_r3_6194_sym/generator.pt
 
 # The play rollout each generator's chain fidelity is read on: the middle command of each task.
 declare -A gait=([backward]=mid [sidestep]=left [jog]=mid)
-# Backward's fixed-command rollouts are its training variant's (skill_space.md §10.12, second
+# Backward's fixed-command rollouts are its training variant's (second
 # declared deviation; w11_backward_train.sh).
 declare -A rollout=([backward]=train)
 

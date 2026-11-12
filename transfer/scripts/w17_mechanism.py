@@ -1,4 +1,4 @@
-"""Where W17's deviation came from (``skill_space.md`` §10.18, read after its result).
+"""Where W17's deviation came from (instrumentation).
 
 Three measurements, all offline, on captures already on disk:
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The warm study's mirror-loss puzzle (transfer/docs/skill_space.md §9.1): the distilled physics
+# The warm study's mirror-loss puzzle: the distilled physics
 # trackers start PPO far from their mirror image (0.67 in round 6, 0.12 in round 3, 0.05 for
 # the incumbent). mirror_error.py measures it on each, joint by joint and term by term.
 #

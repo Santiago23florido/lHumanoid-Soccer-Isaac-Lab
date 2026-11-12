@@ -1,183 +1,68 @@
 # Architecture
 
-The project is an Isaac Lab external extension: a repository-level project with
-`scripts/`, `source/` and documentation at the root, and one installable
-extension under `source/humanoid_transfer`.
+The project is an Isaac Lab external extension: one installable package under
+`source/humanoid_transfer`, with scripts, results and documentation at the repository root.
 
-## Organising principle
+## Package layout
 
-The package is split by **embodiment**, not by software layer. A robot's model,
-its controllers and its tasks live together, because they are coupled through
-numbers derived from that specific machine and nothing else uses them.
+The package is split by embodiment, not by software layer: a robot's model and tasks live
+together, and the shared theory mentions no robot.
 
 ```text
 humanoid_transfer/
-├── common/      theory that mentions no robot
-├── nao/         the constrained target embodiment
-├── g1/          the capable source embodiment
-├── transfer/    teaching one through the other
-│   └── latent/  the learned shared space (torch, never Isaac Lab)
-├── soccer/      the long-horizon target, inactive
+├── common/      body-independent theory (NumPy): z*, units, centroidal dynamics, gait signature,
+│                inverted pendulum and capture point
+├── transfer/    the contract between bodies
+│   ├── latent/  generator, estimator encoder, bodies' data (torch, never Isaac Lab)
+│   ├── tasks/   the tracking task shared by every body: plan command, observations, reward
+│   ├── retarget.py, correspondence.py   joint-angle retargeting (a baseline)
+│   └── symmetry.py                      mirror symmetry of the policies
+├── g1/          source robot: walking teacher, base-task experts, tracking task
+├── nao/         target robot: asset pipeline, tracking task, baselines
+├── soccer/      reserved for a later stage, inactive
 └── tasks.py     registers every gym id
 ```
 
-Outside the extension, `g1/policy/` holds the trained teacher: the only derived
-binary this repository tracks, and the one artifact the transfer study cannot
-regenerate. See [`g1/policy/README.md`](g1/policy/README.md).
+Each arrow points from a module to the modules that use it:
 
-### `common/`
-
-Anything true of legged robots in general: the linear inverted pendulum, the
-divergent component of motion, zero-step capturability. Expressed in terms of a
-centre-of-mass height, a support polygon and a point inside it — never in terms
-of a particular robot.
-
-It also holds the **skill state** the transfer is built on: `centroidal.py`
-aggregates any tree of rigid bodies into CoM and centroidal momentum,
-`similarity.py` turns a body's leg length, mass and gravity into a system of
-units, `skill_state.py` expresses a walking body's state in those units (27
-numbers that mean the same thing on any humanoid), and `gait.py` reads a
-gait's dimensionless signature off a sequence of them.
-
-Pure NumPy, no Isaac Lab. That constraint is what lets the tests check the
-theory directly rather than through a simulator, and it is the same reason the
-NAO's kinematics module is written that way.
-
-### `nao/` — the target
-
-The robot a skill is meant to end up on. Small, weak, and limited for physical
-rather than algorithmic reasons, which is what creates the research question.
-
-- `assets/` — model, derived parameters, URDF-to-USD pipeline
-- `controllers/` — model-based baselines that a learned policy has to beat
-- `tasks/` — reinforcement learning environments
-
-Every number in `assets/nao_kinematics.py` is derived from the vendored URDF and
-covered by a test. That module is the authority; nothing else re-derives.
-
-### `g1/` — the source
-
-The robot a skill is learned on first, because it can perform it. Isaac Lab
-ships the model, the actuator groups and a working locomotion task, so this
-package selects and configures rather than deriving.
-
-`SOURCE_ROBOT` in `assets/g1.py` picks which shipped humanoid plays teacher.
-Changing it changes the size of the embodiment gap, which is the variable the
-transfer study most wants to vary.
-
-### `transfer/` — the research
-
-Joint correspondence, feasibility masking, the dimensionless description of
-each body (`embodiment.py`) and the student objective. Depends on `common/` for
-the theory and on neither robot's URDF: the correspondence is stated at the
-level of kinematic roles, the student's envelope is passed in as geometry, and
-each body's physical facts are restated with their source named and a test that
-re-derives them.
-
-`transfer/latent/` is the learned shared space: a per-body encoder and decoder
-around a skill policy and latent dynamics every body shares, with part of the
-latent anchored to the skill state; a shared memory over the history of that
-state alone, on a grid in body time (`memory.py`); a decoder split by limb
-(`limbs.py`); and the contract that replaced the learned action code: a
-generator per task that samples the next values of the skill state
-(`contract.py`). `transfer/tasks/tracking/` holds the Isaac Lab pieces any
-body's tracking task is built from — the command term that draws and holds
-plans, the observation and the reward — used by `g1/tasks/g1_track/` and
-`nao/tasks/nao_track/`. See
-[`transfer/docs/skill_space.md`](transfer/docs/skill_space.md) §7.
-
-See [`transfer.md`](transfer/docs/plan.md) for the plan and the open questions.
-
-### `soccer/` — the long horizon
-
-Kept intact and deliberately inactive. Balance and transfer have to hold before
-a soccer task means anything.
+```mermaid
+flowchart TB
+  common["common/<br/>theory, NumPy"] --> transfer["transfer/<br/>contract"]
+  common --> g1["g1/<br/>source robot"]
+  common --> nao["nao/<br/>target robot"]
+  transfer --> g1
+  transfer --> nao
+  latent["transfer/latent/<br/>torch only"] --> transfer
+```
 
 ## Boundaries
 
-**Assets do not contain environments.** A test enforces this. A robot
-configuration that knows about rewards has made itself unusable for anything
-except the task it was written for.
-
-**Theory does not contain robots.** `common/` takes geometry as arguments. The
-moment it imports a URDF it stops being reusable for the second embodiment,
-which is the whole reason it exists.
-
-**Embodiments do not import each other.** `transfer/` is the only place the two
-robots meet. Where it needs a constant from the other side — the NAO's
-centre-of-mass height, the G1's leg length — it restates it with a comment
-naming the source, rather than reaching across.
-
-**Torch stops at `transfer/latent`.** `common/` and the rest of `transfer/`
-are NumPy-only, so the theory is checked without a GPU stack; the latent model
-uses torch but never Isaac Lab, so it trains and is tested on recorded
-rollouts. The simulator appears only in the scripts that capture those
-rollouts and run the result closed-loop, and in `transfer/tasks/`, which is
-environment code shared by the robots' tasks and imports neither robot's task
-package. A test enforces these lines (`tests/test_import_boundaries.py`,
+Each is enforced by a test (`tests/test_import_boundaries.py`,
 `tests/test_development_baseline.py`).
 
-**Tasks live with their robot.** `tasks.py` at the package root imports them so
-the gym ids register; it owns nothing.
+- **Theory does not contain robots.** `common/` takes geometry as arguments and imports no URDF.
+- **Embodiments do not import each other.** `transfer/` is the only place the two robots meet.
+- **Torch stops at `transfer/latent/`.** The rest of `common/` and `transfer/` is NumPy, so the
+  theory is tested without a GPU stack; `latent/` uses torch but never Isaac Lab, so it trains
+  and is tested on recorded rollouts.
+- **Assets do not contain environments,** and tasks live with their robot.
+- **The NAO's zero-step balance task (`nao/tasks/nao_stand`) is separate from the walking work.**
+  It terminates on a step, which defines that task; the walking tasks carry no such condition.
 
-**The standing task is not an input to the walking work.** A test enforces this,
-and it is the newest boundary because it is the one that was crossed.
+## Tasks
 
-The NAO's balance work — `nao/tasks/nao_stand` and `nao/controllers` — is
-**kept, registered and documented**, and is **frozen out of the walking
-development path**. What is shared is the robot's *body*: `nao/assets` and
-`common/`, which would read exactly the same if the standing study had never
-happened.
+`scripts/train.py` and `scripts/play.py` import `humanoid_transfer.tasks` before delegating to
+Isaac Lab, which registers these tasks among others (each with a `-Play-v0` variant):
 
-| Shared with the walking work | Frozen out of it |
-| --- | --- |
-| `nao/assets/` — URDF, USD, kinematics, actuator model | `nao/tasks/nao_stand/` |
-| `common/` — LIPM, DCM, capturability as functions of geometry | `nao/controllers/` |
-| | `nao/results/`, `nao/docs/baseline_*.md`, `nao/docs/task_balance.md` |
+| Id | Robot | Purpose |
+| --- | --- | --- |
+| `G1Walk-Teacher-v0` | G1 | The walking teacher (Isaac Lab's flat G1 task at the Froude-matched speed) |
+| `G1Base-{Backward,Sidestep,Jog}-v0` | G1 | Experts for the base tasks (Isaac Lab's recipe, command range only) |
+| `G1RoughOnFlat-v0` | G1 | Isaac Lab's rough G1 policy evaluated on a plane |
+| `G1Track-v0`, `NaoTrack-v0` | G1, NAO | The tracker: follow a plan of `z*` |
+| `NaoVelocity{Flat,Rough}-v0` | NAO | Baseline: the NAO trained on the task with the G1's recipe |
+| `NaoImitate-v0` | NAO | Baseline: imitation of the G1's retargeted joint angles |
+| `NaoStand-Direct-v0` | NAO | Zero-step balance under pushes (separate study) |
 
-The reason is not tidiness. `nao_stand` terminates on a step, and that is
-correct: "recover without stepping" *is* the task it poses, and the zero-step
-capturable envelope is its definition. **A condition may define a task.** The
-walking task poses the opposite objective — track the command, do not fall —
-so the same criterion there stops defining and starts prescribing: it measures
-how close to standing still a state is, which for a gait is a statement about
-*how* to walk rather than about what the body can do.
-
-That has already cost two rewrites, which is why it is a test and not a note:
-
-- `transfer/feasibility.py` weighted the teacher by zero-step capturability. It
-  down-weighted 0 of 12 800 real samples, on the double-stance polygon, for a
-  robot in single support most of a cycle. Replaced by joint reachability.
-- `g1/tasks/g1_walk` justified the student's 0.15 m/s target by the 0.443 m/s
-  capturable bound — "stay near a third of it". The speed is a free parameter of
-  the experiment; the margin a learned gait keeps is a result, not its reason.
-
-Capturability is not deleted anywhere. It is reported
-(`transfer.feasibility.standing_margin`) rather than required, which keeps the
-same number a finding instead of an assumption.
-
-Enforced by [`tests/test_development_baseline.py`](tests/test_development_baseline.py),
-which also asserts the standing task still registers and still carries its
-termination — a guard that passed because the code was deleted would say nothing.
-
-## Task registration
-
-Isaac Lab discovers tasks by importing `isaaclab_tasks`, which knows nothing
-about an external extension. `scripts/train.py` and `scripts/play.py` therefore
-import `humanoid_transfer.tasks` before delegating, which registers:
-
-| Id | Robot | Purpose | State |
-| --- | --- | --- | --- |
-| `G1Walk-Teacher-v0` | G1 | Teacher gait at the Froude-matched speed | **Trained.** Weights pinned in `g1/policy/` |
-| `G1Walk-Teacher-Play-v0` | G1 | Rollout capture | Trained |
-| `NaoStand-Direct-v0` | NAO | Zero-step balance under perturbation | **Kept, not an input.** See the boundary above |
-| `NaoStand-Direct-Play-v0` | NAO | Replay and TorchScript export | Kept |
-| NAO walking | NAO | Open objective: track the command, do not fall | **Not started.** The critical path |
-
-Registering a task is not the same as building on it. The NAO ids stay
-registered so the standing result remains reproducible; the walking work starts
-from the robot's body.
-
-Registration is guarded: on a machine without gymnasium or Isaac Lab it degrades
-to `REGISTERED = False` rather than raising, which is what lets the test suite
-import the package anywhere.
+`python scripts/list_tasks.py` prints the registry. Registration degrades to
+`REGISTERED = False` without gymnasium or Isaac Lab, so the tests import the package anywhere.

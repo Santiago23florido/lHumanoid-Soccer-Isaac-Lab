@@ -14,9 +14,6 @@ REQUIRED_PATHS = [
     # Track 1, the target embodiment.
     "nao/assets/urdf/nao.urdf",
     "nao/assets/licenses/README.md",
-    "nao/docs/task_balance.md",
-    "nao/docs/asset_smoke_test.md",
-    "nao/docs/asset_pipeline.md",
     "nao/img/nao_stand.png",
     "nao/results/comparison_directional.json",
     "nao/scripts/view_asset.py",
@@ -25,7 +22,6 @@ REQUIRED_PATHS = [
     # Track 2, the source embodiment. The teacher is tracked, unlike every other
     # derived artifact, because it is the only one that cannot be regenerated:
     # a rerun under a different seed is a different gait. See g1/policy/README.md.
-    "g1/TRAINING.md",
     "g1/policy/README.md",
     "g1/policy/teacher_policy.pt",
     "g1/policy/teacher_policy.json",
@@ -34,8 +30,8 @@ REQUIRED_PATHS = [
     # The teacher's body as its simulation integrates it. Measured, not derived:
     # the G1 USD is downloaded at run time, so a test cannot re-derive it.
     "g1/body/body_card.json",
-    # Track 3, the research question.
-    "transfer/docs/plan.md",
+    # Track 3, the transfer method.
+    "transfer/results/incumbents.json",
     # Cross-track entry points.
     "scripts/train.py",
     "scripts/play.py",

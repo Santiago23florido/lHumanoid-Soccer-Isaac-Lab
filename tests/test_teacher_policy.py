@@ -171,7 +171,7 @@ def test_the_export_loads_with_torch_alone_and_has_the_promised_width() -> None:
 def test_the_action_width_is_every_joint_of_the_articulation() -> None:
     """37, not 23. Isaac Lab's shipped action term commands the hand joints too,
     and assuming 23 is the same class of mistake as the 29-DOF name the asset
-    does not live up to (``g1/TRAINING.md`` section 5)."""
+    does not live up to."""
     assert MANIFEST["policy"]["action_dim"] == 37
     assert MANIFEST["policy"]["action_dim"] == 23 + 14
 

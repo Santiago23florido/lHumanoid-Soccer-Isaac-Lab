@@ -1,10 +1,10 @@
-"""The paper's tables, rebuilt from the result files into ``transfer/paper/README.md``.
+"""The paper's tables, rebuilt from the result files into ``transfer/paper/tables.md``.
 
 Every cell is read from a JSON in ``transfer/results/`` (or another directory, with
 ``--results``); a row whose files do not exist yet is left out, so the tables grow as
-the queue (``paper_queue.sh``) runs. The tables go between the README's
-``<!-- tables:start -->`` and ``<!-- tables:end -->`` markers, and their data to
-``transfer/paper/data/tables.json``.
+the queue (``paper_queue.sh``) runs. The tables go between the file's
+``<!-- tables:start -->`` and ``<!-- tables:end -->`` markers (the file is created if missing),
+and their data to ``transfer/paper/data/tables.json``.
 
 Usage::
 
@@ -638,11 +638,13 @@ def main() -> int:
     args = parser.parse_args()
     directories.extend(args.results)
     text, data = build()
-    readme = PAPER / "README.md"
+    output = PAPER / "tables.md"
     start, end = "<!-- tables:start -->", "<!-- tables:end -->"
-    head, rest = readme.read_text(encoding="utf-8").split(start, 1)
+    if not output.exists():
+        output.write_text(f"# Tables\n\n{start}\n{end}\n", encoding="utf-8", newline="\n")
+    head, rest = output.read_text(encoding="utf-8").split(start, 1)
     tail = rest.split(end, 1)[1]
-    readme.write_text(f"{head}{start}\n\n{text}\n\n{end}{tail}", encoding="utf-8", newline="\n")
+    output.write_text(f"{head}{start}\n\n{text}\n\n{end}{tail}", encoding="utf-8", newline="\n")
     (PAPER / "data").mkdir(parents=True, exist_ok=True)
     (PAPER / "data" / "tables.json").write_text(json.dumps(finite(data), indent=2) + "\n", encoding="utf-8")  # fmt: skip  # noqa: E501
     sys.stdout.reconfigure(encoding="utf-8")

@@ -77,7 +77,7 @@ READMEs give the commands that run them.
 ## Conventions
 
 - **Comments and documentation in English.** Code, docstrings, commit messages,
-  markdown. The LaTeX book under `docs/` is the exception and is in Spanish.
+  markdown.
 - **Commit messages** are `<type>(<scope>): <imperative summary>`, with a body
   that says *why*. The reasoning is the part that is expensive to recover later.
 - **Robot assets are not committed.** The NAO meshes are CC BY-NC-ND; see

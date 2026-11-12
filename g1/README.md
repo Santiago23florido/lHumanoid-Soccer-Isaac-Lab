@@ -1,87 +1,36 @@
-# `g1/` — the source embodiment
+# `g1/`: the source robot
 
-**Unitree G1, 23 actuated body joints** (plus fourteen hand joints). The robot a skill is learned on first,
-because it can actually perform it: roughly 35 kg, 1.3 m tall, and actuators
-with the torque density to walk dynamically.
+The Unitree G1 (23 actuated body joints, about 32 kg as loaded in Isaac Lab, leg length
+0.655 m). Skills are learned on it first, because it can perform them; its model comes with
+Isaac Lab and is not vendored here.
 
-## Why this robot
+![The G1 teacher over one gait cycle](img/g1_gait.png)
 
-Isaac Lab ships the model, tuned actuator groups and a working velocity
-locomotion task. Nothing here has to re-derive a robot from a URDF the way the
-NAO track does, and nothing carries the redistribution constraints the NAO
-meshes do — the USD downloads from Isaac Lab's Nucleus server on first use.
+## The skills it provides
 
-It is deliberately swappable. `SOURCE_ROBOT` in
-`source/humanoid_transfer/humanoid_transfer/g1/assets/g1.py` selects which
-shipped humanoid plays teacher:
-
-| Value | DOF | Notes |
+| Skill | Policy | Used for |
 | --- | --- | --- |
-| `g1` | 23 | Default. 12 leg, 1 waist, 10 arm, plus 14 hand joints. |
-| `h1` | 19 | Larger, simpler. Matches the NAO's 19 commanded joints exactly — a control condition where joint counts agree and only scale differs. |
+| Flat, rough | Isaac Lab's published `Isaac-Velocity-Flat-G1-v0`, `Isaac-Velocity-Rough-G1-v0` | The skills transferred to the NAO |
+| Walking | `G1Walk-Teacher-v0`: Isaac Lab's flat recipe with the command capped at 0.25 m/s, the speed Froude-matched to 0.15 m/s on the NAO | Pinned in [`policy/`](policy/README.md); its generator provides 30 % of the trackers' training plans |
+| Backward, sidestep, jog | `G1Base-{Backward,Sidestep,Jog}-v0`: Isaac Lab's flat recipe, only the command range changed | The base tasks of the held-out-task setting |
 
-Changing it changes the size of the embodiment gap, which is the variable the
-transfer study most wants to vary.
-
-## The teacher task
-
-`G1Walk-Teacher-v0` is Isaac Lab's `G1FlatEnvCfg` with one change: the command
-range is capped at the Froude-matched speed.
-
-Dynamic similarity between legged systems requires matched Froude numbers,
-`Fr = v²/(g·l)`. With 0.74 m against the NAO's 0.2689 m, a student walking at
-0.15 m/s corresponds to a teacher at **0.25 m/s**. The default configuration
-samples to 1.0 m/s in both directions plus lateral and turning commands, and
-every episode spent there is experience the transfer discards.
-
-```powershell
-python scripts\train.py --task G1Walk-Teacher-v0 --headless --num_envs 4096
-```
-
-See [`docs/teacher_task.md`](docs/teacher_task.md) for the derivation and the
-assumption it rests on.
-
-## The trained teacher
-
-![Six frames across one gait cycle](img/g1_gait.png)
-
-| Quantity | Value |
-| --- | --- |
-| Training | 1500 iterations, 147.5 M steps, 1 h 58 m |
-| Final reward | 33.9, plateaued from ~iteration 900 |
-| Commanded / achieved forward velocity | 0.249 / **0.206** m/s |
-| Foot clearance | 51-60 mm mean, up to 79 mm |
-
-**-> [`TRAINING.md`](TRAINING.md)** - where every component came from, the one
-variable that was chosen, the learning curve, and how the gait was verified.
-
-Note that Isaac Lab ships **no pretrained weights** for this robot. It ships a
-recipe; the weights were produced by running it.
-
-The weights are **pinned in the repository**, in
-[`policy/`](policy/README.md) — 357 KB of TorchScript, hashed, with the seed,
-the command range and the measured gait beside them. They are the only derived
-binary this project tracks, because they are the only artifact it cannot
-regenerate: a rerun under a different seed is a different gait, and every
-transfer comparison is a comparison against *this* teacher.
-
-```python
-import torch
-
-policy = torch.jit.load("g1/policy/teacher_policy.pt", map_location="cpu")
-```
-
-No Isaac Lab, no Isaac Sim, no Nucleus access needed to load it.
+Each policy's rollouts are captured in `z*` (`scripts/capture_rollouts.py`) and become the
+training data of that skill's generator.
 
 ## What is here
 
 | Path | Contents |
 | --- | --- |
-| `policy/` | **The pinned teacher**: weights, manifest, the configs the run dumped. Tracked. |
-| `docs/` | Teacher task documentation. |
-| `scripts/` | G1-specific entry points. |
-| `rollouts/` | Captured teacher behaviour. **Untracked** — regenerable from `policy/`. |
+| `policy/` | The pinned walking teacher: TorchScript weights, provenance and hashes |
+| `body/` | The G1's body card (leg length, mass, feet's sole geometry) and joint mirror map |
+| `scripts/` | Capturing rollouts, measuring the body and the gait, rendering |
+| `img/` | Figures |
+| `rollouts/` | Captured rollouts, untracked (regenerable) |
 
-Code lives in `source/humanoid_transfer/humanoid_transfer/g1/`. The robot model
-is Isaac Lab's and is not vendored here; the trained policy is this project's
-and is.
+The Python code is in `source/humanoid_transfer/humanoid_transfer/g1/`: the robot configuration
+(`assets/`) and the tasks (`tasks/g1_walk`, `g1_base`, `g1_rough_flat`, `g1_track`).
+
+```powershell
+python scripts\train.py --task G1Walk-Teacher-v0 --headless --num_envs 4096
+python g1\scripts\capture_rollouts.py --help
+```

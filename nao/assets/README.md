@@ -19,7 +19,7 @@ redistribution of the NAO geometry only through an installer that obtains the
 user's explicit assent. Populate them once per checkout with:
 
 ```powershell
-python scripts\fetch_nao_meshes.py
+python nao\scripts\fetch_meshes.py
 ```
 
 ## Notes on the URDF

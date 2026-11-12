@@ -48,12 +48,7 @@ FROZEN = (
 )
 """Modules the previous NAO training lives in. Kept, not deleted, not used."""
 
-FROZEN_RESULT_FILES = (
-    "nao/results/comparison_directional.json",
-    "nao/docs/task_balance.md",
-    "nao/docs/baseline_joint_pd.md",
-    "nao/docs/baseline_capture_point.md",
-)
+FROZEN_RESULT_FILES = ("nao/results/comparison_directional.json",)
 """Measurements of the standing task. Readable by a human, not by the pipeline."""
 
 DEVELOPMENT_PATH = (

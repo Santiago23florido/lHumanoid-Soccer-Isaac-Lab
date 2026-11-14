@@ -236,6 +236,7 @@ def run(
     limit = controller.steps if steps is None else min(steps, controller.steps)
     start = nao.data.qpos[:2].copy()
     heights, fell_at = [], None
+    turned, last_yaw = 0.0, None
     for k in range(limit):
         q, gravity, gyro, loads, rot = nao.sensors()
         targets = controller.step(q, gravity, gyro, loads)
@@ -243,6 +244,10 @@ def run(
         height = float(nao.data.qpos[2])
         tilt = float(np.arccos(np.clip(rot[2, 2], -1, 1)))
         heights.append(height)
+        yaw = float(np.arctan2(rot[1, 0], rot[0, 0]))
+        if last_yaw is not None:
+            turned += float(np.arctan2(np.sin(yaw - last_yaw), np.cos(yaw - last_yaw)))
+        last_yaw = yaw
         if height < 0.18 or tilt > 0.8:
             fell_at = k * controller.dt
             break
@@ -258,6 +263,8 @@ def run(
         "forward_m": float(moved[0]),
         "speed_m_s": float(np.linalg.norm(moved) / max(seconds, 1e-9)),
         "walking_s": float(walking[: len(heights)].sum() * controller.dt),
+        "turned_rad": turned,
+        "commanded_turn_rad": float(command[: len(heights), 2].sum() * controller.dt),
     }
 
 
@@ -310,6 +317,7 @@ def main() -> int:
         "runs": len(runs),
         "mean_speed_m_s": float(np.mean([r["speed_m_s"] for r in runs])),
         "mean_forward_m": float(np.mean([r["forward_m"] for r in runs])),
+        "mean_turned_rad": float(np.mean([r["turned_rad"] for r in runs])),
         "results": runs,
     }
     print(json.dumps({k: v for k, v in summary.items() if k != "results"}))

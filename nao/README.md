@@ -42,9 +42,9 @@ Derived from the URDF by `humanoid_transfer.nao.assets.nao_kinematics`, each cov
 | `assets/urdf/` | The vendored URDF (tracked) |
 | `assets/meshes/`, `assets/texture/`, `assets/generated/` | Licensed geometry and the generated USD (untracked) |
 | `assets/licenses/` | Upstream licences and attribution |
-| `body/` | The NAO's joint mirror map |
-| `scripts/` | Asset fetching and checks, and the balance study's controllers and evaluation |
-| `results/` | The balance study's results (JSON) |
+| `body/` | The NAO's joint mirror map; its motors' datasheet ratings (`motors.json`) |
+| `scripts/` | Asset fetching and checks, the balance study's controllers and evaluation, and the legs' static torques against the motors (`static_torque.py`) |
+| `results/` | The balance study's results and the static torques (JSON) |
 | `img/` | Figures |
 
 The Python code is in `source/humanoid_transfer/humanoid_transfer/nao/`: assets, controllers and

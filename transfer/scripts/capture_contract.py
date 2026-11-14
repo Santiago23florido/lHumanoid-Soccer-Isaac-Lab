@@ -117,6 +117,12 @@ parser.add_argument(
     help="Robustness probe on the deployed path: noise on the estimate, in multiples of the "
     "estimator's precision.",
 )
+parser.add_argument(
+    "--joint-load",
+    action="store_true",
+    help="Also record each joint's position, velocity and the torque its drive applied "
+    "(joint_pos, joint_vel, joint_torque), after every step.",
+)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--output", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
@@ -209,6 +215,8 @@ def main() -> int:
         "encoder_input", "procedural", "biped_fallen", "biped_recovering", "estimate",
         "balance", "biped_phase", "plan_gain",
     )  # fmt: skip
+    if args_cli.joint_load:
+        keys += ("joint_pos", "joint_vel", "joint_torque")
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
     for _ in range(args_cli.steps):
@@ -248,6 +256,12 @@ def main() -> int:
         record["contract_age"].append(term.age.cpu().numpy())
         record["done"].append((terminated | truncated).cpu().numpy())
         record["terminated"].append(terminated.cpu().numpy())
+        if args_cli.joint_load:
+            # The drives' torque as the actuator model computed it on the last physics step
+            # (for an implicit drive, its PD law clipped at the effort limit).
+            record["joint_pos"].append(robot.data.joint_pos.cpu().numpy())
+            record["joint_vel"].append(robot.data.joint_vel.cpu().numpy())
+            record["joint_torque"].append(robot.data.applied_torque.cpu().numpy())
 
     arrays = {
         k: np.stack(v).astype(

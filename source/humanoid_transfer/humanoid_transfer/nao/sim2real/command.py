@@ -4,8 +4,8 @@
 estimates ``ẑ*`` from the simulator's link states and places the reference path
 with the simulator's world position. :class:`RobotReferenceCommand` can replace
 both with what the robot computes
-(:class:`~humanoid_transfer.nao.deploy.estimator.Estimator`, the same NumPy code
-the robot runs) from the simulated sensors of
+(:class:`~humanoid_transfer.nao.deploy.estimator.Estimator`, the NumPy code the
+robot runs, transcribed to torch: :mod:`.estimator_torch`) from the simulated sensors of
 :mod:`~humanoid_transfer.nao.sim2real.state`:
 
 * ``robot_estimator``: ``ẑ*`` from forward kinematics of the measured joints, the
@@ -29,9 +29,9 @@ from isaaclab.utils import configclass
 
 from ...common.skill_state import SKILL_LAYOUT
 from ...transfer.tasks.tracking.command import ReferenceCommand, ReferenceCommandCfg
-from ..deploy.estimator import Estimator
 from ..deploy.kinematics import BodyModel
 from .body_model import body_model
+from .estimator_torch import TorchEstimator
 from .state import measured_gravity, measured_gyro, measured_joint_pos, robot_errors
 
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
@@ -64,7 +64,9 @@ class RobotReferenceCommand(ReferenceCommand):
         self.measured_ids = torch.tensor(
             [names.index(n) for n in self.robot_model.joint_names], device=self.device
         )
-        self.estimator = Estimator(self.robot_model, self.num_envs, env.step_dt)
+        # The robot's NumPy estimator, transcribed to torch for every environment at once
+        # (tests/test_nao_estimator_torch.py holds the two together).
+        self.estimator = TorchEstimator(self.robot_model, self.num_envs, env.step_dt, self.device)
         self._robot_z = None
         self._robot_frame = None
 
@@ -97,19 +99,12 @@ class RobotReferenceCommand(ReferenceCommand):
         gyro = measured_gyro(env)
         if self.cfg.gyro_noise > 0.0:
             gyro = gyro + self.cfg.gyro_noise * torch.randn_like(gyro)
-        self.estimator.reset(self.just_reset.cpu().numpy())
-        inputs = (
-            q.double().cpu().numpy(),
-            measured_gravity(env).double().cpu().numpy(),
-            gyro.double().cpu().numpy(),
-            self.foot_loads().double().cpu().numpy(),
-        )
+        self.estimator.reset(self.just_reset)
+        inputs = (q, measured_gravity(env), gyro, self.foot_loads())
         self.robot_inputs = inputs
         """What the estimator read this step: joints, gravity, gyroscope, loads."""
-        z = self.estimator.update(*inputs)
-        self._robot_z = torch.as_tensor(z, dtype=torch.float32, device=self.device)
-        position = torch.as_tensor(self.estimator.position, dtype=torch.float32, device=self.device)
-        yaw = torch.as_tensor(self.estimator.yaw, dtype=torch.float32, device=self.device)
+        self._robot_z = self.estimator.update(*inputs)
+        position, yaw = self.estimator.position, self.estimator.yaw
         self._robot_frame = (position, yaw)
 
     # -- hooks into the plain command ----------------------------------------

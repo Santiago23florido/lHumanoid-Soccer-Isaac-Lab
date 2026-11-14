@@ -140,6 +140,22 @@ def main() -> int:
         if n not in actuated
     }
     units = term.observed_units
+    stiffness = robot.data.joint_stiffness[0].cpu().numpy()
+    damping = robot.data.joint_damping[0].cpu().numpy()
+    effort = robot.data.joint_effort_limits[0].cpu().numpy()
+    lower_all = robot.data.joint_pos_limits[0, :, 0].cpu().numpy()
+    upper_all = robot.data.joint_pos_limits[0, :, 1].cpu().numpy()
+    drives = {
+        n: {
+            "stiffness": float(stiffness[i]),
+            "damping": float(damping[i]),
+            "effort": float(effort[i]),
+            "lower": float(lower_all[i]),
+            "upper": float(upper_all[i]),
+            "default": float(default[i]),
+        }
+        for i, n in enumerate(joint_names)
+    }
     runtime = {
         "control_dt": dt,
         "leg_length": float(term.units.length),
@@ -159,10 +175,16 @@ def main() -> int:
         "units": None if units is None else [u.cpu().tolist() for u in units],
         "plan_limit": 50.0,
         "policy_terms": [[n, w] for n, w in zip(names, widths, strict=True)],
+        "history": {
+            n: int(c.history_length)
+            for n, c in zip(names, manager._group_obs_term_cfgs["policy"], strict=True)
+            if c.history_length > 0
+        },
         "pivot": term.estimator.pivot,
         "policy": str(args_cli.policy),
         "contract": str(command_cfg.contract),
         "robot_model": settings,
+        "drives": drives,
     }
     (bundle / "runtime.json").write_text(json.dumps(runtime, indent=1), encoding="utf-8")
     view = term.view
@@ -206,7 +228,7 @@ def main() -> int:
             path = torch.stack(
                 [ca * dx + sa * dy, -sa * dx + ca * dy, ref_yaw - anchor_yaw[:, None]], -1
             )
-            q, gravity, gyro, loads = term.robot_inputs
+            q, gravity, gyro, loads = (x.cpu().double().numpy() for x in term.robot_inputs)
             record["view"].append(term.upcoming().cpu().numpy())
             record["has_plan"].append(term.has_plan.cpu().numpy())
             record["path"].append(path.cpu().numpy())

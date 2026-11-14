@@ -7,7 +7,8 @@ simulator) in phases:
 1. ``ramp`` -- stiffness from 0 to the run's over ``ramp_s``, holding the joints
    where they are;
 2. ``pose`` -- the targets interpolated to the crouch the policy starts from;
-3. ``hold`` -- the crouch held, the estimator warming up;
+3. ``hold`` -- the crouch held (until the chest button is pressed, with ``wait_button``:
+   the robot is set on its feet first);
 4. ``policy`` -- the tracker following the precomputed plans, one step every
    control period, the targets passed through :class:`Safety`;
 5. ``stop`` -- the last targets held, then the crouch.
@@ -102,6 +103,8 @@ class Phases:
     pose_s: float = 3.0
     hold_s: float = 1.0
     stop_s: float = 2.0
+    wait_button: bool = False
+    """After the hold, keep the crouch until the chest button is pressed and released."""
 
 
 class Session:
@@ -175,6 +178,21 @@ class Session:
                              position=reading.position, targets=targets)  # fmt: skip
                 k += 1
                 self._wait(start, k)
+
+        if self.phases.wait_button:
+            # Hold the crouch until the chest button is pressed and released: the robot is
+            # set on its feet (lowered from its harness) before the policy starts.
+            pressed = False
+            while True:
+                b.write(self._targets(crouch), run_stiffness)
+                reading = b.read()
+                if reading.chest_button:
+                    pressed = True
+                elif pressed:
+                    break
+                k += 1
+                self._wait(start, k)
+            start, k = time.perf_counter(), 0
 
         # 4: the policy.
         c.reset()

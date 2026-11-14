@@ -27,7 +27,6 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "source" / "humanoid_transfer"))
 
 from humanoid_transfer.nao.assets import nao_kinematics as nk  # noqa: E402
-from humanoid_transfer.nao.assets.nao import NAO_DAMPING, NAO_STIFFNESS  # noqa: E402
 from humanoid_transfer.nao.deploy.lola import JOINTS  # noqa: E402
 from humanoid_transfer.nao.sim2real.actuator_fit import Drive, fit_joint, plant_for  # noqa: E402
 from humanoid_transfer.nao.sim2real.events import reflected_inertia  # noqa: E402
@@ -37,6 +36,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("record", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--bundle", type=Path, required=True, help="A deployment bundle: the simulated drives."
+    )
     parser.add_argument("--card", type=Path, default=None)
     parser.add_argument("--margin", type=float, default=0.15, help="Range around the fit, ±.")
     args = parser.parse_args()
@@ -45,6 +47,9 @@ def main() -> int:
     base = dict(zip(JOINTS, (float(v) for v in data["base"]), strict=True))
     base["RHipYawPitch"] = base["LHipYawPitch"]
     limits = {j.name: j.effort for j in nk.load_model().joints}
+    drives = json.loads((args.bundle / "runtime.json").read_text(encoding="utf-8"))["drives"]
+    nominal_stiffness = {n: d["stiffness"] for n, d in drives.items()}
+    nominal_damping = {n: d["damping"] for n, d in drives.items()}
     fits = {}
     for joint in joints:
         index = JOINTS.index(joint)
@@ -60,8 +65,8 @@ def main() -> int:
             })  # fmt: skip
         plant = plant_for(joint, base)
         start = Drive(
-            stiffness=NAO_STIFFNESS[joint],
-            damping=NAO_DAMPING[joint],
+            stiffness=nominal_stiffness[joint],
+            damping=nominal_damping[joint],
             delay=0.03,
             armature=float(reflected_inertia([joint])[0]),
             ceiling=float(limits[joint]),
@@ -72,8 +77,8 @@ def main() -> int:
             **asdict(drive),
             "rms_rad": rms,
             "inertia": plant.inertia,
-            "stiffness_ratio": drive.stiffness / NAO_STIFFNESS[joint],
-            "damping_ratio": drive.damping / NAO_DAMPING[joint],
+            "stiffness_ratio": drive.stiffness / nominal_stiffness[joint],
+            "damping_ratio": drive.damping / nominal_damping[joint],
             "ceiling_ratio": drive.ceiling / float(limits[joint]),
             "armature_ratio": drive.armature / max(float(reflected_inertia([joint])[0]), 1e-9),
         }

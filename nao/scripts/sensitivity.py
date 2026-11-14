@@ -40,17 +40,25 @@ def summary(path: Path) -> dict:
     dt = float(data["control_dt"])
     signature = gait_signature(z, done, dt / time_unit)
     fields = SKILL_LAYOUT.unpack(z)
-    forward = float(fields["com_velocity"][..., 0].mean()) * velocity_unit
+    per_env = fields["com_velocity"][..., 0].mean(axis=0) * velocity_unit
+    forward = float(per_env.mean())
     first = np.argmax(terminated, axis=0)
     fell = terminated.any(axis=0)
+    falls_per_env = terminated.sum(axis=0) * 1000.0 / steps
+    error_per_env = np.median(data["contract_error"], axis=0)
     return {
         "settings": json.loads(str(data["robot_model"])) if "robot_model" in data else {},
         "env_steps": int(steps * envs),
         "falls": int(terminated.sum()),
         "falls_per_1000_steps": 1000.0 * float(terminated.sum()) / (steps * envs),
+        # Standard errors over environments, each an independent robot.
+        "falls_per_1000_steps_se": float(falls_per_env.std(ddof=1) / math.sqrt(envs)),
         "envs_fallen": float(fell.mean()),
         "first_fall_s": float((first[fell] * dt).mean()) if fell.any() else None,
         "forward_speed_m_s": forward,
+        "forward_speed_se": float(per_env.std(ddof=1) / math.sqrt(envs)),
+        "contract_error_env_median_mean": float(error_per_env.mean()),
+        "contract_error_se": float(error_per_env.std(ddof=1) / math.sqrt(envs)),
         "stride_period_s": signature.stride_period * time_unit,
         "duty_factor": float(np.mean(signature.duty_factor)),
         "contract_error_median": float(np.median(data["contract_error"])),

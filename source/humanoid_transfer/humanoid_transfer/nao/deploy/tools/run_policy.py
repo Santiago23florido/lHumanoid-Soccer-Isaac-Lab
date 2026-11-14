@@ -2,8 +2,10 @@
 
 **First runs: robot in its harness.** The plans are a bundle's
 (``nao/scripts/export_runtime.py``): ``stand`` (zero command), ``forward`` and
-``turning`` (2 s standing, 10 s walking, 3 s standing). ``--max-seconds``
-cuts a run short; the chest button, a fall or a hot motor stop it::
+``turning`` (2 s standing, 10 s walking, 3 s standing). The robot holds its
+crouch until the chest button is pressed (set it on its feet first), then
+follows the plan; ``--max-seconds`` cuts a run short; the chest button, a fall
+or a hot motor stop it::
 
     python3 -m deploy.tools.run_policy --lola --bundle bundle --plan stand --max-seconds 5
 """
@@ -28,6 +30,11 @@ def main() -> int:
     parser.add_argument("--fall-tilt", type=float, default=0.6)
     parser.add_argument("--temperature-limit", type=float, default=75.0)
     parser.add_argument("--pose-seconds", type=float, default=3.0)
+    parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="Start the policy right after the crouch, without waiting for the chest button.",
+    )
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
     bundle = Bundle(args.bundle)
@@ -38,7 +45,8 @@ def main() -> int:
         run_stiffness=args.stiffness,
     )
     backend = backend_from(args)
-    session = Session(controller, backend, safety, Phases(pose_s=args.pose_seconds))
+    phases = Phases(pose_s=args.pose_seconds, wait_button=not args.no_wait)
+    session = Session(controller, backend, safety, phases)
     steps = None if args.max_seconds is None else int(args.max_seconds / controller.dt)
     try:
         reason = session.run(max_steps=steps)

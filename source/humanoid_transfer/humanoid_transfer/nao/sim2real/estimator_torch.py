@@ -11,6 +11,7 @@ from __future__ import annotations
 import torch
 
 from ..deploy.kinematics import BodyModel
+from ..deploy.skill import LOADED
 
 
 class TorchBody:
@@ -129,7 +130,9 @@ def skill_state(body: TorchBody, rot, com, com_vel, ang_vel, foot_force) -> torc
     return si / body.scales
 
 
-def stance_velocity(body: TorchBody, rot, com, com_vel, ang_vel, foot_load, pivot: str = "sole"):
+def stance_velocity(
+    body: TorchBody, rot, com, com_vel, ang_vel, foot_load, pivot: str = "sole", previous_load=None
+):
     f = body.feet
     if pivot == "sole":
         offset = sole_points(body, rot, com) - com[:, f]
@@ -148,19 +151,24 @@ def stance_velocity(body: TorchBody, rot, com, com_vel, ang_vel, foot_load, pivo
         point_vel = (weight[..., None] * corner_vel).sum(dim=-2)
     else:
         raise ValueError(f"unknown pivot {pivot!r}")
-    stance = foot_load.argmax(dim=-1)
+    if previous_load is None:
+        stance = foot_load.argmax(dim=-1)
+    else:
+        loaded = (foot_load > LOADED) & (previous_load > LOADED)
+        speed = torch.where(loaded, point_vel.norm(dim=-1), torch.inf)
+        stance = torch.where(loaded.any(dim=-1), speed.argmin(dim=-1), previous_load.argmax(dim=-1))
     return point_vel[torch.arange(len(stance), device=stance.device), stance]
 
 
 def proprioceptive_skill_state(
-    body: TorchBody, rot, com, com_vel, ang_vel, foot_load, pivot="sole"
+    body: TorchBody, rot, com, com_vel, ang_vel, foot_load, pivot="sole", previous_load=None
 ):
     f = body.feet
     points = com[:, f, None] + torch.einsum("nfij,fkj->nfki", rot[:, f], body.corners)
     ground = points[..., 2].flatten(1).min(dim=1).values
     lifted = com.clone()
     lifted[..., 2] = com[..., 2] - ground[:, None] + body.ground_height
-    still = stance_velocity(body, rot, com, com_vel, ang_vel, foot_load, pivot)
+    still = stance_velocity(body, rot, com, com_vel, ang_vel, foot_load, pivot, previous_load)
     velocity = com_vel - still[:, None]
     force = torch.zeros(*foot_load.shape, 3, device=foot_load.device, dtype=foot_load.dtype)
     force[..., 2] = foot_load * body.force_scale
@@ -197,7 +205,7 @@ def rotation_rate(now: torch.Tensor, before: torch.Tensor, dt: float) -> torch.T
 class TorchEstimator:
     """:class:`~...deploy.estimator.Estimator` for ``count`` robots on ``device``."""
 
-    def __init__(self, model: BodyModel, count: int, dt: float, device, pivot: str = "sole",
+    def __init__(self, model: BodyModel, count: int, dt: float, device, pivot: str = "corner",
                  dtype=torch.float32) -> None:  # fmt: skip
         self.body = TorchBody(model, device, dtype)
         self.count, self.dt, self.pivot = count, float(dt), pivot
@@ -205,6 +213,7 @@ class TorchEstimator:
         self.yaw = torch.zeros(count, device=device, dtype=dtype)
         self.rot = self.body.eye.expand(count, bodies, 3, 3).clone()
         self.com = torch.zeros(count, bodies, 3, device=device, dtype=dtype)
+        self.load = torch.zeros(count, 2, device=device, dtype=dtype)
         self.fresh = torch.ones(count, dtype=torch.bool, device=device)
         self.position = torch.zeros(count, 2, device=device, dtype=dtype)
 
@@ -227,14 +236,17 @@ class TorchEstimator:
         velocity = torch.where(fresh[:, None, None], 0.0, (com - self.com) / self.dt)
         spin = torch.where(fresh[:, None, None], 0.0, rotation_rate(rot, self.rot, self.dt))
         spin[:, body.base] = torch.einsum("nij,nj->ni", base, gyro)
-        z = proprioceptive_skill_state(body, rot, com, velocity, spin, foot_load, self.pivot)
-        still = stance_velocity(body, rot, com, velocity, spin, foot_load, self.pivot)
+        previous = torch.where(fresh[:, None], foot_load, self.load)
+        z = proprioceptive_skill_state(
+            body, rot, com, velocity, spin, foot_load, self.pivot, previous
+        )
+        still = stance_velocity(body, rot, com, velocity, spin, foot_load, self.pivot, previous)
         centre = torch.einsum("b,nbi->ni", body.mass, com) / body.total_mass
         moving = torch.einsum("b,nbi->ni", body.mass, velocity) / body.total_mass - still
         self.position = torch.where(
             fresh[:, None], centre[:, :2], self.position + self.dt * moving[:, :2]
         )
-        self.yaw, self.rot, self.com = yaw, rot, com
+        self.yaw, self.rot, self.com, self.load = yaw, rot, com, foot_load.clone()
         self.fresh = torch.zeros_like(fresh)
         return z
 

@@ -13,8 +13,9 @@ From them:
 * every body's pose by forward kinematics, in a frame turned as the world and
   centred on the base;
 * velocities by finite differences over one step: the base's translation is the
-  same for every body and cancels once velocities are measured from the more
-  loaded foot's sole, taken to stand still (leg odometry);
+  same for every body and cancels once velocities are measured from a stance
+  foot's sole, taken to stand still (leg odometry) -- one loaded at both ends of
+  the step (:func:`~.skill.stance_velocity`);
 * ``z*`` from those (:func:`~.skill.proprioceptive_skill_state`);
 * leg odometry of the whole-body centre of mass in the plane (its velocity from
   the stance foot, integrated) and the yaw: where the robot is relative to where
@@ -75,7 +76,7 @@ def rotation_rate(now: np.ndarray, before: np.ndarray, dt: float) -> np.ndarray:
 class Estimator:
     """``z*`` and leg odometry for ``count`` robots, one control step at a time."""
 
-    def __init__(self, model: BodyModel, count: int, dt: float, pivot: str = "sole") -> None:
+    def __init__(self, model: BodyModel, count: int, dt: float, pivot: str = "corner") -> None:
         self.model = model
         self.count = count
         self.dt = float(dt)
@@ -85,6 +86,8 @@ class Estimator:
         self.com = np.zeros((count, bodies, 3))
         self.pivot = pivot
         """Which point of the stance foot is taken to stand still (:data:`~.skill.PIVOTS`)."""
+        self.load = np.zeros((count, 2))
+        """Each foot's load at the previous step."""
         self.fresh = np.ones(count, dtype=bool)
         """Robots whose next step starts their history: no velocity, odometry at the origin."""
         self.position = np.zeros((count, 2))
@@ -111,18 +114,26 @@ class Estimator:
         spin = np.where(fresh[:, None, None], 0.0, rotation_rate(rot, self.rot, self.dt))
         # The base turns as its gyroscope says, not as two filtered tilts differ.
         spin[:, model.base] = np.einsum("nij,nj->ni", base, gyro)
-        z = proprioceptive_skill_state(model, rot, com, velocity, spin, foot_load, self.pivot)
+        previous = np.where(fresh[:, None], foot_load, self.load)
+        z = proprioceptive_skill_state(
+            model, rot, com, velocity, spin, foot_load, self.pivot, previous
+        )
 
         # Leg odometry: the whole-body centre of mass moves at its velocity measured from the
         # stance foot, integrated; it starts where the kinematics put it relative to the base.
-        still = stance_velocity(model, rot, com, velocity, spin, foot_load, self.pivot)
+        still = stance_velocity(model, rot, com, velocity, spin, foot_load, self.pivot, previous)
         centre = np.einsum("b,nbi->ni", model.mass, com) / model.total_mass
         moving = np.einsum("b,nbi->ni", model.mass, velocity) / model.total_mass - still
         self.position = np.where(
             fresh[:, None], centre[:, :2], self.position + self.dt * moving[:, :2]
         )
 
-        self.yaw, self.rot, self.com = yaw, rot, com
+        self.yaw, self.rot, self.com, self.load = (
+            yaw,
+            rot,
+            com,
+            np.array(foot_load, dtype=np.float64),
+        )
         self.fresh = np.zeros(self.count, dtype=bool)
         return z
 

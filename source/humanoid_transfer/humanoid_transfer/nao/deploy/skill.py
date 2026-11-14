@@ -90,6 +90,8 @@ def skill_state(
 PIVOTS = ("sole", "corner")
 CORNER_SOFTNESS = 0.002
 """How much higher than the lowest corner another still counts as touching, metres."""
+LOADED = 0.25
+"""A foot carrying more than this share of the weight is on the ground."""
 
 
 def _corners(model: BodyModel, rot: np.ndarray, com: np.ndarray) -> np.ndarray:
@@ -108,10 +110,18 @@ def stance_velocity(
     ang_vel: np.ndarray,
     foot_load: np.ndarray,
     pivot: str = "sole",
+    previous_load: np.ndarray | None = None,
 ) -> np.ndarray:
-    """``(..., 3)`` the velocity of the point of the more loaded foot taken to stand still.
+    """``(..., 3)`` the velocity of the point of a stance foot taken to stand still.
 
-    ``sole``: its sole point, as :func:`~...skill_torch.proprioceptive_skill_state`.
+    Which foot: without ``previous_load``, the more loaded one, as
+    :func:`~...skill_torch.proprioceptive_skill_state`. With the loads at the start of
+    the step the velocities were differenced over, one loaded (:data:`LOADED`) at both
+    ends of the step, the slower of two -- a foot that landed during the step was still
+    swinging for part of it, and taking it to stand still loses that motion at every
+    change of stance; without one, the foot most loaded at the step's start.
+
+    Which point: ``sole``, its sole point.
     ``corner``: its lowest corners, weighted by how close each is to the lowest -- the
     edge a foot rolls about when its heel or toe leaves the ground, still while the sole
     point under the ankle moves.
@@ -130,7 +140,12 @@ def stance_velocity(
         point_vel = (weight[..., None] * corner_vel).sum(axis=-2)
     else:
         raise ValueError(f"pivot must be one of {PIVOTS}, not {pivot!r}")
-    stance = np.argmax(foot_load, axis=-1)
+    if previous_load is None:
+        stance = np.argmax(foot_load, axis=-1)
+    else:
+        loaded = (foot_load > LOADED) & (previous_load > LOADED)
+        speed = np.where(loaded, np.linalg.norm(point_vel, axis=-1), np.inf)
+        stance = np.where(loaded.any(axis=-1), speed.argmin(axis=-1), previous_load.argmax(axis=-1))
     return np.take_along_axis(point_vel, stance[..., None, None], axis=-2)[..., 0, :]
 
 
@@ -142,19 +157,20 @@ def proprioceptive_skill_state(
     ang_vel: np.ndarray,
     foot_load: np.ndarray,
     pivot: str = "sole",
+    previous_load: np.ndarray | None = None,
 ) -> np.ndarray:
     """``z*`` from what a body senses: its kinematics, and loads ``(..., 2)`` in units of mg.
 
     As :func:`~...skill_torch.proprioceptive_skill_state` with ``base_velocity=False`` and
     sole corners: the ground is under the lowest corner of either sole, and every velocity
-    is measured from the more loaded foot, taken to stand still (leg odometry) at its
-    ``pivot`` (:func:`stance_velocity`).
+    is measured from a stance foot taken to stand still (leg odometry): the more loaded
+    one, or with ``previous_load`` the one :func:`stance_velocity` picks, at its ``pivot``.
     """
     points = _corners(model, rot, com)
     ground = points[..., 2].reshape(*points.shape[:-3], -1).min(axis=-1)
     lifted = com.copy()
     lifted[..., 2] = com[..., 2] - ground[..., None] + model.ground_height
-    still = stance_velocity(model, rot, com, com_vel, ang_vel, foot_load, pivot)
+    still = stance_velocity(model, rot, com, com_vel, ang_vel, foot_load, pivot, previous_load)
     velocity = com_vel - still[..., None, :]
     force = np.zeros((*foot_load.shape, 3))
     force[..., 2] = foot_load * model.force_scale
@@ -163,6 +179,7 @@ def proprioceptive_skill_state(
 
 __all__ = [
     "CORNER_SOFTNESS",
+    "LOADED",
     "PIVOTS",
     "proprioceptive_skill_state",
     "skill_state",

@@ -53,3 +53,25 @@ def test_theory_and_transfer_core_are_numpy_only(path: Path) -> None:
 def test_the_latent_model_never_imports_the_simulator(path: Path) -> None:
     forbidden = set(SIMULATOR) & _top_level_imports(path)
     assert not forbidden, f"{path.name} imports {sorted(forbidden)}"
+
+
+def _reaches_outside(path: Path) -> list[str]:
+    """Relative imports that climb above the module's own package."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return [
+        "." * node.level + (node.module or "")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.level > 1
+    ]
+
+
+@pytest.mark.parametrize(
+    "path",
+    _modules("nao", "deploy", recursive=True),
+    ids=lambda p: p.relative_to(PACKAGE).as_posix(),
+)
+def test_the_robot_runtime_stands_alone(path: Path) -> None:
+    """The runtime is copied to the robot on its own: NumPy and its own modules only."""
+    imports = _top_level_imports(path)
+    forbidden = ({"torch", "humanoid_transfer", *SIMULATOR} & imports) | set(_reaches_outside(path))
+    assert not forbidden, f"{path.name} imports {sorted(forbidden)}"

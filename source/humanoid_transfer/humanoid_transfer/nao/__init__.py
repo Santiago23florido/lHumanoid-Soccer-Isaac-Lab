@@ -14,4 +14,8 @@ Contents:
     Model-based baselines, which set the bar a learned policy has to clear.
 ``tasks``
     Reinforcement learning environments.
+``sim2real``
+    The real robot's actuator and sensor imperfections, modelled in the simulator.
+``deploy``
+    What runs on the real robot; standalone, NumPy only.
 """

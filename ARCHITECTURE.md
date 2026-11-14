@@ -46,6 +46,8 @@ Each is enforced by a test (`tests/test_import_boundaries.py`,
   theory is tested without a GPU stack; `latent/` uses torch but never Isaac Lab, so it trains
   and is tested on recorded rollouts.
 - **Assets do not contain environments,** and tasks live with their robot.
+- **The robot runtime stands alone.** `nao/deploy/` imports only the standard library, NumPy
+  and its own modules, so it is copied to the robot without the extension.
 - **The NAO's zero-step balance task (`nao/tasks/nao_stand`) is separate from the walking work.**
   It terminates on a step, which defines that task; the walking tasks carry no such condition.
 

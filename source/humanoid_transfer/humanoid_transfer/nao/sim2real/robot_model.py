@@ -147,10 +147,17 @@ def apply_robot_model(cfg, settings: dict) -> None:
 
     if s.get("sensors", False):
         policy = cfg.observations.policy
-        policy.base_ang_vel.func = sensors.gyro
-        policy.projected_gravity.func = sensors.gravity
-        policy.joint_pos.func = sensors.encoder_joint_pos_rel
-        policy.joint_vel.func = sensors.encoder_joint_vel
+        for name, func in (
+            ("base_ang_vel", sensors.gyro),
+            ("projected_gravity", sensors.gravity),
+            ("joint_pos", sensors.encoder_joint_pos_rel),
+            ("joint_vel", sensors.encoder_joint_vel),
+        ):
+            # A term's history reads the same sensor.
+            for term_name in (name, f"{name}_history"):
+                term = getattr(policy, term_name, None)
+                if term is not None:
+                    term.func = func
 
     command = cfg.commands.base_velocity
     if "base_velocity" in s:

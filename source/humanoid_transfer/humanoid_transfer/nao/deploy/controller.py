@@ -12,7 +12,7 @@ simulator knew and the robot needs:
   for every control step the plan's next rows as the tracker sees them
   (``view``, in the contract's normalised units), whether a plan is held
   (``has_plan``) and where the reference will be over the view (``path``, metres
-  and radians, relative to where the plans started).
+  and radians, relative to where the body was when the first plan was drawn).
 
 :class:`Controller` builds the policy's observation exactly as the simulator's
 observation manager does (``NaoTrackPolicyCfg`` with the robot's sensors,
@@ -122,7 +122,8 @@ class Controller:
         t = min(self.t, self.steps - 1)
         position = self.estimator.position[0]
         yaw = float(self.estimator.yaw[0])
-        if self.anchor is None:
+        if self.anchor is None and bool(self.plan["has_plan"][t]):
+            # The first plan is drawn on the step after a reset, from where the body is then.
             self.anchor = (position.copy(), yaw)
         terms = {
             "base_ang_vel": np.asarray(gyro, dtype=np.float64),

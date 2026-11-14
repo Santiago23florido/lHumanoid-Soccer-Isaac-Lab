@@ -49,6 +49,9 @@ class encoder_joint_vel(ManagerTermBase):
 
     def reset(self, env_ids=None) -> None:
         self.fresh[slice(None) if env_ids is None else env_ids] = True
+        # A reset outside a step (env.reset()) is observed at the same step count as the
+        # step before it: read again rather than return that step's value.
+        self.stamp = -1
 
     def __call__(self, env, asset_cfg: SceneEntityCfg = ROBOT) -> torch.Tensor:
         stamp = int(env.common_step_counter)

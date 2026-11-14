@@ -164,7 +164,20 @@ def observation_mirror(
     relative, _ = normalised_skill_mirror(skill_mean, skill_std)
     absolute = normalised_skill_mirror(skill_mean, skill_std)
     mirror = AffineMirror(sum(width for _, width in terms))
+    steps = {"base_lin_vel": 3, "projected_gravity": 3, "base_ang_vel": 3}
+    steps.update(dict.fromkeys(("joint_pos", "joint_vel", "actions"), joints.shape[0]))
+    expanded: list[tuple[str, int]] = []
     for name, width in terms:
+        # A term's history (Isaac Lab's ``history_length``, under the name ``<term>_history``)
+        # is that term's reading at each of its steps, oldest first: each reflects as one.
+        base = name.removesuffix("_history")
+        if base != name:
+            if base not in steps or width % steps[base]:
+                raise KeyError(f"no mirror for observation term {name!r} of width {width}")
+            expanded += [(base, steps[base])] * (width // steps[base])
+        else:
+            expanded.append((name, width))
+    for name, width in expanded:
         if name in ("base_lin_vel", "projected_gravity"):
             mirror.add(VECTOR)
         elif name == "base_ang_vel":

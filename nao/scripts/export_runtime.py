@@ -205,8 +205,9 @@ def main() -> int:
         obs = inner.observation_manager.compute()
         record = {k: [] for k in ("view", "has_plan", "path", "command", "q", "gravity", "gyro",
                                   "loads", "observation", "action", "fell")}  # fmt: skip
-        anchor_com = term.start_com.clone()
-        anchor_yaw = term.start_yaw.clone()
+        # The path is stored relative to where the first plan starts: drawn on the step after
+        # the reset (a command does not draw on its reset step), from the body's frame then.
+        anchor_com = anchor_yaw = None
         fell = torch.zeros(inner.num_envs, dtype=torch.bool, device=inner.device)
         for k in range(steps):
             for at, (vx, vy, wz) in switches:
@@ -223,10 +224,15 @@ def main() -> int:
                 s * planned[..., 0] + c * planned[..., 1]
             )
             ref_yaw = term.start_yaw[:, None] + planned[..., 2]
-            ca, sa = torch.cos(anchor_yaw)[:, None], torch.sin(anchor_yaw)[:, None]
-            dx, dy = ref_x - anchor_com[:, None, 0], ref_y - anchor_com[:, None, 1]
+            if anchor_com is None and bool(term.has_plan.all()):
+                anchor_com, anchor_yaw = term.start_com.clone(), term.start_yaw.clone()
+            # Before the first plan the path is not observed (zero); any origin will do.
+            origin = term.start_com if anchor_com is None else anchor_com
+            origin_yaw = term.start_yaw if anchor_yaw is None else anchor_yaw
+            ca, sa = torch.cos(origin_yaw)[:, None], torch.sin(origin_yaw)[:, None]
+            dx, dy = ref_x - origin[:, None, 0], ref_y - origin[:, None, 1]
             path = torch.stack(
-                [ca * dx + sa * dy, -sa * dx + ca * dy, ref_yaw - anchor_yaw[:, None]], -1
+                [ca * dx + sa * dy, -sa * dx + ca * dy, ref_yaw - origin_yaw[:, None]], -1
             )
             q, gravity, gyro, loads = (x.cpu().double().numpy() for x in term.robot_inputs)
             record["view"].append(term.upcoming().cpu().numpy())

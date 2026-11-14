@@ -55,13 +55,14 @@ def test_the_latent_model_never_imports_the_simulator(path: Path) -> None:
     assert not forbidden, f"{path.name} imports {sorted(forbidden)}"
 
 
-def _reaches_outside(path: Path) -> list[str]:
-    """Relative imports that climb above the module's own package."""
+def _reaches_outside(path: Path, root: str = "deploy") -> list[str]:
+    """Relative imports that climb above the package named ``root`` the module sits in."""
+    depth = len(path.parent.parts) - path.parent.parts.index(root) - 1
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return [
         "." * node.level + (node.module or "")
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.level > 1
+        if isinstance(node, ast.ImportFrom) and node.level > depth + 1
     ]
 
 

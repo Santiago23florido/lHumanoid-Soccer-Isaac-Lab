@@ -98,12 +98,15 @@ class RobotReferenceCommand(ReferenceCommand):
         if self.cfg.gyro_noise > 0.0:
             gyro = gyro + self.cfg.gyro_noise * torch.randn_like(gyro)
         self.estimator.reset(self.just_reset.cpu().numpy())
-        z = self.estimator.update(
+        inputs = (
             q.double().cpu().numpy(),
             measured_gravity(env).double().cpu().numpy(),
             gyro.double().cpu().numpy(),
             self.foot_loads().double().cpu().numpy(),
         )
+        self.robot_inputs = inputs
+        """What the estimator read this step: joints, gravity, gyroscope, loads."""
+        z = self.estimator.update(*inputs)
         self._robot_z = torch.as_tensor(z, dtype=torch.float32, device=self.device)
         position = torch.as_tensor(self.estimator.position, dtype=torch.float32, device=self.device)
         yaw = torch.as_tensor(self.estimator.yaw, dtype=torch.float32, device=self.device)

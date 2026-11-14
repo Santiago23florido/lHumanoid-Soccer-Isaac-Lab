@@ -123,6 +123,12 @@ parser.add_argument(
     help="Also record each joint's position, velocity and the torque its drive applied "
     "(joint_pos, joint_vel, joint_torque), after every step.",
 )
+parser.add_argument(
+    "--robot-model",
+    default=None,
+    help="A real NAO's imperfections, as JSON (inline or a file): latency, drives, masses, "
+    "friction, sensor errors, the robot's own estimator (humanoid_transfer.nao.sim2real).",
+)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--output", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
@@ -191,6 +197,15 @@ def main() -> int:
         command_cfg.ranges.ang_vel_z = (wz, wz)
         command_cfg.heading_command = False
         command_cfg.rel_standing_envs = 0.0
+    robot_model = None
+    if args_cli.robot_model is not None:
+        from humanoid_transfer.nao.sim2real.robot_model import apply_robot_model
+
+        text = args_cli.robot_model
+        if Path(text).is_file():
+            text = Path(text).read_text(encoding="utf-8")
+        robot_model = json.loads(text)
+        apply_robot_model(cfg, robot_model)
     env = gym.make(args_cli.task_id, cfg=cfg)
     inner = env.unwrapped
     term = inner.command_manager.get_term(COMMAND)
@@ -296,6 +311,7 @@ def main() -> int:
         resample_space=np.array(getattr(term, "resample_space", "linear")),
         push=np.array(args_cli.push if args_cli.push is not None else [0.0, 0.0]),
         estimate_noise=np.float64(args_cli.estimate_noise or 0.0),
+        robot_model=np.array(json.dumps(robot_model or {})),
         sole_points=np.array(term.cfg.sole_points, dtype=np.float64),
         seed=np.int64(args_cli.seed),
         settle_steps=np.int64(args_cli.settle_steps),

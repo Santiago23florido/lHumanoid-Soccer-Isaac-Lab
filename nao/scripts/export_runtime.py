@@ -85,7 +85,11 @@ def export_actor(path: Path, out: Path) -> dict:
     for i, layer in enumerate(layers):
         arrays[f"weight_{i}"] = state[f"{prefix}mlp.{layer}.weight"]
         arrays[f"bias_{i}"] = state[f"{prefix}mlp.{layer}.bias"]
-    if prefix:
+    if prefix and "mirror_linear" in state:
+        # nao/scripts/checkpoint_bundle.py --torchscript names its buffers as the bundle does.
+        arrays.update({k: state[k] for k in ("mirror_linear", "mirror_offset", "action_joints")})
+        arrays["action_offset"] = state["action_offset"]
+    elif prefix:
         arrays.update(
             mirror_linear=state["linear"], mirror_offset=state["offset"],
             action_joints=state["joints"], action_offset=state["action_offset"],

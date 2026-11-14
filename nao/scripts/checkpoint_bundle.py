@@ -69,6 +69,47 @@ def mirror_arrays(config: dict, terms: list[tuple[str, int]]) -> dict[str, np.nd
     }
 
 
+def torchscript(arrays: dict[str, np.ndarray], path: Path) -> None:
+    """The actor as TorchScript, ``½ (π(o) + P π(A o + b) + c)`` with π the normalised MLP:
+    what ``transfer/scripts/capture_contract.py`` and ``nao/scripts/export_runtime.py`` load."""
+    import torch
+    from torch import nn
+
+    class Actor(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.register_buffer("mean", torch.as_tensor(arrays["mean"], dtype=torch.float32))
+            self.register_buffer("scale", torch.as_tensor(arrays["scale"], dtype=torch.float32))
+            layers = []
+            i = 0
+            while f"weight_{i}" in arrays:
+                weight = torch.as_tensor(arrays[f"weight_{i}"], dtype=torch.float32)
+                linear = nn.Linear(weight.shape[1], weight.shape[0])
+                linear.weight.data.copy_(weight)
+                linear.bias.data.copy_(torch.as_tensor(arrays[f"bias_{i}"], dtype=torch.float32))
+                layers += [linear, nn.ELU()]
+                i += 1
+            self.mlp = nn.Sequential(*layers[:-1])
+
+        def forward(self, observation: torch.Tensor) -> torch.Tensor:
+            return self.mlp((observation - self.mean) / self.scale)
+
+    class Symmetrized(nn.Module):
+        def __init__(self, actor: nn.Module) -> None:
+            super().__init__()
+            self.actor = actor
+            for key in ("mirror_linear", "mirror_offset", "action_joints", "action_offset"):
+                self.register_buffer(key, torch.as_tensor(arrays[key], dtype=torch.float32))
+
+        def forward(self, observation: torch.Tensor) -> torch.Tensor:
+            reflected = observation @ self.mirror_linear.T + self.mirror_offset
+            mirrored = self.actor(reflected) @ self.action_joints.T + self.action_offset
+            return 0.5 * (self.actor(observation) + mirrored)
+
+    module = Actor() if "mirror_linear" not in arrays else Symmetrized(Actor())
+    torch.jit.script(module.eval()).save(str(path))
+
+
 def main() -> int:
     import torch
 
@@ -78,6 +119,9 @@ def main() -> int:
     parser.add_argument("--history", type=int, default=0)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--plain", action="store_true", help="Do not symmetrise.")
+    parser.add_argument(
+        "--torchscript", type=Path, default=None, help="Also save it as TorchScript."
+    )
     args = parser.parse_args()
     config = json.loads((args.like / "runtime.json").read_text(encoding="utf-8"))
     base = [(n, w) for n, w in config["policy_terms"] if not n.endswith("_history")]
@@ -128,6 +172,14 @@ def main() -> int:
             for k in ("mirror_linear", "mirror_offset", "action_joints", "action_offset")
         )
         print(f"mirror against {args.like}: largest difference {gap:.1e}")
+    if args.torchscript is not None:
+        from humanoid_transfer.nao.deploy.policy import Actor
+
+        torchscript(arrays, args.torchscript)
+        probe = np.random.default_rng(0).normal(size=(8, width))
+        traced = torch.jit.load(str(args.torchscript))(torch.as_tensor(probe, dtype=torch.float32))
+        gap = float(np.abs(traced.detach().numpy() - Actor(arrays)(probe)).max())
+        print(f"wrote {args.torchscript} (against the NumPy actor: {gap:.1e})")
     print(f"wrote {args.output}: {width} inputs, history {args.history}")
     return 0
 

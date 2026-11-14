@@ -5,8 +5,9 @@ the estimator, the precomputed plans, the NumPy actor) drives the MuJoCo NAO of
 ``nao/scripts/build_mjcf.py``, every 20 ms, from the sensors the robot has --
 joint angles (12-bit), the IMU's roll and pitch, the gyroscope, each foot's
 contact force as its force sensors read it -- with its targets reaching the
-drives ``--delay-ms`` later. It starts in the crouch, as a simulated episode
-does. Reports falls, the walking speed and how far the robot went, per run::
+drives ``--delay-ms`` later. It starts in the crouch, as the robot
+does after its hold phase: the crouch held by the drives until the robot rests on its
+feet. Reports falls, the walking speed and how far the robot went, per run::
 
     python nao/scripts/sim2sim.py --bundle nao/bundles/<name> --plan forward --runs 5
 """
@@ -31,13 +32,29 @@ RESOLUTION = 2 * np.pi / 4096
 class MujocoNao:
     """The MuJoCo NAO with the robot's sensors and a latency on its targets."""
 
-    def __init__(self, path: Path, bundle: Bundle, delay: float, friction: float | None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        bundle: Bundle,
+        delay: float,
+        friction: float | None,
+        settle: float = 1.0,
+        contact_time: float | None = None,
+        elliptic: bool = False,
+    ) -> None:
         import mujoco
 
         self.mj = mujoco
         self.model = mujoco.MjModel.from_xml_path(str(path))
         if friction is not None:
             self.model.geom_friction[:, 0] = friction
+        if contact_time is not None:
+            # Contact stiffness: MuJoCo's soft contacts settle in about this time constant.
+            self.model.geom_solref[:, 0] = contact_time
+        if elliptic:
+            # Elliptic friction cones with a high impedance ratio: less creep under load.
+            self.model.opt.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
+            self.model.opt.impratio = 10.0
         self.data = mujoco.MjData(self.model)
         self.bundle = bundle
         self.dt = float(bundle.config["control_dt"])
@@ -50,6 +67,8 @@ class MujocoNao:
         feet = ("l_ankle", "r_ankle")
         self.feet = [self.model.body(f).id for f in feet]
         self.mass = float(self.model.body_subtreemass[self.base])
+        self.settle = settle
+        """Seconds the drives hold the crouch before a run."""
 
     def reset(self, perturb: float, rng: np.random.Generator) -> None:
         mj, m, d = self.mj, self.model, self.data
@@ -67,11 +86,15 @@ class MujocoNao:
         mj.mj_forward(m, d)
         d.qpos[2] -= self.lowest_point() - 0.0005
         d.qvel[:] = 0.0
-        d.qvel[:2] = rng.uniform(-perturb, perturb, size=2)
         mj.mj_forward(m, d)
         targets = np.array([drives[self.model.actuator(i).name]["default"] for i in range(m.nu)])
         self.queue = [targets.copy() for _ in range(self.delay_steps + 1)]
         self.data.ctrl[:] = targets
+        # The drives hold the crouch until the robot rests on its feet, as a session's hold
+        # phase does on the robot; then the push the run starts with.
+        for _ in range(int(round(self.settle / m.opt.timestep))):
+            mj.mj_step(m, d)
+        d.qvel[:2] += rng.uniform(-perturb, perturb, size=2)
 
     def lowest_point(self) -> float:
         """The lowest vertex of the feet's collision meshes, world z."""
@@ -250,6 +273,9 @@ def main() -> int:
     parser.add_argument("--friction", type=float, default=None)
     parser.add_argument("--perturb", type=float, default=0.02, help="Initial base speed, m/s, ±.")
     parser.add_argument("--steps", type=int, default=None)
+    parser.add_argument("--settle", type=float, default=1.0, help="Crouch held first, s.")
+    parser.add_argument("--contact-time", type=float, default=None, help="Contact solref, s.")
+    parser.add_argument("--elliptic", action="store_true", help="Elliptic cones, impratio 10.")
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument(
         "--session",
@@ -258,7 +284,15 @@ def main() -> int:
     )
     args = parser.parse_args()
     bundle = Bundle(args.bundle)
-    nao = MujocoNao(args.mjcf, bundle, args.delay_ms / 1000.0, args.friction)
+    nao = MujocoNao(
+        args.mjcf,
+        bundle,
+        args.delay_ms / 1000.0,
+        args.friction,
+        args.settle,
+        args.contact_time,
+        args.elliptic,
+    )
     if args.session:
         result = run_session(nao, bundle, args.plan, 0)
         print(json.dumps(result))

@@ -68,6 +68,19 @@ class BodyModel:
         self.fields: list[tuple[str, int]] = [(str(n), int(s)) for n, s in spec["skill_fields"]]
         """``z*``'s fields and sizes, in order."""
         self.order = _evaluation_order(self.parent, self.base)
+        # Rodrigues' terms of every body's joint (zero for a welded one), and the bodies by
+        # depth: each level is posed from the one above in a single batched product.
+        x, y, z = self.axis[:, 0], self.axis[:, 1], self.axis[:, 2]
+        zero = np.zeros_like(x)
+        skew = np.stack(
+            [np.stack([zero, -z, y], -1), np.stack([z, zero, -x], -1), np.stack([-y, x, zero], -1)],
+            axis=-2,
+        )
+        skew[self.source < 0] = 0.0
+        self._skew = skew
+        self._skew2 = skew @ skew
+        self._moving = np.flatnonzero(self.source >= 0)
+        self._levels = _levels(self.parent, self.order)
 
     @classmethod
     def load(cls, path: str | Path) -> BodyModel:
@@ -83,23 +96,38 @@ class BodyModel:
         q = np.asarray(q, dtype=np.float64)
         lead = q.shape[:-1]
         count = len(self.names)
+        angle = np.zeros((*lead, count))
+        angle[..., self._moving] = q[..., self.source[self._moving]]
+        s = np.sin(angle)[..., None, None]
+        c = np.cos(angle)[..., None, None]
+        local = self.origin_rot @ (np.eye(3) + s * self._skew + (1.0 - c) * self._skew2)
         rot = np.zeros((*lead, count, 3, 3))
         pos = np.zeros((*lead, count, 3))
         rot[..., self.base, :, :] = np.eye(3)
-        for b in self.order:
-            p = self.parent[b]
-            local = np.broadcast_to(self.origin_rot[b], (*lead, 3, 3))
-            if self.source[b] >= 0:
-                local = local @ axis_rotation(self.axis[b], q[..., self.source[b]])
-            rot[..., b, :, :] = rot[..., p, :, :] @ local
-            pos[..., b, :] = pos[..., p, :] + np.einsum(
-                "...ij,j->...i", rot[..., p, :, :], self.origin_pos[b]
+        for bodies, parents in self._levels:
+            above = rot[..., parents, :, :]
+            rot[..., bodies, :, :] = above @ local[..., bodies, :, :]
+            pos[..., bodies, :] = pos[..., parents, :] + np.einsum(
+                "...bij,bj->...bi", above, self.origin_pos[bodies]
             )
         return rot, pos
 
     def centres(self, rot: np.ndarray, pos: np.ndarray) -> np.ndarray:
         """``(..., B, 3)`` each body's centre of mass, in the frame ``rot`` and ``pos`` are in."""
         return pos + np.einsum("...bij,bj->...bi", rot, self.com)
+
+
+def _levels(parent: np.ndarray, order: list[int]) -> list[tuple[np.ndarray, np.ndarray]]:
+    """The bodies of :func:`_evaluation_order` grouped by depth below the base, each group
+    with its parents."""
+    depth = {}
+    for b in order:
+        depth[b] = depth.get(int(parent[b]), 0) + 1
+    levels = []
+    for d in sorted(set(depth.values())):
+        bodies = np.array([b for b in order if depth[b] == d], dtype=np.int64)
+        levels.append((bodies, parent[bodies]))
+    return levels
 
 
 def _evaluation_order(parent: np.ndarray, base: int) -> list[int]:

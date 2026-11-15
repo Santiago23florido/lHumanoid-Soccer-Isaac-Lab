@@ -94,8 +94,23 @@ class Reading:
         return bool(self.touch[0] > 0.5)
 
 
-def command(positions: dict[str, float], stiffness: dict[str, float] | float, base=None) -> dict:
-    """A LoLA actuator message: every joint's target and stiffness (0 to 1).
+ACTUATOR_KEYS = {
+    "Chest": 3, "LEar": 10, "REar": 10, "LEye": 24, "REye": 24,
+    "LFoot": 3, "RFoot": 3, "Skull": 12,
+}  # fmt: skip
+"""The LED arrays of an actuator message besides Position and Stiffness, and their lengths
+(RGB triples for the chest, eyes and feet); ``Sonar`` is two booleans. A message carries
+every key every cycle, as ``nao_lola`` sends it."""
+
+
+def command(
+    positions: dict[str, float],
+    stiffness: dict[str, float] | float,
+    base=None,
+    chest: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> dict:
+    """A LoLA actuator message: every joint's target and stiffness (0 to 1), the chest LED's
+    colour, every other LED off, the sonars on.
 
     Joints not in ``positions`` keep ``base`` (a 25-entry array, e.g. the last reading);
     a right hip yaw-pitch target is ignored (the left's drives both).
@@ -108,7 +123,11 @@ def command(positions: dict[str, float], stiffness: dict[str, float] | float, ba
         gains = [float(stiffness.get(name, 0.0)) for name in JOINTS]
     else:
         gains = [float(stiffness)] * 25
-    return {"Position": [float(v) for v in target], "Stiffness": gains}
+    message = {"Position": [float(v) for v in target], "Stiffness": gains}
+    message.update({key: [0.0] * length for key, length in ACTUATOR_KEYS.items()})
+    message["Chest"] = [float(v) for v in chest]
+    message["Sonar"] = [True, True]
+    return message
 
 
 class LolaSocket:
@@ -163,6 +182,7 @@ def wait_cycles(count: int) -> None:
 
 
 __all__ = [
+    "ACTUATOR_KEYS",
     "CYCLE",
     "FSR",
     "JOINTS",

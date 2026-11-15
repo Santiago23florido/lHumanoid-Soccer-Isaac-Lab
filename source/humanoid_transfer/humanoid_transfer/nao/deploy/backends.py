@@ -20,7 +20,7 @@ import time
 from .lola import SOCKET, LolaSocket, Reading, command, split_messages
 from .msgpack_lite import packb, unpackb
 
-LIMP = packb({"Position": [0.0] * 25, "Stiffness": [0.0] * 25})
+LIMP = packb(command({}, 0.0))
 
 
 class _Latest:

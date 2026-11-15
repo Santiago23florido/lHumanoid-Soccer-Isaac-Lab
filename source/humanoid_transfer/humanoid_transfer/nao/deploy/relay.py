@@ -14,13 +14,36 @@ On the laptop, ``RelayBackend`` (``backends.py``) is the other end.
 
 import argparse
 import socket
+import struct
 import time
 
-LIMP = (
-    b"\x82\xa8Position\xdc\x00\x19" + b"\xca\x00\x00\x00\x00" * 25
-    + b"\xa9Stiffness\xdc\x00\x19" + b"\xca\x00\x00\x00\x00" * 25
-)  # fmt: skip
-"""MessagePack of {"Position": [0.0] * 25, "Stiffness": [0.0] * 25}."""
+
+def _pack_limp():
+    """MessagePack of LoLA's actuator message with every joint limp (stiffness 0), every LED
+    off and the sonars on: every key, as LoLA is sent each cycle (``lola.command({}, 0.0)``)."""
+    zero = struct.pack(">Bf", 0xCA, 0.0)
+
+    def floats(n):
+        if n < 16:
+            head = struct.pack("B", 0x90 | n)
+        else:
+            head = struct.pack(">BH", 0xDC, n)
+        return head + zero * n
+
+    def text(key):
+        data = key.encode("ascii")
+        return struct.pack("B", 0xA0 | len(data)) + data
+
+    items = [("Position", floats(25)), ("Stiffness", floats(25))]
+    leds = (("Chest", 3), ("LEar", 10), ("REar", 10), ("LEye", 24), ("REye", 24))
+    leds += (("LFoot", 3), ("RFoot", 3), ("Skull", 12))
+    for key, n in leds:
+        items.append((key, floats(n)))
+    items.append(("Sonar", struct.pack("BBB", 0x92, 0xC3, 0xC3)))
+    return struct.pack("B", 0x80 | len(items)) + b"".join(text(k) + v for k, v in items)
+
+
+LIMP = _pack_limp()
 
 
 def main():

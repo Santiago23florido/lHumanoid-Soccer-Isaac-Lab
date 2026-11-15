@@ -50,8 +50,10 @@ def test_messages_round_trip() -> None:
     np.testing.assert_allclose(back["Position"], message["Position"], rtol=1e-6)
 
 
-def test_relay_limp_command_is_the_encoder_s() -> None:
-    assert LIMP == packb({"Position": [0.0] * 25, "Stiffness": [0.0] * 25})
+def test_relay_limp_command_is_the_runtime_s() -> None:
+    # The relay builds it without the runtime (Python 2.7 on the robot): every key, all zero.
+    assert unpackb(LIMP) == lola.command({}, 0.0)
+    assert LIMP == packb(lola.command({}, 0.0))
 
 
 def test_lola_messages_are_framed_across_reads() -> None:
@@ -79,6 +81,7 @@ def test_reading_maps_lola_s_joints_and_sensors() -> None:
     assert out["Position"][lola.JOINTS.index("LKneePitch")] == pytest.approx(1.2)
     assert 9.0 not in out["Position"]
     assert out["Stiffness"] == [0.5] * 25
+    assert set(out) == {"Position", "Stiffness", "Sonar", *lola.ACTUATOR_KEYS}
 
 
 torch = pytest.importorskip("torch")

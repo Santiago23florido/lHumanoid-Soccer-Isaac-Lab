@@ -90,7 +90,7 @@ tools on the laptop with `--relay <robot ip>` instead of `--lola`.
 | Latency | `python3 -m deploy.tools.measure_delay --lola` | in its harness, feet free |
 | Drives | `python3 -m deploy.tools.sysid_record --lola` | in its harness, feet free |
 | Fit | `python nao/scripts/fit_actuators.py <record> --bundle <bundle> --output <fit> --card <card>` | (PC) |
-| Retrain | `HUMANOID_ROBOT_CARD=<card> bash nao/scripts/train_sim2real.sh` | (PC) |
+| Retrain | `HUMANOID_ROBOT_CARD=<card> bash nao/scripts/train_sim2real.sh 300 <name> <run>/model_<n>.pt` | (PC) |
 | Run | `python3 -m deploy.tools.run_policy --lola --bundle bundle --plan stand` | in its harness, then free |
 
 A run ramps the stiffness, moves to the crouch, holds it until the chest button is pressed (the

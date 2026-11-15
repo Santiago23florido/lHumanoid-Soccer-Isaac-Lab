@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -52,6 +53,13 @@ ROBOT = {
 
 parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
 parser.add_argument("--policy", type=Path, required=True, help="TorchScript actor (symmetrised).")
+parser.add_argument(
+    "--actor-npz",
+    type=Path,
+    default=None,
+    help="The bundle's actor.npz as written elsewhere (a student's: nao/scripts/"
+    "student_bundle.py), instead of one read from --policy, which still drives the simulator.",
+)
 parser.add_argument("--bundle", type=Path, required=True)
 parser.add_argument("--task-id", default="NaoTrack-Play-v0")
 parser.add_argument("--num-envs", type=int, default=8)
@@ -104,7 +112,10 @@ def main() -> int:
     bundle = args_cli.bundle
     (bundle / "plans").mkdir(parents=True, exist_ok=True)
     (bundle / "parity").mkdir(parents=True, exist_ok=True)
-    export_actor(args_cli.policy, bundle / "actor.npz")
+    if args_cli.actor_npz is None:
+        export_actor(args_cli.policy, bundle / "actor.npz")
+    elif args_cli.actor_npz.resolve() != (bundle / "actor.npz").resolve():
+        shutil.copy(args_cli.actor_npz, bundle / "actor.npz")
     driver = None
 
     cfg = parse_env_cfg(args_cli.task_id, num_envs=args_cli.num_envs)
@@ -190,6 +201,11 @@ def main() -> int:
         "robot_model": settings,
         "drives": drives,
     }
+    if "robot_params" in names:
+        from humanoid_transfer.nao.sim2real.params import PARAMS
+        from humanoid_transfer.nao.tasks.nao_track.nao_track_sim2real_env_cfg import PARAM_RANGES
+
+        runtime["robot_params"] = {"names": list(PARAMS), "ranges": [list(r) for r in PARAM_RANGES]}
     (bundle / "runtime.json").write_text(json.dumps(runtime, indent=1), encoding="utf-8")
     view = term.view
     length = term.units.length

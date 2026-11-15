@@ -17,6 +17,12 @@ simulator knew and the robot needs:
 :class:`Controller` builds the policy's observation exactly as the simulator's
 observation manager does (``NaoTrackPolicyCfg`` with the robot's sensors,
 :mod:`humanoid_transfer.nao.sim2real`), runs the actor and returns the targets.
+
+A student's bundle also lists the robot parameters its actor reads (``robot_params``
+in ``runtime.json``: their names and the ranges they are normalised over). The
+actor estimates them from its history; :class:`Controller` can be given measured
+values instead (``robot_params=``, a name-to-value mapping in the parameters' own
+units; a parameter left out keeps the estimate).
 """
 
 from __future__ import annotations
@@ -34,6 +40,29 @@ from .policy import Actor
 
 def wrap(angle: np.ndarray) -> np.ndarray:
     return np.arctan2(np.sin(angle), np.cos(angle))
+
+
+def history_base(name: str) -> str:
+    """The term a history term repeats: ``<term>_history`` or ``<term>_adapt_history``."""
+    for suffix in ("_adapt_history", "_history"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def normalise_params(values: dict, config: dict) -> np.ndarray:
+    """Robot parameters in their own units (``values``) as the actor reads them: each mapped
+    from its range to ``[-1, 1]`` and clipped; NaN for a parameter not given."""
+    spec = config["robot_params"]
+    out = np.full(len(spec["names"]), np.nan)
+    unknown = set(values) - set(spec["names"])
+    if unknown:
+        raise KeyError(f"unknown robot parameters {sorted(unknown)}")
+    for i, name in enumerate(spec["names"]):
+        low, high = spec["ranges"][i]
+        if name in values:
+            out[i] = np.clip(2.0 * (float(values[name]) - low) / (high - low) - 1.0, -1.0, 1.0)
+    return out
 
 
 class Bundle:
@@ -56,7 +85,7 @@ class Bundle:
 class Controller:
     """One robot's tracker: :meth:`step` per control step."""
 
-    def __init__(self, bundle: Bundle, plan: str) -> None:
+    def __init__(self, bundle: Bundle, plan: str, robot_params: dict | None = None) -> None:
         config = bundle.config
         self.bundle = bundle
         self.config = config
@@ -82,6 +111,11 @@ class Controller:
         self.plan = bundle.plan(plan)
         if self.actor.inputs != sum(w for _, w in self.layout):
             raise ValueError("the actor's input width does not match the policy terms")
+        self.given_params = None
+        if robot_params:
+            if self.actor.adaptation is None:
+                raise ValueError("this bundle's actor reads no robot parameters")
+            self.given_params = normalise_params(robot_params, config)
         self.reset()
 
     def reset(self) -> None:
@@ -138,8 +172,11 @@ class Controller:
                 self.plan["path"][t], bool(self.plan["has_plan"][t]), position, yaw
             ),
         }
+        if self.actor.adaptation is not None:
+            # Not sensed: the actor writes its estimate, or the given values, here.
+            terms["robot_params"] = np.zeros(len(self.config["robot_params"]["names"]))
         for name, buffer in self.buffers.items():
-            base = name[: -len("_history")]
+            base = history_base(name)
             if not buffer:
                 buffer.extend([terms[base]] * buffer.maxlen)
             else:
@@ -179,7 +216,12 @@ class Controller:
 
     def act(self, observation: np.ndarray) -> np.ndarray:
         """The actuated joints' targets (``actuated`` order) for this step's observation."""
-        action = self.actor(observation)
+        params = None
+        if self.given_params is not None:
+            params = self.given_params
+            if np.isnan(params).any():
+                params = np.where(np.isnan(params), self.actor.estimate_params(observation), params)
+        action = self.actor(observation, params)
         self.last_action = action
         self.t += 1
         return self.default + self.scale * action
@@ -188,4 +230,4 @@ class Controller:
         return self.act(self.observe(q, gravity, gyro, loads))
 
 
-__all__ = ["Bundle", "Controller", "wrap"]
+__all__ = ["Bundle", "Controller", "history_base", "normalise_params", "wrap"]

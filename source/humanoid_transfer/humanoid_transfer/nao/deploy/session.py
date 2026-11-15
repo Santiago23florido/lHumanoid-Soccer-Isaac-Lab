@@ -214,6 +214,9 @@ class Session:
                 gravity, _legs(reading.temperature), reading.chest_button
             )
             odometry = np.append(c.estimator.position[0], c.estimator.yaw[0])
+            if c.actor.last_params is not None:
+                # A student's robot parameters, normalised: what it estimated, or was given.
+                self.log.add(robot_params=c.actor.last_params)
             self.log.add(
                 phase=_PHASES["policy"],
                 time=tic - start,

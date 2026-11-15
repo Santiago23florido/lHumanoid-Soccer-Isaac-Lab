@@ -44,13 +44,19 @@ def replay(bundle: Bundle, name: str) -> dict:
     sim_action = record["action"][:, env].astype(np.float64)
     terms = bundle.config["policy_terms"]
     per_term, start = {}, 0
+    sensed = np.ones(observation.shape[-1], dtype=bool)
     for term, width in terms:
         part = slice(start, start + width)
-        per_term[term] = float(np.abs(observation[:, part] - sim_obs[:, part]).max())
+        if term == "robot_params":
+            # Not sensed: the simulator's are the truth, the robot's a placeholder the actor
+            # overwrites with its estimate. The actions compare what it does with them.
+            sensed[part] = False
+        else:
+            per_term[term] = float(np.abs(observation[:, part] - sim_obs[:, part]).max())
         start += width
     return {
         "steps": len(observation),
-        "observation_max_abs": float(np.abs(observation - sim_obs).max()),
+        "observation_max_abs": float(np.abs(observation - sim_obs)[:, sensed].max()),
         "observation_per_term": per_term,
         "action_max_abs": float(np.abs(action - sim_action).max()),
         "action_scale": float(np.abs(sim_action).max()),

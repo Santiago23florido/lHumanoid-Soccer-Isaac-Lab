@@ -39,15 +39,31 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--plans", nargs="+", default=None)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--params",
+        type=Path,
+        default=None,
+        help="A student: measured robot parameters (JSON, own units) instead of its estimate.",
+    )
+    parser.add_argument(
+        "--tell-latency",
+        action="store_true",
+        help="A student: given each setting's latency as delay_ms, the rest as --params says.",
+    )
     args = parser.parse_args()
     bundle = Bundle(args.bundle)
+    given = {} if args.params is None else json.loads(args.params.read_text(encoding="utf-8"))
     plans = args.plans or bundle.plans()
     rows = []
     for plan in plans:
         for friction in FRICTIONS:
             for latency in LATENCIES_MS:
                 nao = MujocoNao(args.mjcf, bundle, latency / 1000.0, friction)
-                runs = [run(nao, bundle, plan, None, 0.02, seed) for seed in range(args.runs)]
+                params = {**given, "delay_ms": latency} if args.tell_latency else given
+                runs = [
+                    run(nao, bundle, plan, None, 0.02, seed, params or None)
+                    for seed in range(args.runs)
+                ]
                 row = {
                     "plan": plan,
                     "friction": friction,
@@ -60,11 +76,20 @@ def main() -> int:
                     "commanded_turn_rad": float(runs[0]["commanded_turn_rad"]),
                     "results": runs,
                 }
+                if params:
+                    row["given"] = params
+                if "robot_params" in runs[0]:
+                    row["robot_params"] = {
+                        name: float(np.median([r["robot_params"][name]["median"] for r in runs]))
+                        for name in runs[0]["robot_params"]
+                    }
                 rows.append(row)
+                acted = row.get("robot_params", {})
                 print(
                     f"{plan:8s} friction {friction:4.2f} latency {latency:4.0f} ms: falls "
                     f"{row['falls']}/{row['runs']}  forward {row['forward_m']:+.2f} m  turned "
                     f"{row['turned_rad']:+.2f} of {row['commanded_turn_rad']:+.2f} rad"
+                    + "".join(f"  {k.split('_')[0]} {v:.2f}" for k, v in acted.items())
                 )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

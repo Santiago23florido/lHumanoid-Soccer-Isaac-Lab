@@ -226,20 +226,29 @@ def run_session(nao: MujocoNao, bundle: Bundle, plan: str, seed: int) -> dict:
 
 
 def run(
-    nao: MujocoNao, bundle: Bundle, plan: str, steps: int | None, perturb: float, seed: int
+    nao: MujocoNao,
+    bundle: Bundle,
+    plan: str,
+    steps: int | None,
+    perturb: float,
+    seed: int,
+    robot_params: dict | None = None,
 ) -> dict:
+    """One run; a student is given ``robot_params`` (its own units) and estimates the rest."""
     rng = np.random.default_rng(seed)
-    controller = Controller(bundle, plan)
+    controller = Controller(bundle, plan, robot_params=robot_params)
     nao.reset(perturb, rng)
     controller.reset()
     held = bundle.config.get("held_pos", {})
     limit = controller.steps if steps is None else min(steps, controller.steps)
     start = nao.data.qpos[:2].copy()
-    heights, fell_at = [], None
+    heights, fell_at, acted = [], None, []
     turned, last_yaw = 0.0, None
     for k in range(limit):
         q, gravity, gyro, loads, rot = nao.sensors()
         targets = controller.step(q, gravity, gyro, loads)
+        if controller.actor.last_params is not None:
+            acted.append(np.array(controller.actor.last_params))
         nao.step({**held, **dict(zip(controller.actuated, targets, strict=True))})
         height = float(nao.data.qpos[2])
         tilt = float(np.arccos(np.clip(rot[2, 2], -1, 1)))
@@ -255,7 +264,7 @@ def run(
     seconds = len(heights) * controller.dt
     command = bundle.plan(plan)["command"]
     walking = np.abs(command[:, 0]) > 0
-    return {
+    result = {
         "seed": seed,
         "fell_at_s": fell_at,
         "seconds": seconds,
@@ -266,6 +275,23 @@ def run(
         "turned_rad": turned,
         "commanded_turn_rad": float(command[: len(heights), 2].sum() * controller.dt),
     }
+    if acted:
+        result["robot_params"] = acted_params(np.array(acted), bundle.config)
+    return result
+
+
+def acted_params(acted: np.ndarray, config: dict) -> dict:
+    """What a student acted on over a run, per parameter in its own units: the median over
+    the run's second half (the estimate settled) and its 10th-90th percentiles."""
+    spec = config["robot_params"]
+    late = acted[len(acted) // 2 :]
+    out = {}
+    for i, name in enumerate(spec["names"]):
+        low, high = spec["ranges"][i]
+        values = low + (late[:, i] + 1.0) * 0.5 * (high - low)
+        p10, p50, p90 = np.percentile(values, [10, 50, 90])
+        out[name] = {"median": float(p50), "p10": float(p10), "p90": float(p90)}
+    return out
 
 
 def main() -> int:
@@ -284,6 +310,12 @@ def main() -> int:
     parser.add_argument("--contact-time", type=float, default=None, help="Contact solref, s.")
     parser.add_argument("--elliptic", action="store_true", help="Elliptic cones, impratio 10.")
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--params",
+        type=Path,
+        default=None,
+        help="A student: measured robot parameters (JSON, own units) instead of its estimate.",
+    )
     parser.add_argument(
         "--session",
         action="store_true",
@@ -304,8 +336,10 @@ def main() -> int:
         result = run_session(nao, bundle, args.plan, 0)
         print(json.dumps(result))
         return 0 if result["stopped"] == "end" else 1
+    params = None if args.params is None else json.loads(args.params.read_text(encoding="utf-8"))
     runs = [
-        run(nao, bundle, args.plan, args.steps, args.perturb, seed) for seed in range(args.runs)
+        run(nao, bundle, args.plan, args.steps, args.perturb, seed, params)
+        for seed in range(args.runs)
     ]
     for r in runs:
         print(json.dumps(r))

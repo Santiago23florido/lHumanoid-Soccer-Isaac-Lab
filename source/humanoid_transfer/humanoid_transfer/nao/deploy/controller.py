@@ -22,7 +22,9 @@ A student's bundle also lists the robot parameters its actor reads (``robot_para
 in ``runtime.json``: their names and the ranges they are normalised over). The
 actor estimates them from its history; :class:`Controller` can be given measured
 values instead (``robot_params=``, a name-to-value mapping in the parameters' own
-units; a parameter left out keeps the estimate).
+units; a parameter left out keeps the estimate). The estimate is low-passed with the
+time constant ``params_tau`` in ``runtime.json`` (seconds; 0 or absent acts on each
+step's estimate), or the one given (``params_tau=``).
 """
 
 from __future__ import annotations
@@ -85,7 +87,13 @@ class Bundle:
 class Controller:
     """One robot's tracker: :meth:`step` per control step."""
 
-    def __init__(self, bundle: Bundle, plan: str, robot_params: dict | None = None) -> None:
+    def __init__(
+        self,
+        bundle: Bundle,
+        plan: str,
+        robot_params: dict | None = None,
+        params_tau: float | None = None,
+    ) -> None:
         config = bundle.config
         self.bundle = bundle
         self.config = config
@@ -116,6 +124,13 @@ class Controller:
             if self.actor.adaptation is None:
                 raise ValueError("this bundle's actor reads no robot parameters")
             self.given_params = normalise_params(robot_params, config)
+        # The estimate low-passed with time constant params_tau (s); 0 acts on each step's.
+        if params_tau is None:
+            params_tau = float(config.get("params_tau", 0.0))
+        self.params_tau = params_tau
+        self.params_alpha = 1.0 if params_tau <= 0.0 else -float(np.expm1(-self.dt / params_tau))
+        if self.params_alpha < 1.0 and self.actor.adaptation is None:
+            raise ValueError("this bundle's actor estimates no robot parameters")
         self.reset()
 
     def reset(self) -> None:
@@ -127,6 +142,7 @@ class Controller:
         self.anchor = None
         self.buffers = {name: deque(maxlen=n) for name, n in self.histories.items()}
         self.estimate = None
+        self.params_estimate = None
 
     @property
     def steps(self) -> int:
@@ -216,11 +232,19 @@ class Controller:
 
     def act(self, observation: np.ndarray) -> np.ndarray:
         """The actuated joints' targets (``actuated`` order) for this step's observation."""
-        params = None
-        if self.given_params is not None:
-            params = self.given_params
-            if np.isnan(params).any():
-                params = np.where(np.isnan(params), self.actor.estimate_params(observation), params)
+        params = self.given_params
+        estimating = params is None or np.isnan(params).any()
+        if estimating and (params is not None or self.params_alpha < 1.0):
+            estimate = self.actor.estimate_params(observation)
+            if self.params_alpha < 1.0:
+                # The parameters are the robot's, constant over a run; the estimate moves with
+                # the gait's phase. Started at the first step's.
+                if self.params_estimate is not None:
+                    estimate = self.params_estimate + self.params_alpha * (
+                        estimate - self.params_estimate
+                    )
+                self.params_estimate = estimate
+            params = estimate if params is None else np.where(np.isnan(params), estimate, params)
         action = self.actor(observation, params)
         self.last_action = action
         self.t += 1

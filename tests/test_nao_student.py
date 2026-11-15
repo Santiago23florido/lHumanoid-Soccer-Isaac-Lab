@@ -117,6 +117,29 @@ def test_the_torchscript_student_is_the_numpy_one(tmp_path: Path) -> None:
     np.testing.assert_allclose(out, student(observation), atol=1e-4)
 
 
+def test_the_torchscript_student_low_passes_its_estimate_as_the_runtime_does(
+    tmp_path: Path,
+) -> None:
+    torch = pytest.importorskip("torch")
+    from student_bundle import torchscript
+
+    rng = np.random.default_rng(5)
+    arrays = _arrays(rng, mirror=True)
+    tau, dt = 0.1, 0.02
+    alpha = 1.0 - np.exp(-dt / tau)
+    torchscript(arrays, tmp_path / "student.pt", tau, dt)
+    traced = torch.jit.load(str(tmp_path / "student.pt"))
+    assert traced.params_tau == pytest.approx(tau)
+    student = Actor(arrays)
+    smoothed = None
+    for _ in range(4):
+        observation = rng.normal(size=(3, student.inputs))
+        estimate = student.estimate_params(observation)
+        smoothed = estimate if smoothed is None else smoothed + alpha * (estimate - smoothed)
+        out = traced(torch.as_tensor(observation, dtype=torch.float32)).detach().numpy()
+        np.testing.assert_allclose(out, student(observation, smoothed), atol=1e-4)
+
+
 def test_measured_values_are_normalised_over_the_bundles_ranges() -> None:
     config = {"robot_params": {"names": NAMES, "ranges": RANGES}}
     out = normalise_params({"delay_ms": 35.0, "effort_scale": 0.7, "armature_scale": 9.0}, config)
@@ -187,3 +210,37 @@ def test_the_controller_keeps_the_estimate_for_what_is_not_measured(bundle: Bund
         told.act(observation)
         np.testing.assert_allclose(bundle.actor.last_params[[0, 3]], [0.0, 1.0])
         np.testing.assert_allclose(bundle.actor.last_params[[1, 2, 4]], estimate[[1, 2, 4]])
+
+
+def test_the_controller_low_passes_the_estimate_and_keeps_given_values(bundle: Bundle) -> None:
+    rng = np.random.default_rng(4)
+    q = np.array([nk.NOMINAL_STAND_JOINT_POS.get(n, 0.0) for n in bundle.model.joint_names])
+    tau = 0.1
+    alpha = 1.0 - np.exp(-0.02 / tau)
+    smooth = Controller(bundle, "test", params_tau=tau)
+    told = Controller(bundle, "test", robot_params={"delay_ms": 35.0}, params_tau=tau)
+    expected = expected_told = None
+    for _ in range(4):
+        gyro = rng.normal(scale=0.5, size=3)
+        sensors = (q, np.array([0.0, 0.0, -1.0]), gyro, np.array([0.5, 0.5]))
+        observation = smooth.observe(*sensors)
+        estimate = bundle.actor.estimate_params(observation)
+        expected = estimate if expected is None else expected + alpha * (estimate - expected)
+        smooth.act(observation)
+        np.testing.assert_allclose(bundle.actor.last_params, expected, atol=1e-12)
+        observation = told.observe(*sensors)
+        estimate = bundle.actor.estimate_params(observation)
+        if expected_told is None:
+            expected_told = estimate
+        else:
+            expected_told = expected_told + alpha * (estimate - expected_told)
+        told.act(observation)
+        np.testing.assert_allclose(bundle.actor.last_params[0], 0.0)
+        np.testing.assert_allclose(bundle.actor.last_params[1:], expected_told[1:], atol=1e-12)
+    # A new run starts from its own first estimate.
+    smooth.reset()
+    observation = smooth.observe(q, np.array([0.0, 0.0, -1.0]), np.zeros(3), np.array([0.5, 0.5]))
+    smooth.act(observation)
+    np.testing.assert_allclose(
+        bundle.actor.last_params, bundle.actor.estimate_params(observation), atol=1e-12
+    )

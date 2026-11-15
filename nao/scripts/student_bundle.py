@@ -9,12 +9,15 @@ and writes:
   (:mod:`humanoid_transfer.nao.deploy.policy`), plus ``φ``, its normaliser and its
   mirror over the history, and where the robot parameters go (``params_start``);
 * ``runtime.json`` -- the policy terms with ``robot_params`` and the adaptation history,
-  the history lengths, and ``robot_params``' names and ranges, so measured values can be
-  given in their own units;
+  the history lengths, ``robot_params``' names and ranges, so measured values can be
+  given in their own units, and ``params_tau``: the estimate's low-pass time constant
+  (``--params-tau``, seconds; 0 acts on each step's estimate);
 * with ``--torchscript``, the same student as TorchScript, which reads
   ``NaoTrack-Sim2RealStudent-Play-v0``'s policy group (its true ``robot_params``
   ignored): for ``transfer/scripts/capture_contract.py`` and
   ``nao/scripts/export_runtime.py --actor-npz``, and checked against the NumPy actor.
+  With a time constant it keeps each robot's low-passed estimate from call to call,
+  started at its first (a module per run: a robot reset keeps its estimate).
 
 Usage::
 
@@ -75,8 +78,13 @@ def adaptation_arrays(path: Path) -> tuple[dict[str, np.ndarray], dict]:
     return arrays, saved
 
 
-def torchscript(arrays: dict[str, np.ndarray], path: Path) -> None:
-    """The student as TorchScript, the NumPy actor's computation over a batch."""
+def torchscript(
+    arrays: dict[str, np.ndarray], path: Path, params_tau: float = 0.0, control_dt: float = 0.02
+) -> None:
+    """The student as TorchScript, the NumPy actor's computation over a batch; with
+    ``params_tau > 0`` its estimate low-passed from call to call, one call per
+    ``control_dt``, as :class:`~humanoid_transfer.nao.deploy.controller.Controller` does."""
+    alpha = 1.0 if params_tau <= 0.0 else -float(np.expm1(-control_dt / params_tau))
     import torch
     from torch import nn
 
@@ -108,6 +116,9 @@ def torchscript(arrays: dict[str, np.ndarray], path: Path) -> None:
             self.width = int(arrays["mean"].shape[0])
             self.start = int(arrays["params_start"])
             self.count = PARAM_WIDTH
+            self.alpha = float(alpha)
+            self.params_tau = float(params_tau)
+            self.register_buffer("smoothed", torch.zeros(0, PARAM_WIDTH))
 
         def estimate(self, history: torch.Tensor) -> torch.Tensor:
             reflected = history @ self.adapt_mirror_linear.T + self.adapt_mirror_offset
@@ -121,6 +132,10 @@ def torchscript(arrays: dict[str, np.ndarray], path: Path) -> None:
         def forward(self, observation: torch.Tensor) -> torch.Tensor:
             base = observation[:, : self.width]
             params = self.estimate(observation[:, self.width :])
+            if self.alpha < 1.0:
+                if self.smoothed.shape[0] == params.shape[0]:
+                    params = self.smoothed + self.alpha * (params - self.smoothed)
+                self.smoothed = params
             base = torch.cat(
                 [base[:, : self.start], params, base[:, self.start + self.count :]], dim=-1
             )
@@ -138,6 +153,12 @@ def main() -> int:
     parser.add_argument("--like", type=Path, required=True, help="A bundle to take the rest from.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--torchscript", type=Path, default=None)
+    parser.add_argument(
+        "--params-tau",
+        type=float,
+        default=0.0,
+        help="The estimate's low-pass time constant, s, written to the bundle (0: none).",
+    )
     args = parser.parse_args()
 
     arrays = checkpoint_arrays(args.teacher)
@@ -172,6 +193,7 @@ def main() -> int:
     config["robot_params"] = {"names": saved["params"], "ranges": saved["param_ranges"]}
     config["policy"] = str(args.teacher)
     config["adaptation"] = str(args.adaptation)
+    config["params_tau"] = args.params_tau
 
     args.output.mkdir(parents=True, exist_ok=True)
     shutil.copy(args.like / "body_model.json", args.output / "body_model.json")
@@ -183,7 +205,7 @@ def main() -> int:
         import torch
         from humanoid_transfer.nao.deploy.policy import Actor
 
-        torchscript(arrays, args.torchscript)
+        torchscript(arrays, args.torchscript, args.params_tau, float(config["control_dt"]))
         total = width + arrays["adapt_mean"].shape[0]
         rng = np.random.default_rng(0)
         # Inputs drawn about each one's normalised mean: some of the teacher's never varied in

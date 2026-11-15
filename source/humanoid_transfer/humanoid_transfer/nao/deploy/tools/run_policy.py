@@ -15,6 +15,9 @@ A student's bundle estimates the robot's parameters as it runs (logged as
 estimate)::
 
     python3 -m deploy.tools.run_policy --lola --bundle bundle --plan stand --params params.json
+
+The estimate is low-passed with the bundle's time constant (``params_tau`` in
+``runtime.json``); ``--params-tau`` sets another (seconds, 0: none).
 """
 
 from __future__ import annotations
@@ -47,6 +50,12 @@ def main() -> int:
         default=None,
         help="A student's robot parameters, measured (JSON: name to value in its own units).",
     )
+    parser.add_argument(
+        "--params-tau",
+        type=float,
+        default=None,
+        help="A student's estimate's low-pass time constant, s (default: the bundle's).",
+    )
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
     bundle = Bundle(args.bundle)
@@ -54,7 +63,7 @@ def main() -> int:
     if args.params is not None:
         with open(args.params, encoding="utf-8") as handle:
             given = json.load(handle)
-    controller = Controller(bundle, args.plan, robot_params=given)
+    controller = Controller(bundle, args.plan, robot_params=given, params_tau=args.params_tau)
     safety = SafetyConfig(
         fall_tilt=args.fall_tilt,
         temperature_limit=args.temperature_limit,
@@ -69,7 +78,11 @@ def main() -> int:
     finally:
         output = args.output or f"logs/run_{args.plan}_{stamp()}.npz"
         session.log.save(
-            output, plan=args.plan, bundle=str(args.bundle), params=json.dumps(given or {})
+            output,
+            plan=args.plan,
+            bundle=str(args.bundle),
+            params=json.dumps(given or {}),
+            params_tau=controller.params_tau,
         )
         backend.close()
     compute = session.log.rows.get("compute_s", [])

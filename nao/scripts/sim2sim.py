@@ -233,10 +233,12 @@ def run(
     perturb: float,
     seed: int,
     robot_params: dict | None = None,
+    params_tau: float | None = None,
 ) -> dict:
-    """One run; a student is given ``robot_params`` (its own units) and estimates the rest."""
+    """One run; a student is given ``robot_params`` (its own units) and estimates the rest,
+    low-passed with time constant ``params_tau`` (s; None: the bundle's)."""
     rng = np.random.default_rng(seed)
-    controller = Controller(bundle, plan, robot_params=robot_params)
+    controller = Controller(bundle, plan, robot_params=robot_params, params_tau=params_tau)
     nao.reset(perturb, rng)
     controller.reset()
     held = bundle.config.get("held_pos", {})
@@ -317,6 +319,12 @@ def main() -> int:
         help="A student: measured robot parameters (JSON, own units) instead of its estimate.",
     )
     parser.add_argument(
+        "--params-tau",
+        type=float,
+        default=None,
+        help="A student: its estimate's low-pass time constant, s (default: the bundle's).",
+    )
+    parser.add_argument(
         "--session",
         action="store_true",
         help="Run the robot's whole Session (phases, safety, LoLA's message) in real time.",
@@ -338,7 +346,7 @@ def main() -> int:
         return 0 if result["stopped"] == "end" else 1
     params = None if args.params is None else json.loads(args.params.read_text(encoding="utf-8"))
     runs = [
-        run(nao, bundle, args.plan, args.steps, args.perturb, seed, params)
+        run(nao, bundle, args.plan, args.steps, args.perturb, seed, params, args.params_tau)
         for seed in range(args.runs)
     ]
     for r in runs:

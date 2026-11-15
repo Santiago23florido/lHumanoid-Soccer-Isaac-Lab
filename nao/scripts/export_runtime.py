@@ -206,6 +206,8 @@ def main() -> int:
         from humanoid_transfer.nao.tasks.nao_track.nao_track_sim2real_env_cfg import PARAM_RANGES
 
         runtime["robot_params"] = {"names": list(PARAMS), "ranges": [list(r) for r in PARAM_RANGES]}
+        # A student's estimate low-passed as its TorchScript does (student_bundle.py).
+        runtime["params_tau"] = float(getattr(driver, "params_tau", 0.0))
     (bundle / "runtime.json").write_text(json.dumps(runtime, indent=1), encoding="utf-8")
     view = term.view
     length = term.units.length
@@ -218,6 +220,9 @@ def main() -> int:
         for seconds, vx, vy, wz in segments:
             switches.append((t, (vx, vy, wz)))
             t += int(round(seconds / dt))
+        # A fresh policy per schedule: a student's low-passed estimate starts at the run's
+        # first, as the runtime's Controller.reset() does.
+        driver = torch.jit.load(str(args_cli.policy), map_location=inner.device).eval()
         env.reset()
         # A reset inside a step updates the command before observing; env.reset() does
         # not. Do it here, so the first step is every later episode's first step.

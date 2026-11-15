@@ -37,6 +37,7 @@ def main() -> int:
         "--mjcf", type=Path, default=ROOT / "nao" / "assets" / "generated" / "nao_mujoco.xml"
     )
     parser.add_argument("--runs", type=int, default=5)
+    parser.add_argument("--first-seed", type=int, default=0)
     parser.add_argument("--plans", nargs="+", default=None)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -50,6 +51,12 @@ def main() -> int:
         action="store_true",
         help="A student: given each setting's latency as delay_ms, the rest as --params says.",
     )
+    parser.add_argument(
+        "--params-tau",
+        type=float,
+        default=None,
+        help="A student: its estimate's low-pass time constant, s (default: the bundle's).",
+    )
     args = parser.parse_args()
     bundle = Bundle(args.bundle)
     given = {} if args.params is None else json.loads(args.params.read_text(encoding="utf-8"))
@@ -61,8 +68,8 @@ def main() -> int:
                 nao = MujocoNao(args.mjcf, bundle, latency / 1000.0, friction)
                 params = {**given, "delay_ms": latency} if args.tell_latency else given
                 runs = [
-                    run(nao, bundle, plan, None, 0.02, seed, params or None)
-                    for seed in range(args.runs)
+                    run(nao, bundle, plan, None, 0.02, seed, params or None, args.params_tau)
+                    for seed in range(args.first_seed, args.first_seed + args.runs)
                 ]
                 row = {
                     "plan": plan,
@@ -93,7 +100,20 @@ def main() -> int:
                 )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
-        json.dumps({"bundle": str(args.bundle), "rows": rows}, indent=1), encoding="utf-8"
+        json.dumps(
+            {
+                "bundle": str(args.bundle),
+                "first_seed": args.first_seed,
+                "params_tau": (
+                    float(bundle.config.get("params_tau", 0.0))
+                    if args.params_tau is None
+                    else args.params_tau
+                ),
+                "rows": rows,
+            },
+            indent=1,
+        ),
+        encoding="utf-8",
     )
     print(f"wrote {args.output}")
     return 0

@@ -47,6 +47,24 @@ def _layers(arrays: dict, prefix: str = "") -> list:
     return layers
 
 
+class _Map:
+    """``x ↦ x Lᵀ + b``; as a gather and a scale when every row of ``L`` has one entry (a
+    mirror: a signed, scaled permutation), which costs a row, not a matrix."""
+
+    def __init__(self, linear: np.ndarray, offset: np.ndarray) -> None:
+        self.linear = linear
+        self.offset = offset
+        self.index = None
+        if ((linear != 0).sum(axis=1) <= 1).all():
+            self.index = np.abs(linear).argmax(axis=1)
+            self.scale = linear[np.arange(linear.shape[0]), self.index]
+
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        if self.index is None:
+            return x @ self.linear.T + self.offset
+        return x[..., self.index] * self.scale + self.offset
+
+
 def _mlp(x: np.ndarray, layers: list) -> np.ndarray:
     for k, (weight, bias) in enumerate(layers):
         x = x @ weight.T + bias
@@ -62,18 +80,21 @@ class Actor:
         self.layers = _layers(arrays)
         self.mirror = None
         if "mirror_linear" in arrays:
-            self.mirror = tuple(
+            linear, offset, joints, action_offset = (
                 np.asarray(arrays[k], dtype=np.float64)
                 for k in ("mirror_linear", "mirror_offset", "action_joints", "action_offset")
             )
+            self.mirror = (_Map(linear, offset), _Map(joints, action_offset))
         self.adaptation = None
         if "adapt_weight_0" in arrays:
             self.adaptation = {
                 "mean": np.asarray(arrays["adapt_mean"], dtype=np.float64),
                 "scale": np.asarray(arrays["adapt_scale"], dtype=np.float64),
                 "layers": _layers(arrays, "adapt_"),
-                "linear": np.asarray(arrays["adapt_mirror_linear"], dtype=np.float64),
-                "offset": np.asarray(arrays["adapt_mirror_offset"], dtype=np.float64),
+                "mirror": _Map(
+                    np.asarray(arrays["adapt_mirror_linear"], dtype=np.float64),
+                    np.asarray(arrays["adapt_mirror_offset"], dtype=np.float64),
+                ),
                 "start": int(np.asarray(arrays["params_start"])),
             }
         self.last_params = None
@@ -105,12 +126,10 @@ class Actor:
         """A student's estimate of the robot's parameters from its observation's history."""
         a = self.adaptation
         history = np.asarray(observation, dtype=np.float64)[..., self.width :]
-
-        def phi(x: np.ndarray) -> np.ndarray:
-            return _mlp((x - a["mean"]) / a["scale"], a["layers"])
-
-        reflected = history @ a["linear"].T + a["offset"]
-        return np.clip(0.5 * (phi(history) + phi(reflected)), -1.0, 1.0)
+        # Both passes in one: on the robot the per-call overhead outweighs the arithmetic.
+        both = np.stack([history, a["mirror"](history)])
+        out = _mlp((both - a["mean"]) / a["scale"], a["layers"])
+        return np.clip(0.5 * (out[0] + out[1]), -1.0, 1.0)
 
     def __call__(self, observation: np.ndarray, params: np.ndarray | None = None) -> np.ndarray:
         """The action; a student acts on ``params`` (normalised) if given, else its estimate."""
@@ -126,9 +145,9 @@ class Actor:
             self.last_params = np.array(params)
         if self.mirror is None:
             return self.raw(observation)
-        linear, offset, joints, action_offset = self.mirror
-        reflected = observation @ linear.T + offset
-        return 0.5 * (self.raw(observation) + self.raw(reflected) @ joints.T + action_offset)
+        reflect, act = self.mirror
+        out = self.raw(np.stack([observation, reflect(observation)]))
+        return 0.5 * (out[0] + act(out[1]))
 
 
 __all__ = ["Actor", "elu"]

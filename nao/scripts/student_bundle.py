@@ -186,10 +186,11 @@ def main() -> int:
         torchscript(arrays, args.torchscript)
         total = width + arrays["adapt_mean"].shape[0]
         rng = np.random.default_rng(0)
-        probe = rng.normal(size=(8, total)) * arrays["scale"].mean()
-        probe[:, width:] = (
-            arrays["adapt_mean"] + rng.normal(size=(8, total - width)) * adapt["adapt_scale"]
-        )
+        # Inputs drawn about each one's normalised mean: some of the teacher's never varied in
+        # training (a deviation of 1e11), and a probe beyond them only measures float32.
+        probe = np.concatenate([arrays["mean"], arrays["adapt_mean"]]) + rng.normal(
+            size=(8, total)
+        ) * np.minimum(np.concatenate([arrays["scale"], arrays["adapt_scale"]]), 1.0)
         traced = torch.jit.load(str(args.torchscript))(torch.as_tensor(probe, dtype=torch.float32))
         gap = float(np.abs(traced.detach().numpy() - Actor(arrays)(probe)).max())
         print(f"wrote {args.torchscript} (against the NumPy actor: {gap:.1e})")

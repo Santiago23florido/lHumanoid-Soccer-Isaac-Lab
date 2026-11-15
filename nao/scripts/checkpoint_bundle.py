@@ -8,6 +8,8 @@ the body's measured mirror exactly as ``transfer/scripts/symmetrize_actor.py``
 does, over the checkpoint's own input layout (``--history`` steps of
 proprioception and actions appended, as ``NaoTrack-Sim2Real-v0`` has them).
 Checked against the source bundle's actor when the layouts agree (``--check``).
+A teacher (``nao/scripts/train_teacher.sh``) reads the robot's parameters after
+them (``--robot-params``); its bundle is for simulation, where they are known.
 
 Usage::
 
@@ -120,6 +122,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--plain", action="store_true", help="Do not symmetrise.")
     parser.add_argument(
+        "--robot-params",
+        action="store_true",
+        help="The checkpoint is a teacher's: robot_params (5 inputs) follow the history.",
+    )
+    parser.add_argument(
         "--torchscript", type=Path, default=None, help="Also save it as TorchScript."
     )
     args = parser.parse_args()
@@ -129,6 +136,8 @@ def main() -> int:
     terms = base + [(f"{n}_history", args.history * widths[n]) for n in HISTORY_TERMS] * bool(
         args.history
     )
+    if args.robot_params:
+        terms.append(("robot_params", 5))
     config["policy_terms"] = [list(t) for t in terms]
     config["history"] = (
         {f"{n}_history": args.history for n in HISTORY_TERMS} if args.history else {}

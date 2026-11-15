@@ -38,8 +38,9 @@ from __future__ import annotations
 import math
 
 from isaaclab.envs import mdp
-from isaaclab.managers import EventTermCfg, SceneEntityCfg
+from isaaclab.managers import EventTermCfg, ObservationTermCfg, SceneEntityCfg
 
+from ...transfer.symmetry import history_base
 from ..assets import nao_kinematics as nk
 from . import sensors
 from .actions import RobotJointPositionActionCfg
@@ -161,18 +162,18 @@ def apply_robot_model(cfg, settings: dict) -> None:
         )
 
     if s.get("sensors", False):
-        policy = cfg.observations.policy
-        for name, func in (
-            ("base_ang_vel", sensors.gyro),
-            ("projected_gravity", sensors.gravity),
-            ("joint_pos", sensors.encoder_joint_pos_rel),
-            ("joint_vel", sensors.encoder_joint_vel),
-        ):
-            # A term's history reads the same sensor.
-            for term_name in (name, f"{name}_history"):
-                term = getattr(policy, term_name, None)
-                if term is not None:
-                    term.func = func
+        readings = {
+            "base_ang_vel": sensors.gyro,
+            "projected_gravity": sensors.gravity,
+            "joint_pos": sensors.encoder_joint_pos_rel,
+            "joint_vel": sensors.encoder_joint_vel,
+        }
+        # Every history of a term (the tracker's, an adaptation module's) reads the same
+        # sensor, whether it was added before or after this call.
+        for term_name, term in vars(cfg.observations.policy).items():
+            func = readings.get(history_base(term_name))
+            if func is not None and isinstance(term, ObservationTermCfg):
+                term.func = func
 
     command = cfg.commands.base_velocity
     if "base_velocity" in s:

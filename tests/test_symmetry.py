@@ -208,3 +208,26 @@ def test_a_history_reflects_step_by_step_as_its_term(g1: dict) -> None:
     np.testing.assert_allclose(reflected, expected, atol=1e-12)
     with pytest.raises(KeyError):
         observation_mirror([("joint_pos_history", n + 1)], joints, mean, std)
+
+
+def test_an_adaptation_history_reflects_as_the_short_one(g1: dict) -> None:
+    names = [row["name"] for row in g1["joints"]]
+    rng = np.random.default_rng(3)
+    mean = rng.normal(size=SKILL_LAYOUT.size)
+    std = rng.uniform(0.1, 2.0, size=SKILL_LAYOUT.size)
+    joints = joint_mirror(names, g1)
+    n = len(names)
+    short = observation_mirror([("joint_pos_history", 5 * n)], joints, mean, std)
+    long = observation_mirror([("joint_pos_adapt_history", 5 * n)], joints, mean, std)
+    np.testing.assert_array_equal(short.linear, long.linear)
+    np.testing.assert_array_equal(short.offset, long.offset)
+
+
+def test_the_robot_parameters_are_the_same_robot_in_the_mirror(g1: dict) -> None:
+    names = [row["name"] for row in g1["joints"]]
+    joints = joint_mirror(names, g1)
+    mirror = observation_mirror(
+        [("robot_params", 5)], joints, np.zeros(SKILL_LAYOUT.size), np.ones(SKILL_LAYOUT.size)
+    )
+    np.testing.assert_array_equal(mirror.linear, np.eye(5))
+    np.testing.assert_array_equal(mirror.offset, np.zeros(5))

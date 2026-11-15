@@ -12,6 +12,8 @@ sensor errors); single numbers are symmetric bounds ``±``.
 ``damping_scale``         leg drives' damping, times the derived gains
 ``effort_scale``          leg joints' torque ceilings, times the URDF's
 ``armature_scale``        leg joints' reflected rotor inertia, times the nominal
+``joint_spread``          the four above drawn as one factor per robot, each joint
+                          ``1 ±`` this around it (absent: one factor per joint)
 ``friction``              the feet's static friction coefficient (dynamic: 3/4 of it)
 ``mass_scale``            every link's mass
 ``added_mass_kg``         a load on the torso (a marker, a camera)
@@ -42,15 +44,15 @@ from ..assets import nao_kinematics as nk
 from . import sensors
 from .actions import RobotJointPositionActionCfg
 from .command import robot_command
-from .events import scale_effort_limits, set_reflected_inertia
+from .events import scale_drive_gains, scale_effort_limits, set_reflected_inertia
 from .state import sample_robot_errors
 
 LEGS = SceneEntityCfg("robot", joint_names=list(nk.LEG_ACTUATED_JOINTS), preserve_order=True)
 KEYS = (
     "delay_ms", "stiffness_scale", "damping_scale", "effort_scale", "armature_scale",
-    "friction", "mass_scale", "added_mass_kg", "base_com_m", "encoder_offset_deg",
-    "imu_tilt_deg", "gyro_bias", "fsr_scale", "fsr_offset", "sensors", "estimator",
-    "odometry", "loads", "base_velocity", "fsr_noise", "gyro_noise",
+    "joint_spread", "friction", "mass_scale", "added_mass_kg", "base_com_m",
+    "encoder_offset_deg", "imu_tilt_deg", "gyro_bias", "fsr_scale", "fsr_offset", "sensors",
+    "estimator", "odometry", "loads", "base_velocity", "fsr_noise", "gyro_noise",
 )  # fmt: skip
 
 
@@ -88,26 +90,39 @@ def apply_robot_model(cfg, settings: dict) -> None:
     }
     events.robot_errors = EventTermCfg(func=sample_robot_errors, mode="reset", params=errors)
 
+    spread = s.get("joint_spread")
+    spread = None if spread is None else float(spread)
     if "stiffness_scale" in s or "damping_scale" in s:
-        params = {"asset_cfg": LEGS, "operation": "scale", "distribution": "uniform"}
-        if "stiffness_scale" in s:
-            params["stiffness_distribution_params"] = _pair(s["stiffness_scale"])
-        if "damping_scale" in s:
-            params["damping_distribution_params"] = _pair(s["damping_scale"])
-        events.drive_gains = EventTermCfg(
-            func=mdp.randomize_actuator_gains, mode="startup", params=params
-        )
+        if spread is None:
+            params = {"asset_cfg": LEGS, "operation": "scale", "distribution": "uniform"}
+            if "stiffness_scale" in s:
+                params["stiffness_distribution_params"] = _pair(s["stiffness_scale"])
+            if "damping_scale" in s:
+                params["damping_distribution_params"] = _pair(s["damping_scale"])
+            func = mdp.randomize_actuator_gains
+        else:
+            params = {"asset_cfg": LEGS, "spread": spread}
+            if "stiffness_scale" in s:
+                params["stiffness_range"] = _pair(s["stiffness_scale"])
+            if "damping_scale" in s:
+                params["damping_range"] = _pair(s["damping_scale"])
+            func = scale_drive_gains
+        events.drive_gains = EventTermCfg(func=func, mode="startup", params=params)
     if "effort_scale" in s:
         events.effort_limits = EventTermCfg(
             func=scale_effort_limits,
             mode="startup",
-            params={"asset_cfg": LEGS, "scale_range": _pair(s["effort_scale"])},
+            params={"asset_cfg": LEGS, "scale_range": _pair(s["effort_scale"]), "spread": spread},
         )
     if "armature_scale" in s:
         events.reflected_inertia = EventTermCfg(
             func=set_reflected_inertia,
             mode="startup",
-            params={"asset_cfg": LEGS, "scale_range": _pair(s["armature_scale"])},
+            params={
+                "asset_cfg": LEGS,
+                "scale_range": _pair(s["armature_scale"]),
+                "spread": spread,
+            },
         )
     if "friction" in s:
         low, high = _pair(s["friction"])

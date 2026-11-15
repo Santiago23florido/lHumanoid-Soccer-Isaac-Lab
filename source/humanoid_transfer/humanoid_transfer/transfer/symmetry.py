@@ -146,6 +146,14 @@ class AffineMirror:
         return self
 
 
+def history_base(name: str) -> str:
+    """The term a history term repeats (``<term>_history``, ``<term>_adapt_history``), or the
+    name itself."""
+    if not name.endswith("_history"):
+        return name
+    return name.removesuffix("_history").removesuffix("_adapt")
+
+
 def observation_mirror(
     terms: Sequence[tuple[str, int]],
     joints: np.ndarray,
@@ -168,9 +176,10 @@ def observation_mirror(
     steps.update(dict.fromkeys(("joint_pos", "joint_vel", "actions"), joints.shape[0]))
     expanded: list[tuple[str, int]] = []
     for name, width in terms:
-        # A term's history (Isaac Lab's ``history_length``, under the name ``<term>_history``)
-        # is that term's reading at each of its steps, oldest first: each reflects as one.
-        base = name.removesuffix("_history")
+        # A term's history (Isaac Lab's ``history_length``, under the name ``<term>_history``,
+        # or ``<term>_adapt_history`` for the longer one an adaptation module reads) is that
+        # term's reading at each of its steps, oldest first: each reflects as one.
+        base = history_base(name)
         if base != name:
             if base not in steps or width % steps[base]:
                 raise KeyError(f"no mirror for observation term {name!r} of width {width}")
@@ -203,6 +212,9 @@ def observation_mirror(
             mirror.add(np.eye(1))
         elif name == "contract_path":
             mirror.add(PLANAR, repeat=width // 3)
+        elif name == "robot_params":
+            # Latency and whole-robot drive factors: the same robot in the mirror.
+            mirror.add(np.eye(width))
         elif name == "balance":
             mirror.add(BALANCE)
         else:
@@ -216,6 +228,7 @@ __all__ = [
     "BALANCE",
     "PLANAR",
     "VECTOR",
+    "history_base",
     "joint_mirror",
     "joint_offsets",
     "load_joint_mirror",

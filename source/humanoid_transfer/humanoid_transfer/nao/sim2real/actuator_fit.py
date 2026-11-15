@@ -66,9 +66,18 @@ def plant_for(joint: str, posture: dict[str, float], step: float = 1e-4) -> Plan
 
 
 def simulate(
-    plant: Plant, drive: Drive, time: np.ndarray, target: np.ndarray, q0: float, v0: float = 0.0
+    plant: Plant,
+    drive: Drive,
+    time: np.ndarray,
+    target: np.ndarray,
+    q0: float,
+    v0: float = 0.0,
+    peak: list | None = None,
 ):
-    """The joint's angle at each recorded ``time``, its targets held over each interval."""
+    """The joint's angle at each recorded ``time``, its targets held over each interval.
+
+    With ``peak``, appends the largest torque the drive asked for before its ceiling.
+    """
     t_end = time[-1]
     steps = int(np.ceil((t_end - time[0]) / SUBSTEP)) + 1
     grid = time[0] + SUBSTEP * np.arange(steps)
@@ -78,9 +87,11 @@ def simulate(
     q, v = q0, v0
     out = np.empty(steps)
     mass = plant.inertia + drive.armature
+    largest = 0.0
     for k in range(steps):
         out[k] = q
         torque = drive.stiffness * (held[k] - q) - drive.damping * v
+        largest = max(largest, abs(torque))
         torque = min(max(torque, -drive.ceiling), drive.ceiling)
         torque += plant.gravity + plant.gravity_slope * (q - plant.reference)
         if v != 0.0:
@@ -91,7 +102,18 @@ def simulate(
             torque -= drive.friction * np.sign(torque)
         v += SUBSTEP * torque / mass
         q += SUBSTEP * v
+    if peak is not None:
+        peak.append(largest)
     return np.interp(time, grid, out)
+
+
+def peak_demand(plant: Plant, drive: Drive, records: list[dict]) -> float:
+    """The largest torque ``drive`` asks for over ``records``, before its ceiling. Below the
+    ceiling the records never saturated it, and say nothing of it but that it is higher."""
+    peaks: list[float] = []
+    for r in records:
+        simulate(plant, drive, r["time"], r["target"], float(r["position"][0]), peak=peaks)
+    return max(peaks)
 
 
 NAMES = ("stiffness", "damping", "delay", "armature", "ceiling", "friction")
@@ -131,4 +153,4 @@ def fit_joint(
     return drive, float(np.sqrt(np.mean(residuals(result.x) ** 2)))
 
 
-__all__ = ["Drive", "Plant", "fit_joint", "plant_for", "simulate"]
+__all__ = ["Drive", "Plant", "fit_joint", "peak_demand", "plant_for", "simulate"]

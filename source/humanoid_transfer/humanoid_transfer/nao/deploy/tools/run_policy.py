@@ -8,6 +8,13 @@ follows the plan; ``--max-seconds`` cuts a run short; the chest button, a fall
 or a hot motor stop it::
 
     python3 -m deploy.tools.run_policy --lola --bundle bundle --plan stand --max-seconds 5
+
+A student's bundle estimates the robot's parameters as it runs (logged as
+``robot_params``); ``--params`` gives it measured ones instead, from
+``nao/scripts/fit_actuators.py --params`` (a parameter the file leaves out keeps the
+estimate)::
+
+    python3 -m deploy.tools.run_policy --lola --bundle bundle --plan stand --params params.json
 """
 
 from __future__ import annotations
@@ -35,10 +42,19 @@ def main() -> int:
         action="store_true",
         help="Start the policy right after the crouch, without waiting for the chest button.",
     )
+    parser.add_argument(
+        "--params",
+        default=None,
+        help="A student's robot parameters, measured (JSON: name to value in its own units).",
+    )
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
     bundle = Bundle(args.bundle)
-    controller = Controller(bundle, args.plan)
+    given = None
+    if args.params is not None:
+        with open(args.params, encoding="utf-8") as handle:
+            given = json.load(handle)
+    controller = Controller(bundle, args.plan, robot_params=given)
     safety = SafetyConfig(
         fall_tilt=args.fall_tilt,
         temperature_limit=args.temperature_limit,
@@ -52,7 +68,9 @@ def main() -> int:
         reason = session.run(max_steps=steps)
     finally:
         output = args.output or f"logs/run_{args.plan}_{stamp()}.npz"
-        session.log.save(output, plan=args.plan, bundle=str(args.bundle))
+        session.log.save(
+            output, plan=args.plan, bundle=str(args.bundle), params=json.dumps(given or {})
+        )
         backend.close()
     compute = session.log.rows.get("compute_s", [])
     summary = {

@@ -28,8 +28,22 @@ sys.path.insert(0, str(ROOT / "source" / "humanoid_transfer"))
 
 from humanoid_transfer.nao.assets import nao_kinematics as nk  # noqa: E402
 from humanoid_transfer.nao.deploy.lola import JOINTS  # noqa: E402
-from humanoid_transfer.nao.sim2real.actuator_fit import Drive, fit_joint, plant_for  # noqa: E402
-from humanoid_transfer.nao.sim2real.events import reflected_inertia  # noqa: E402
+from humanoid_transfer.nao.sim2real.actuator_fit import (  # noqa: E402
+    Drive,
+    fit_joint,
+    peak_demand,
+    plant_for,
+)
+from humanoid_transfer.nao.sim2real.motors import reflected_inertia  # noqa: E402
+
+RATIOS = {
+    "stiffness_scale": "stiffness_ratio",
+    "damping_scale": "damping_ratio",
+    "effort_scale": "ceiling_ratio",
+    "armature_scale": "armature_ratio",
+}
+"""A student's drive parameters (``humanoid_transfer.nao.sim2real.params``), each the robot's
+factor: the mean of its joints' fitted ratios."""
 
 
 def main() -> int:
@@ -40,6 +54,13 @@ def main() -> int:
         "--bundle", type=Path, required=True, help="A deployment bundle: the simulated drives."
     )
     parser.add_argument("--card", type=Path, default=None)
+    parser.add_argument(
+        "--params",
+        type=Path,
+        default=None,
+        help="Write the robot's parameters as a student reads them (deploy.tools.run_policy "
+        "--params): latency and each drive factor, the mean over the fitted joints.",
+    )
     parser.add_argument("--margin", type=float, default=0.15, help="Range around the fit, ±.")
     args = parser.parse_args()
     data = np.load(args.record, allow_pickle=False)
@@ -73,6 +94,7 @@ def main() -> int:
             friction=0.02,
         )
         drive, rms = fit_joint(plant, records, start)
+        demand = peak_demand(plant, drive, records)
         fits[joint] = {
             **asdict(drive),
             "rms_rad": rms,
@@ -81,6 +103,10 @@ def main() -> int:
             "damping_ratio": drive.damping / nominal_damping[joint],
             "ceiling_ratio": drive.ceiling / float(limits[joint]),
             "armature_ratio": drive.armature / max(float(reflected_inertia([joint])[0]), 1e-9),
+            # A ceiling the record never reached does not shape the fit: the fitted value is
+            # arbitrary above the largest torque asked for.
+            "peak_demand": demand,
+            "ceiling_identified": bool(demand >= drive.ceiling),
         }
         print(f"{joint}: " + ", ".join(f"{k} {v:.4g}" for k, v in fits[joint].items()))
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -96,13 +122,31 @@ def main() -> int:
         card = {
             "stiffness_scale": span("stiffness_ratio"),
             "damping_scale": span("damping_ratio"),
-            "effort_scale": span("ceiling_ratio"),
             "armature_scale": span("armature_ratio"),
             # The policy's 20 ms step held over LoLA's 12 ms cycle adds up to one cycle.
             "delay_ms": [float(delays.min() * (1 - m)), float(delays.max() * (1 + m) + 12.0)],
         }
+        saturated = [f["ceiling_ratio"] for f in fits.values() if f["ceiling_identified"]]
+        if saturated:
+            low, high = min(saturated), max(saturated)
+            card["effort_scale"] = [float(low * (1 - m)), float(high * (1 + m))]
+        else:
+            print("no joint reached its ceiling: the card keeps the simulator's effort range")
         args.card.write_text(json.dumps(card, indent=1))
         print(f"robot card: {card}")
+    if args.params is not None:
+        params = {}
+        for name, ratio in RATIOS.items():
+            rows = [f for f in fits.values() if ratio != "ceiling_ratio" or f["ceiling_identified"]]
+            if rows:
+                params[name] = float(np.mean([f[ratio] for f in rows]))
+            else:
+                # Left out: a student keeps its own estimate of it.
+                print(f"{name}: not identified by this record, left to the student's estimate")
+        # The policy's 20 ms step waits for LoLA's next 12 ms cycle: 6 ms on average.
+        params["delay_ms"] = 1000.0 * float(np.mean([f["delay"] for f in fits.values()])) + 6.0
+        args.params.write_text(json.dumps(params, indent=1))
+        print(f"robot parameters: {params}")
     print(f"wrote {args.output}")
     return 0
 

@@ -17,7 +17,7 @@ import json
 import torch
 from isaaclab.managers import SceneEntityCfg
 
-from .events import MOTORS
+from .motors import MOTORS
 
 
 def nominal_joint_torque(joint_names: list[str]) -> torch.Tensor:

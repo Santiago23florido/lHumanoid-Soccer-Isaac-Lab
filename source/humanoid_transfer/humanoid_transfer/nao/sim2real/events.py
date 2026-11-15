@@ -21,34 +21,12 @@ can infer (:mod:`.params`, which reads it from :func:`~.params.robot_draws`).
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import torch
 from isaaclab.actuators import ImplicitActuator
 from isaaclab.managers import SceneEntityCfg
 
+from .motors import MOTORS, ROTOR_INERTIA, reflected_inertia
 from .params import draw_factors, robot_draws
-
-MOTORS = Path(__file__).resolve().parents[5] / "nao" / "body" / "motors.json"
-ROTOR_INERTIA = 3.0e-7
-"""A leg motor's rotor inertia, kg m^2 (see the module's docstring)."""
-
-
-def reflected_inertia(joint_names: list[str], rotor_inertia: float = ROTOR_INERTIA) -> torch.Tensor:
-    """``(J,)`` each joint's reflected rotor inertia ``J_r r^2``; 0 for joints without a motor
-    listed (the mimic joints, which share their driver's)."""
-    spec = json.loads(MOTORS.read_text(encoding="utf-8"))
-    values = []
-    for name in joint_names:
-        key = name[1:] if name[:1] in "LR" and name[1:] in spec["joints"] else name
-        entry = spec["joints"].get(key)
-        if entry is None:
-            values.append(0.0)
-            continue
-        motor, gear = entry
-        values.append(rotor_inertia * spec["motors"][motor]["reduction"][gear] ** 2)
-    return torch.tensor(values)
 
 
 def _ids(env, env_ids: torch.Tensor | None) -> torch.Tensor:
@@ -145,6 +123,7 @@ def scale_drive_gains(
 
 
 __all__ = [
+    "MOTORS",
     "ROTOR_INERTIA",
     "reflected_inertia",
     "scale_drive_gains",

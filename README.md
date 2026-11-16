@@ -89,6 +89,11 @@ the tracker practises plans it has not seen executed. On the G1 they cost a litt
 **Limits.** Simulation only; one source and one target body; on the NAO, no command keeps every
 feature of the gait signature within 10 % of the teacher's.
 
+**Toward a real NAO.** The NAO's tracker has also been trained on a model of the real robot, with
+a student policy that estimates the robot's drives from its own history. It runs on the robot's
+sensors only and is tested in a second physics engine, MuJoCo. It has not yet run on hardware;
+see [`nao/README.md`](nao/README.md#running-on-a-real-nao).
+
 ## Repository
 
 ```text
@@ -98,10 +103,11 @@ feature of the gait signature within 10 % of the teacher's.
 │       ├── common/             body-independent theory: z*, units, centroidal dynamics, gait signature
 │       ├── transfer/           the contract: generator, estimator, tracking task, evaluation
 │       ├── g1/                 source robot: teacher and expert tasks, G1 tracking task
-│       └── nao/                target robot: asset pipeline, NAO tracking task, baselines
+│       └── nao/                target robot: asset pipeline, NAO tracking task, baselines,
+│                               the real robot's model and runtime
 ├── transfer/                   scripts and results of the method (see transfer/README.md)
 ├── g1/                         the pinned teacher policy and the G1's body card
-├── nao/                        the NAO's URDF, licences and asset scripts
+├── nao/                        the NAO's URDF, licences, scripts and results (see nao/README.md)
 ├── scripts/                    train.py, play.py, list_tasks.py (they register this extension's tasks)
 └── tests/                      run without Isaac Sim
 ```

@@ -19,6 +19,8 @@ humanoid_transfer/
 │   └── symmetry.py                      mirror symmetry of the policies
 ├── g1/          source robot: walking teacher, base-task experts, tracking task
 ├── nao/         target robot: asset pipeline, tracking task, baselines
+│   ├── sim2real/  a real NAO's drives, sensors and estimator in simulation
+│   └── deploy/    the runtime that runs on the robot (NumPy only)
 ├── soccer/      reserved for a later stage, inactive
 └── tasks.py     registers every gym id
 ```
@@ -46,6 +48,8 @@ Each is enforced by a test (`tests/test_import_boundaries.py`,
   theory is tested without a GPU stack; `latent/` uses torch but never Isaac Lab, so it trains
   and is tested on recorded rollouts.
 - **Assets do not contain environments,** and tasks live with their robot.
+- **The robot runtime stands alone.** `nao/deploy/` imports only the standard library, NumPy
+  and its own modules, so it is copied to the robot without the extension.
 - **The NAO's zero-step balance task (`nao/tasks/nao_stand`) is separate from the walking work.**
   It terminates on a step, which defines that task; the walking tasks carry no such condition.
 
@@ -60,6 +64,8 @@ Isaac Lab, which registers these tasks among others (each with a `-Play-v0` vari
 | `G1Base-{Backward,Sidestep,Jog}-v0` | G1 | Experts for the base tasks (Isaac Lab's recipe, command range only) |
 | `G1RoughOnFlat-v0` | G1 | Isaac Lab's rough G1 policy evaluated on a plane |
 | `G1Track-v0`, `NaoTrack-v0` | G1, NAO | The tracker: follow a plan of `z*` |
+| `NaoTrack-Sim2Real-v0` | NAO | The tracker on a model of the real robot |
+| `NaoTrack-Sim2Real{Teacher,Student}-v0` | NAO | The same, with the robot's drive parameters given (teacher) or estimated (student) |
 | `NaoVelocity{Flat,Rough}-v0` | NAO | Baseline: the NAO trained on the task with the G1's recipe |
 | `NaoImitate-v0` | NAO | Baseline: imitation of the G1's retargeted joint angles |
 | `NaoStand-Direct-v0` | NAO | Zero-step balance under pushes (separate study) |

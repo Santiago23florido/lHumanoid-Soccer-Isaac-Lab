@@ -41,6 +41,7 @@ __all__ = [
     "lipm_omega",
     "composite_inertia_about_joint",
     "whole_body_inertia_about_ankle",
+    "static_joint_torque",
     "foot_collision_extent",
     "NOMINAL_STAND_JOINT_POS",
     "LEG_ACTUATED_JOINTS",
@@ -428,6 +429,38 @@ def whole_body_inertia_about_ankle(
     )
     lever = float(np.linalg.norm(center_of_mass(joint_pos, urdf_path) - point))
     return inertia, lever
+
+
+def static_joint_torque(
+    joint_name: str,
+    force: np.ndarray,
+    point: np.ndarray,
+    joint_pos: dict[str, float] | None = None,
+    urdf_path: Path | None = None,
+) -> float:
+    """Torque a joint holds, at rest, against the weight of its distal links and a contact force.
+
+    The distal subtree (the links beyond the joint, away from ``base_link``) is in
+    equilibrium under its own weight, the external ``force`` applied at ``point``
+    (both in the ``base_link`` frame, newtons and metres) and the joint's torque
+    about its axis, which is returned in N m. Gravity points along ``-z`` of
+    ``base_link``, so the torso is taken upright. For a stance leg the force is the
+    ground reaction at the centre of pressure; the joint then carries the rest of
+    the body. A mimic joint driven by this one is not included.
+    """
+    model = load_model(urdf_path)
+    poses = forward_kinematics(joint_pos, urdf_path)
+    joint = next(j for j in model.joints if j.name == joint_name)
+    frame = poses[joint.child]
+    origin, axis = frame[:3, 3], frame[:3, :3] @ joint.axis
+    moment = np.cross(np.asarray(point, dtype=float) - origin, np.asarray(force, dtype=float))
+    for name in _subtree(model, joint.child):
+        link = model.links.get(name)
+        if link is None or link.mass == 0.0 or name not in poses:
+            continue
+        com = (poses[name] @ np.append(link.com, 1.0))[:3]
+        moment += np.cross(com - origin, np.array([0.0, 0.0, -link.mass * GRAVITY]))
+    return float(-axis @ moment)
 
 
 # ---------------------------------------------------------------------------

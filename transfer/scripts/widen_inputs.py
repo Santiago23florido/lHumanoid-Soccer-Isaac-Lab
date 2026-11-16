@@ -53,13 +53,16 @@ def main() -> int:
     # must act as the old one did.
     old_state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     old, new = old_state["actor_state_dict"], saved["actor_state_dict"]
-    x = torch.randn(64, before)
-    wide = torch.cat([x, torch.randn(64, args.actor)], dim=-1)
+    # In double precision: in single, the sums over thousands of normalised inputs differ in
+    # their last bits with the summation order alone.
+    x = torch.randn(64, before, dtype=torch.float64)
+    wide = torch.cat([x, torch.randn(64, args.actor, dtype=torch.float64)], dim=-1)
 
     def first_layer(state: dict, inputs: torch.Tensor) -> torch.Tensor:
-        mean, std = state["obs_normalizer._mean"], state["obs_normalizer._std"]
+        mean = state["obs_normalizer._mean"].double()
+        std = state["obs_normalizer._std"].double()
         normalised = (inputs - mean) / (std + 1e-2)
-        return normalised @ state["mlp.0.weight"].T + state["mlp.0.bias"]
+        return normalised @ state["mlp.0.weight"].double().T + state["mlp.0.bias"].double()
 
     error = float((first_layer(old, x) - first_layer(new, wide)).abs().max())
     if error > 1e-5:

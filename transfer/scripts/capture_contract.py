@@ -12,6 +12,8 @@ step; a second body has no teacher. This capture needs only a contract task
 * the body's units, so speeds compare across bodies in ``V = sqrt(g L)``;
 * ``encoder_input``: what the body's encoder reads, to fit one
   (``train_body_encoder.py``);
+* with ``--joints``, the joint angles and speeds and the projected gravity; with
+  ``--policy-obs``, the tracker's observation (both before each step);
 * with ``--procedural-fraction`` or ``--gait-probes``, plans from the
   point-mass biped instead of the task (``transfer/latent/procedural.py``):
   per step which envs follow it (``procedural``), and whether their biped has
@@ -117,6 +119,17 @@ parser.add_argument(
     help="Robustness probe on the deployed path: noise on the estimate, in multiples of the "
     "estimator's precision.",
 )
+parser.add_argument(
+    "--joints",
+    action="store_true",
+    help="Also record the joint angles and speeds and the projected gravity before each step "
+    "(what the PACT anchors and encoder read).",
+)
+parser.add_argument(
+    "--policy-obs",
+    action="store_true",
+    help="Also record the tracker's observation before each step (distillation data).",
+)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--output", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
@@ -209,6 +222,10 @@ def main() -> int:
         "encoder_input", "procedural", "biped_fallen", "biped_recovering", "estimate",
         "balance", "biped_phase", "plan_gain",
     )  # fmt: skip
+    if args_cli.joints:
+        keys += ("joint_pos", "joint_vel", "projected_gravity")
+    if args_cli.policy_obs:
+        keys += ("policy_obs",)
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
     for _ in range(args_cli.steps):
@@ -237,6 +254,12 @@ def main() -> int:
         record["biped_phase"].append(phase if biped is None else biped.phase.cpu().numpy())
         # How far each env's plan is trusted (1 everywhere without the command's plan_trust).
         record["plan_gain"].append(term.plan_gain()[:, 0].cpu().numpy())
+        if args_cli.joints:
+            record["joint_pos"].append(robot.data.joint_pos.cpu().numpy())
+            record["joint_vel"].append(robot.data.joint_vel.cpu().numpy())
+            record["projected_gravity"].append(robot.data.projected_gravity_b.cpu().numpy())
+        if args_cli.policy_obs:
+            record["policy_obs"].append(obs["policy"].cpu().numpy())
         with torch.inference_mode():
             action = driver(obs["policy"])
         record["action_executed"].append(action.cpu().numpy())

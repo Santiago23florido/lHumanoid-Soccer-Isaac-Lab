@@ -14,6 +14,8 @@ step; a second body has no teacher. This capture needs only a contract task
   (``train_body_encoder.py``);
 * with ``--joints``, the joint angles and speeds and the projected gravity; with
   ``--policy-obs``, the tracker's observation (both before each step);
+* with ``--replay-plans``, fixed plans every body follows alike: per step each env's
+  instant along its chain (``replay_clock``), and its chain (``replay_chain``);
 * with ``--procedural-fraction`` or ``--gait-probes``, plans from the
   point-mass biped instead of the task (``transfer/latent/procedural.py``):
   per step which envs follow it (``procedural``), and whether their biped has
@@ -103,6 +105,13 @@ parser.add_argument(
 )
 parser.add_argument("--procedural-seed", type=int, default=0)
 parser.add_argument(
+    "--replay-plans",
+    type=Path,
+    default=None,
+    help="A replay file (latent/replay.py): env i follows chain i %% K, the same on every body.",
+)
+parser.add_argument("--replay-spacing", type=float, default=None)
+parser.add_argument(
     "--push",
     type=float,
     nargs=2,
@@ -175,6 +184,10 @@ def main() -> int:
         probes = json.loads(args_cli.gait_probes.read_text(encoding="utf-8"))
         command_cfg.procedural_probes = probes
     command_cfg.procedural_seed = args_cli.procedural_seed
+    if args_cli.replay_plans is not None:
+        command_cfg.replay_plans = str(args_cli.replay_plans)
+    if args_cli.replay_spacing is not None:
+        command_cfg.replay_spacing = args_cli.replay_spacing
     if args_cli.estimate_noise is not None:
         command_cfg.estimate_noise = args_cli.estimate_noise
     if args_cli.push is not None:
@@ -226,6 +239,9 @@ def main() -> int:
         keys += ("joint_pos", "joint_vel", "projected_gravity")
     if args_cli.policy_obs:
         keys += ("policy_obs",)
+    replay = getattr(term, "replay", None)
+    if replay is not None:
+        keys += ("replay_clock",)
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
     for _ in range(args_cli.steps):
@@ -260,6 +276,9 @@ def main() -> int:
             record["projected_gravity"].append(robot.data.projected_gravity_b.cpu().numpy())
         if args_cli.policy_obs:
             record["policy_obs"].append(obs["policy"].cpu().numpy())
+        if replay is not None:
+            # The instant of the chain this row's state is paired at (body times).
+            record["replay_clock"].append(term.replay_clock.cpu().numpy())
         with torch.inference_mode():
             action = driver(obs["policy"])
         record["action_executed"].append(action.cpu().numpy())
@@ -283,6 +302,9 @@ def main() -> int:
         for k, v in record.items()
     }
     units = term.units
+    if replay is not None:
+        arrays["replay_chain"] = term.replay_chain.cpu().numpy()
+        arrays["replay_file"] = np.array(str(args_cli.replay_plans))
     if probes is not None:
         arrays["probe_index"] = term.probe_index.cpu().numpy()
         arrays["probes"] = np.array(json.dumps(probes))

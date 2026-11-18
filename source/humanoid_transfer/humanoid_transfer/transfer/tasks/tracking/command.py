@@ -53,6 +53,7 @@ from ...latent.memory import TimeGrid
 from ...latent.plan_contact import PLAN_CONTACTS, apply_plan_contact
 from ...latent.plan_trust import PlanTrust, smooth_noise, sway
 from ...latent.procedural import GaitRanges, PointMassBiped
+from ...latent.replay import ReplayChains, load_replay, replay_starts
 from ...latent.resampling import RESAMPLE_SPACES, plan_interpolation, resample_rows
 from ...latent.skill_torch import BodyConstants, proprioceptive_skill_state, skill_state
 from ...latent.units import change_of_units, tracker_view
@@ -263,6 +264,21 @@ class ReferenceCommand(UniformVelocityCommand):
             self.trust = PlanTrust(2, length, size, cfg.trust_rate, self.device)
         self.sway_amplitude = torch.zeros(n, 2, device=self.device)
         """Each procedural episode's trunk sway, pitch and roll, radians."""
+        self.replay: ReplayChains | None = None
+        """With ``replay_plans``: the fixed chains every env follows (``latent/replay.py``)."""
+        if cfg.replay_plans:
+            if cfg.tasks or self.biped is not None or self.trust is not None:
+                raise ValueError("replay_plans excludes tasks, procedural plans and plan trust")
+            self.replay = load_replay(cfg.replay_plans, generator.skill_norm, self.device)
+            if abs(self.replay.grid_step - grid_step) > _TOLERANCE:
+                raise ValueError(f"{cfg.replay_plans}: not on the contract's grid")
+            span = (self.interpolation.shape[1] - 1) * self.dt_star
+            self.replay_chain = torch.arange(n, device=self.device) % self.replay.count
+            self.replay_start = replay_starts(n, self.replay.count, span, cfg.replay_spacing).to(
+                self.device
+            )
+            self.replay_clock = self.replay_start.clone()
+            """Each env's instant along its chain, in body times: what pairs bodies."""
 
     def __str__(self) -> str:
         return (
@@ -535,6 +551,12 @@ class ReferenceCommand(UniformVelocityCommand):
         self.vel_command_b[ids] = windows["command"][t, n] / self.command_scale
         self.is_standing_env[ids] = windows["command"][t, n].norm(dim=-1) == 0
         heading = window[:, -1, _VX : _VX + 2] * self.units.velocity
+        self._write_heading_velocity(ids, heading)
+        self.needs_refill[ids] = False
+        self.replan[ids] = True
+
+    def _write_heading_velocity(self, ids: torch.Tensor, heading: torch.Tensor) -> None:
+        """Give the bases in ``ids`` a horizontal velocity given in their heading frame (m/s)."""
         # The root pose the reset just wrote; body poses are only refreshed by a step.
         w, x, y, z = self.robot.data.root_quat_w[ids].unbind(-1)
         yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
@@ -543,8 +565,40 @@ class ReferenceCommand(UniformVelocityCommand):
         velocity[:, 0] = c * heading[:, 0] - s * heading[:, 1]
         velocity[:, 1] = s * heading[:, 0] + c * heading[:, 1]
         self.robot.write_root_velocity_to_sim(velocity, env_ids=ids)
+
+    def _start_from_replay(self, ids: torch.Tensor) -> None:
+        """Start each env in ``ids`` at its replay's first instant, as
+        :meth:`_start_from_contract` starts one inside the task's motion: the history is the
+        chain's window there, the command the chain's, the base given the chain's CoM velocity
+        in this body's units, the joints left in the default pose."""
+        replay, chain, start = self.replay, self.replay_chain[ids], self.replay_start[ids]
+        window = replay.window(chain, start, self.interpolation.shape[1], self.dt_star)
+        self.history[ids] = window
+        self.physical[ids] = window
+        self.replay_clock[ids] = start
+        command = replay.command[chain]
+        self.vel_command_b[ids] = command / self.command_scale
+        self.is_standing_env[ids] = command.norm(dim=-1) == 0
+        physical = self.generator.skill_norm.inverse(window[:, -1])
+        self._write_heading_velocity(ids, physical[:, _VX : _VX + 2] * self.units.velocity)
         self.needs_refill[ids] = False
         self.replan[ids] = True
+
+    def _replay_plan(self, ids: torch.Tensor, space: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """The replayed chain at each env's next instants, and what it integrates to.
+
+        The rows are read straight from the chain at the body's instants (``latent/replay.py``:
+        not through the plan matrix), so every body is handed the same row at the same
+        instant; the integrals sum those rows over the body's step. ``space`` does not apply:
+        the chain is read linearly in the contract's normalised units.
+        """
+        del space
+        generator = self.generator
+        chain, now = self.replay_chain[ids], self.replay_clock[ids]
+        rows = self.replay.ahead(chain, now, self.plan.shape[1], self.dt_star)
+        rows = apply_plan_contact(rows, generator.skill_norm, self.cfg.plan_contact)
+        integrals = plan_integrals(generator.skill_norm.inverse(rows), self.dt_star)
+        return rows, integrals
 
     def _start_from_demonstrations(self, ids: torch.Tensor, starts: dict | None = None) -> None:
         """Reference state initialisation (Peng et al., 2018) on the contract.
@@ -778,7 +832,9 @@ class ReferenceCommand(UniformVelocityCommand):
         space = self.resample_space
         window = resample_rows(self.generator, self.interpolation, self.history[ids], space)
         command = self.vel_command_b[ids] * self.command_scale
-        if self.tasks is not None:
+        if self.replay is not None:
+            rows, integrals = self._replay_plan(ids, space)
+        elif self.tasks is not None:
             rows, integrals = self._draw_tasks(ids, window, command, space)
         else:
             noise = torch.randn(len(ids), self.generator.noise_size, device=self.device)
@@ -880,6 +936,9 @@ class ReferenceCommand(UniformVelocityCommand):
                 amplitude = torch.rand(len(every), 2, device=self.device)
                 sign = torch.where(torch.rand(len(every), 2, device=self.device) < 0.5, -1.0, 1.0)
                 self.sway_amplitude[every] = self.cfg.procedural_sway * amplitude * sign
+        if self.replay is not None:
+            self._start_from_replay(every)
+            return extras
         task = every[~self.procedural[every]]
         if self.tasks is not None:
             self._reset_tasks(every, task)
@@ -943,6 +1002,8 @@ class ReferenceCommand(UniformVelocityCommand):
         super()._update_command()
         if self.tasks is not None:
             self._task_headings()
+        if self.replay is not None:
+            self.vel_command_b[:] = self.replay.command[self.replay_chain] / self.command_scale
         self._true_now = self.true_skill()
         self._frame_now = self.frame()
         estimate = self._estimate()
@@ -989,6 +1050,10 @@ class ReferenceCommand(UniformVelocityCommand):
             self.history = self.physical.clone()
             anchor = torch.ones_like(refill)
         self.age = torch.where(carried, self.age + 1, self.age)
+        if self.replay is not None:
+            self.replay_clock = torch.where(
+                carried, self.replay_clock + self.dt_star, self.replay_clock
+            )
         self.anchored = torch.where(carried, self.anchored + 1, self.anchored)
         draw = refill | (carried & (self.replan | (self.age >= self.commit_env)))
         ids = draw.nonzero().squeeze(-1)
@@ -1236,6 +1301,16 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     task_weights: list[float] | None = None
     """Relative weight of each task, task 0 first; uniform by default."""
+
+    replay_plans: str | None = None
+    """A replay file (``latent/replay.py``): env ``i`` follows chain ``i % K`` of fixed plans
+    from a fixed instant, the same on every body, so states pair across bodies by (chain,
+    instant): co-executions. Every episode starts inside its chain (the history its window
+    there, the base its CoM velocity). Excludes ``tasks``, procedural plans and
+    ``plan_trust``."""
+
+    replay_spacing: float = 0.0
+    """Envs sharing a chain (``i // K``) start this many body times apart along it."""
 
 
 OCTAVES = tuple(2.0**j for j in range(8))

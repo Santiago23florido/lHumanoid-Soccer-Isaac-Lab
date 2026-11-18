@@ -388,14 +388,15 @@ class DriveLoads(torch.nn.Module):
         action: torch.Tensor | None = None,
         target: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        """``loads (N, 2)`` in ``m g``; ``force (N, 2, 3)`` in the base frame, newtons.
+        """``loads (N, 2)`` in ``m g``; ``force`` and ``moment`` ``(N, 2, 3)``, the ground's
+        wrench at each sole point in the base frame (N, N m).
 
         ``target``: each joint's PD target as the drives hold it when the state is read
         (the previous action's); or ``action``, the action that set them.
         """
         statics = self.balance(joint_pos, gravity_b)
         tau = self.torque(joint_pos, joint_vel, action, target)
-        forces, loads = [], []
+        forces, moments, loads = [], [], []
         for f in range(statics["wrench_map"].shape[1]):
             a_matrix = statics["wrench_map"][:, f]  # (N, J, 6)
             b = -(tau + statics["gravity_tau"]) * self.on_chain[f][None, :]
@@ -414,6 +415,11 @@ class DriveLoads(torch.nn.Module):
             wrench = torch.linalg.solve(gram + reg, a_matrix.transpose(1, 2) @ b[..., None])
             force = wrench[:, :3, 0]
             forces.append(force)
+            moments.append(wrench[:, 3:, 0])
             weight = 9.81 * self.anchors.mass.sum()
             loads.append(-(force * statics["down"]).sum(-1) / weight)
-        return {"loads": torch.stack(loads, -1), "force": torch.stack(forces, 1)}
+        return {
+            "loads": torch.stack(loads, -1),
+            "force": torch.stack(forces, 1),
+            "moment": torch.stack(moments, 1),
+        }

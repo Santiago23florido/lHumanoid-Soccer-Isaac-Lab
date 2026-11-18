@@ -111,6 +111,13 @@ def main() -> int:
     parser.add_argument("--history", type=int, default=4)
     parser.add_argument("--width", type=int, default=128)
     parser.add_argument("--steps", type=int, default=6000)
+    parser.add_argument(
+        "--mlp-steps",
+        type=int,
+        default=None,
+        help="Steps of each per-body MLP (default --steps). --steps 24000 --mlp-steps 6000 gives "
+        "both the same samples per body with four bodies.",
+    )
     parser.add_argument("--batch", type=int, default=512)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--seed", type=int, default=0)
@@ -225,13 +232,14 @@ def main() -> int:
             inputs = w.joint_obs.shape[1] * args.history * 2 + args.history * 6
             mlp = per_body_mlp(inputs).to(device)
             opt = torch.optim.AdamW(mlp.parameters(), lr=1e-3, weight_decay=1e-4)
-            sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.steps)
+            mlp_steps = args.mlp_steps or args.steps
+            sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, mlp_steps)
             n_joints = w.joint_obs.shape[1]
 
             def flat(obs, imu, n=n_joints):
                 return torch.cat([obs[:, :n].flatten(1), imu.flatten(1)], dim=1)
 
-            for _ in range(args.steps):
+            for _ in range(mlp_steps):
                 obs, imu, target = tensors(i, rng.choice(train_rows[i], args.batch))
                 loss = (mlp(flat(obs, imu)) - target).square().mean()
                 opt.zero_grad(set_to_none=True)

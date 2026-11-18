@@ -3,8 +3,11 @@
 # procedural family (transfer/probes/gait_probes.json, 71 probes, 3 envs each), recorded with
 # the joints and the tracker's observation (capture_contract.py --joints --policy-obs). The
 # probes are dimensionless, so (probe, biped phase) pairs states across bodies by construction.
-# The same captures score each tracker's competence (evaluate_competence.py); the new bodies'
-# trackers are also scored on the random schedules of training (l1) and the family's corners.
+# The same captures score each tracker's competence (evaluate_competence.py). Then every body
+# replays the same fixed plans of the base tasks (logs/pact/replays/base_tasks.npz, made by
+# pact_make_replays.py; env i follows chain i, paired by (chain, replay_clock)), recorded the
+# same way. Last, the new bodies' trackers are also scored on the random schedules of training
+# (l1) and the family's corners.
 #
 #   PACT_ROOT=<repo> bash <snapshot copy> ["h1 cassie g1 nao"] [status file to wait for "done"]
 #
@@ -69,10 +72,12 @@ score() {  # score <body> <stage> <suffix>
     && note "$body $stage scored: $result" || note "$body $stage: scoring FAILED"
 }
 
-note "start bodies=$bodies"
-for body in $bodies; do
+replay=logs/pact/replays/base_tasks.npz
+replay_envs="$("$python" -c "import numpy, sys; print(numpy.load(sys.argv[1])['command'].shape[0])" "$replay" 2>/dev/null)"
+
+setup() {  # setup <body>: sets run, checkpoint, task, policy and the body's contract
   unset HUMANOID_POSTURE_CONTRACT HUMANOID_OBSERVE_UNITS HUMANOID_TASKS HUMANOID_PROCEDURAL
-  case "$body" in
+  case "$1" in
     g1)
       run=logs/rsl_rl/g1_track/2026-11-08_18-22-20_xs_g1_s41 checkpoint=model_7193
       task=G1Track-Play-v0
@@ -85,25 +90,36 @@ for body in $bodies; do
       export HUMANOID_POSTURE_CONTRACT="$HUMANOID_CONTRACT"
       ;;
     h1 | cassie)
-      run="$(latest_run "logs/rsl_rl/${body}_track" "pact_${body}_s41")"
-      if [ -z "$run" ]; then note "$body: no tracker run, skipped"; continue; fi
+      run="$(latest_run "logs/rsl_rl/${1}_track" "pact_${1}_s41")"
+      if [ -z "$run" ]; then note "$1: no tracker run, skipped"; return 1; fi
       checkpoint="$(latest_checkpoint "$run")"
-      task="$(echo "${body:0:1}" | tr a-z A-Z)${body:1}Track-Play-v0"
+      task="$(echo "${1:0:1}" | tr a-z A-Z)${1:1}Track-Play-v0"
       export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt" HUMANOID_LOAD_SPACE=log
       ;;
-    *) note "$body: unknown body, skipped"; continue ;;
+    *) note "$1: unknown body, skipped"; return 1 ;;
   esac
   "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt" > /dev/null \
-    || { note "$body: export FAILED ($run/$checkpoint.pt)"; continue; }
+    || { note "$1: export FAILED ($run/$checkpoint.pt)"; return 1; }
   policy="$run/exported/$checkpoint.pt"
+}
+
+note "start bodies=$bodies (replay: ${replay_envs:-none} chains)"
+for body in $bodies; do
+  setup "$body" || continue
   note "$body: $policy on $task"
   capture "$body" map "$task" "$policy" --num-envs 213 --joints --policy-obs \
     --gait-probes transfer/probes/gait_probes.json && score "$body" map ""
-  if [ "$body" = h1 ] || [ "$body" = cassie ]; then
-    capture "$body" random "$task" "$policy" --num-envs 128 --procedural-fraction 1 \
-      && score "$body" random _random
-    capture "$body" corners "$task" "$policy" --num-envs 108 \
-      --gait-probes transfer/probes/corner_probes.json && score "$body" corners _corners
+  if [ -n "$replay_envs" ]; then
+    capture "$body" replay "$task" "$policy" --num-envs "$replay_envs" --joints --policy-obs \
+      --replay-plans "$replay" && score "$body" replay _replay
   fi
+done
+for body in $bodies; do
+  if [ "$body" != h1 ] && [ "$body" != cassie ]; then continue; fi
+  setup "$body" || continue
+  capture "$body" random "$task" "$policy" --num-envs 128 --procedural-fraction 1 \
+    && score "$body" random _random
+  capture "$body" corners "$task" "$policy" --num-envs 108 \
+    --gait-probes transfer/probes/corner_probes.json && score "$body" corners _corners
 done
 note "done"

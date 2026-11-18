@@ -26,7 +26,8 @@ if [ -f transfer/bodies/cassie/mirror.json ]; then
   note "cassie mirror measured"
   # the trackers' queue rewrites its own status; start a fresh run of it for Cassie
   mv logs/pact/train_trackers.status "logs/pact/train_trackers_h1.status"
-  bash transfer/scripts/pact_train_trackers.sh cassie 3000 41
+  cp transfer/scripts/pact_train_trackers.sh logs/pact/.train_trackers.run.sh
+  PACT_ROOT="$root" bash logs/pact/.train_trackers.run.sh cassie 3000 41
   note "cassie: $(tail -2 logs/pact/train_trackers.status | head -1)"
 else
   note "cassie mirror FAILED, see logs/pact/mirror_cassie.log"

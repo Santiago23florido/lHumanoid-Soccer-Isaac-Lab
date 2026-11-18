@@ -11,8 +11,9 @@ run on; this only pulls them in.
 
 from __future__ import annotations
 
+from . import bodies as body_tasks  # noqa: F401
 from .g1 import tasks as g1_tasks  # noqa: F401
 from .nao import tasks as nao_tasks  # noqa: F401
 from .soccer import tasks as soccer_tasks  # noqa: F401
 
-__all__ = ["g1_tasks", "nao_tasks", "soccer_tasks"]
+__all__ = ["body_tasks", "g1_tasks", "nao_tasks", "soccer_tasks"]

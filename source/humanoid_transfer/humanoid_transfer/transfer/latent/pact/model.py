@@ -83,6 +83,9 @@ class PactDims:
     contacts: int = 2
     plan_steps: int = 8
     max_distance: int = 16
+    anchor_inputs: bool = False
+    """Entity queries also read the analytic anchors (:mod:`.anchors`): the centroid its
+    13 fields, each contact its 7, with what is not known exactly set to zero."""
 
 
 @dataclass
@@ -277,6 +280,9 @@ class StateEncoder(nn.Module):
         self.contact_query = nn.Parameter(torch.randn(1, w) * 0.02)
         self.contact_from_joint = nn.Linear(w, w)
         self.free_queries = nn.Parameter(torch.randn(dims.free_tokens, w) * 0.02)
+        if dims.anchor_inputs:
+            self.centroid_anchor = nn.Linear(CENTROID_SIZE, w)
+            self.contact_anchor = nn.Linear(CONTACT_SIZE, w)
         self.cross = nn.ModuleList(
             Block(w, dims.heads, dims.ff_mult, cross=True) for _ in range(dims.cross_layers)
         )
@@ -293,8 +299,10 @@ class StateEncoder(nn.Module):
         embodiment: torch.Tensor,
         joint_obs: torch.Tensor,
         imu: torch.Tensor,
+        anchors: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> dict[str, torch.Tensor]:
-        """``joint_obs (B, J, history, observation)``, ``imu (B, history, imu)``.
+        """``joint_obs (B, J, history, observation)``, ``imu (B, history, imu)``; with
+        ``dims.anchor_inputs``, ``anchors = (centroid (B, 13), contacts (B, contacts, 7))``.
 
         Returns the entity tokens ``latent (B, 1 + contacts + free, W)`` and their
         anchored readouts ``centroid (B, 13)`` and ``contacts (B, contacts, 7)``.
@@ -312,9 +320,15 @@ class StateEncoder(nn.Module):
         contact = self.contact_query + self.contact_from_joint(
             _gather(joints, bodies.contact_joint)
         )
+        centroid = self.centroid_query.expand(batch, -1, -1)
+        if self.dims.anchor_inputs:
+            if anchors is None:
+                raise ValueError("this encoder reads the analytic anchors: pass them")
+            centroid = centroid + self.centroid_anchor(anchors[0])[:, None]
+            contact = contact + self.contact_anchor(anchors[1])
         queries = torch.cat(
             [
-                self.centroid_query.expand(batch, -1, -1),
+                centroid,
                 contact,
                 self.free_queries.expand(batch, -1, -1),
             ],

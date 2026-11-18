@@ -42,9 +42,17 @@ parser.add_argument(
     "--prefix",
     nargs=2,
     action="append",
-    required=True,
+    default=[],
     metavar=("LEFT", "RIGHT"),
     help="A pair of name prefixes naming a body's two sides; repeat for several.",
+)
+parser.add_argument(
+    "--suffix",
+    nargs=2,
+    action="append",
+    default=[],
+    metavar=("LEFT", "RIGHT"),
+    help="A pair of name suffixes (Cassie's hip_flexion_left); tried after the prefixes.",
 )
 parser.add_argument("--delta", type=float, default=0.1, help="Joint move, radians.")
 parser.add_argument("--max-joints", type=int, default=40)
@@ -69,13 +77,21 @@ import torch
 import humanoid_transfer.tasks  # noqa: F401
 
 
-def partner(name: str, prefixes: list[tuple[str, str]]) -> str:
-    """The name of the other side's part: a side's prefix swapped, or itself on the midline."""
+def partner(
+    name: str, prefixes: list[tuple[str, str]], suffixes: list[tuple[str, str]] = ()
+) -> str:
+    """The name of the other side's part: a side's prefix (or suffix) swapped, or itself on
+    the midline."""
     for left, right in prefixes:
         if name.startswith(left):
             return right + name[len(left) :]
         if name.startswith(right):
             return left + name[len(right) :]
+    for left, right in suffixes:
+        if name.endswith(left):
+            return name[: -len(left)] + right
+        if name.endswith(right):
+            return name[: -len(right)] + left
     return name
 
 
@@ -83,6 +99,9 @@ def main() -> int:
     from isaaclab_tasks.utils import parse_env_cfg
 
     prefixes = [tuple(p) for p in args_cli.prefix]
+    suffixes = [tuple(s) for s in args_cli.suffix]
+    if not prefixes and not suffixes:
+        raise SystemExit("give at least one --prefix or --suffix pair")
     # One environment per move; a simulation app holds one environment, so it is made
     # with room for any humanoid's joints and the first 1 + 2 * joints are used.
     cfg = parse_env_cfg(args_cli.task_id, num_envs=1 + 2 * args_cli.max_joints)
@@ -96,13 +115,13 @@ def main() -> int:
         raise ValueError(f"{len(joints)} joints: raise --max-joints")
     n = inner.num_envs
     links = list(robot.data.body_names)
-    joint_partner = [joints.index(partner(j, prefixes)) for j in joints]
+    joint_partner = [joints.index(partner(j, prefixes, suffixes)) for j in joints]
     # A link whose name has no partner (a merged frame named for one side only) is left
     # out of the comparison and reported, rather than paired with the wrong one.
-    keep = [i for i, b in enumerate(links) if partner(b, prefixes) in links]
+    keep = [i for i, b in enumerate(links) if partner(b, prefixes, suffixes) in links]
     unpaired = [b for i, b in enumerate(links) if i not in keep]
     slot = {i: k for k, i in enumerate(keep)}
-    link_partner = [slot[links.index(partner(links[i], prefixes))] for i in keep]
+    link_partner = [slot[links.index(partner(links[i], prefixes, suffixes))] for i in keep]
 
     default = robot.data.default_joint_pos[:1].clone()
     position = default.expand(n, -1).clone()

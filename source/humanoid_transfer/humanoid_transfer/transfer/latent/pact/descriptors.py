@@ -251,3 +251,13 @@ def describe(card: dict[str, Any], *, leg_length: float | None = None) -> BodyDe
         leg_length=length,
         mass=mass,
     )
+
+
+def contact_joints(card: dict[str, Any]) -> list[int]:
+    """Per foot (card order: left, right), the joint whose child link is that foot."""
+    child = {row["child_link"]: row["joint"] for row in card["joint_geometry"]}
+    names = list(card["joints"]["names"])
+    missing = [foot for foot in card["foot_bodies"] if foot not in child]
+    if missing:
+        raise KeyError(f"no joint moves the feet {missing} directly")
+    return [names.index(child[foot]) for foot in card["foot_bodies"]]

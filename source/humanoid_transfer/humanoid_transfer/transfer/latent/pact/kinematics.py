@@ -119,3 +119,55 @@ class CardKinematics:
 
     def com_height_above_soles(self, q: np.ndarray) -> float:
         return float(self.com(q)[2] - self.soles(q)[:, 2].min())
+
+
+def sagittal_crouch(
+    card: dict[str, Any],
+    chains: list[tuple[str, str, str]],
+    target: float,
+    leg_length: float | None = None,
+    kinematics: CardKinematics | None = None,
+) -> dict[str, float]:
+    """Joint angles that lower the CoM to ``target`` leg lengths above the soles.
+
+    Each ``(hip, knee, ankle)`` pitch chain bends with hip and ankle at minus half the
+    knee about parallel axes, which keeps the torso upright and the foot flat (the
+    rule the NAO's crouch follows). The other joints stay at the card's default. The
+    knee angle is found by bisection within every joint's limits.
+    """
+    kinematics = kinematics or CardKinematics(card)
+    length = float(leg_length or card["leg_length"])
+    names = kinematics.joint_names
+    limits = np.asarray(card["joints"]["pos_limits"], dtype=float)
+    sign = {
+        name: float(np.sign(kinematics.axis[names.index(name)][1])) for c in chains for name in c
+    }
+
+    def pose(knee: float) -> np.ndarray:
+        q = kinematics.default.copy()
+        for hip_name, knee_name, ankle_name in chains:
+            bend = knee * sign[knee_name]
+            q[names.index(knee_name)] = knee
+            q[names.index(hip_name)] = -bend / 2 * sign[hip_name]
+            q[names.index(ankle_name)] = -bend / 2 * sign[ankle_name]
+        return q
+
+    def feasible(knee: float) -> bool:
+        q = pose(knee)
+        return bool(np.all((q >= limits[:, 0] - 1e-9) & (q <= limits[:, 1] + 1e-9)))
+
+    def height(knee: float) -> float:
+        return kinematics.com_height_above_soles(pose(knee)) / length
+
+    low, high = 0.0, 0.0
+    while feasible(high + 0.01) and high < np.pi:
+        high += 0.01
+    if height(low) < target or height(high) > target:
+        raise ValueError(
+            f"target {target:.3f} L is outside the reachable {height(high):.3f}-{height(low):.3f} L"
+        )
+    for _ in range(50):
+        middle = (low + high) / 2
+        low, high = (middle, high) if height(middle) > target else (low, middle)
+    q = pose((low + high) / 2)
+    return {name: float(q[names.index(name)]) for c in chains for name in c}

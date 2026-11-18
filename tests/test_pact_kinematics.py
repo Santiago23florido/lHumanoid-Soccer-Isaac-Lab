@@ -42,3 +42,40 @@ def test_the_default_pose_matches_the_simulator(body):
     assert kinematics.com_height_above_soles(q) == pytest.approx(
         measured["com_height_above_soles"], abs=2e-4
     )
+
+
+@pytest.mark.parametrize(
+    "body, chains",
+    [
+        (
+            "h1",
+            [
+                ("left_hip_pitch", "left_knee", "left_ankle"),
+                ("right_hip_pitch", "right_knee", "right_ankle"),
+            ],
+        ),
+        (
+            "g1",
+            [
+                ("left_hip_pitch_joint", "left_knee_joint", "left_ankle_pitch_joint"),
+                ("right_hip_pitch_joint", "right_knee_joint", "right_ankle_pitch_joint"),
+            ],
+        ),
+    ],
+)
+def test_a_crouch_reaches_its_height_with_flat_feet(body, chains):
+    from humanoid_transfer.transfer.latent.pact.kinematics import sagittal_crouch
+
+    card = _card(body)
+    kinematics = CardKinematics(card)
+    angles = sagittal_crouch(card, chains, target=0.95, kinematics=kinematics)
+    q = kinematics.default.copy()
+    for name, value in angles.items():
+        q[kinematics.joint_names.index(name)] = value
+    assert kinematics.com_height_above_soles(q) / card["leg_length"] == pytest.approx(
+        0.95, abs=1e-6
+    )
+    for foot in kinematics.feet:
+        bent = kinematics.motions(q)[foot][:3, :3] @ kinematics.link_rot0[foot]
+        # the sole is as flat as in the zero pose (the default pose tilts it 0.01 rad)
+        np.testing.assert_allclose(bent[:, 2], kinematics.link_rot0[foot][:, 2], atol=1e-6)

@@ -5,7 +5,8 @@ velocity task (Isaac Lab's, or the NAO oracle's ``NaoVelocity*``) has none, so h
 ``z*`` comes from the same GPU transcription
 (:func:`~humanoid_transfer.transfer.latent.skill_torch.skill_state`) with the body
 described as the contract tasks describe it: its masses and inertias from PhysX, its
-sole points from the body's own record (``g1/body/body_card.json``; the NAO's URDF).
+sole points from the body's own record (``g1/body/body_card.json``; the NAO's URDF;
+for any other body, its card in ``transfer/bodies/``).
 
 The archive has what the L4 verdict reads -- ``skill_state``, ``done``, ``terminated``,
 ``command``, the body's units and control step -- so an oracle is scored against the
@@ -43,7 +44,13 @@ parser = argparse.ArgumentParser(description="Capture a velocity policy on any b
 parser.add_argument(
     "--task-id", required=True, help="A velocity task, e.g. NaoVelocityFlat-Play-v0."
 )
-parser.add_argument("--body", choices=("g1", "nao"), required=True)
+_REGISTRY = json.loads((_REPO_ROOT / "transfer" / "bodies" / "bodies.json").read_text("utf-8"))
+parser.add_argument(
+    "--body",
+    choices=sorted(k for k in _REGISTRY if not k.startswith("$")),
+    required=True,
+    help="g1 and nao as before; any other registered body from its measured card.",
+)
 parser.add_argument("--driver-policy", type=Path, required=True, help="TorchScript policy.")
 which = parser.add_mutually_exclusive_group(required=True)
 which.add_argument("--command", type=float, nargs=3, metavar=("VX", "VY", "WZ"))
@@ -57,6 +64,12 @@ parser.add_argument("--steps", type=int, default=900)
 parser.add_argument("--settle-steps", type=int, default=100)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--output", type=Path, required=True)
+parser.add_argument(
+    "--joints",
+    action="store_true",
+    help="Also record joint positions and velocities and the base's projected gravity, "
+    "before each step (what a multi-body encoder reads).",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 app_launcher = AppLauncher(args_cli)
@@ -84,6 +97,16 @@ def body_record(body: str) -> tuple[str, list[str], list[list[float]], float]:
             feet,
             [card["foot"][f]["sole_point_link"] for f in feet],
             card["leg_length"],
+        )
+    if body != "nao":
+        entry = _REGISTRY[body]
+        card = json.loads((_REPO_ROOT / entry["card"]).read_text("utf-8"))
+        feet = list(entry["foot_bodies"])
+        return (
+            entry["base_body"],
+            feet,
+            [card["foot"][f]["sole_point_link"] for f in feet],
+            entry.get("leg_length_unit", card["leg_length"]),
         )
     from humanoid_transfer.nao.assets import nao_kinematics as nk
     from humanoid_transfer.nao.tasks.nao_track.nao_track_env_cfg import sole_points
@@ -175,6 +198,8 @@ def main() -> int:
         "skill_state", "command", "action_executed", "base_lin_vel", "base_ang_vel",
         "base_quat", "base_pos", "done", "terminated",
     )  # fmt: skip
+    if args_cli.joints:
+        keys = (*keys, "joint_pos", "joint_vel", "projected_gravity")
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
     for _ in range(args_cli.steps):
@@ -184,6 +209,10 @@ def main() -> int:
         record["base_ang_vel"].append(robot.data.root_ang_vel_b.cpu().numpy())
         record["base_quat"].append(robot.data.root_quat_w.cpu().numpy())
         record["base_pos"].append((robot.data.root_pos_w - origins).cpu().numpy())
+        if args_cli.joints:
+            record["joint_pos"].append(robot.data.joint_pos.cpu().numpy())
+            record["joint_vel"].append(robot.data.joint_vel.cpu().numpy())
+            record["projected_gravity"].append(robot.data.projected_gravity_b.cpu().numpy())
         with torch.inference_mode():
             action = act(obs)
         record["action_executed"].append(action.cpu().numpy())
@@ -206,6 +235,7 @@ def main() -> int:
         leg_length=np.float64(units.length),
         total_mass=np.float64(units.mass),
         task=np.array(args_cli.task_id),
+        body=np.array(args_cli.body),
         driver=np.array(str(args_cli.driver_policy)),
         seed=np.int64(args_cli.seed),
         settle_steps=np.int64(args_cli.settle_steps),

@@ -155,15 +155,11 @@ class KinematicAnchors(torch.nn.Module):
         eye = torch.eye(3, device=axis.device, dtype=axis.dtype).expand_as(k)
         return eye + s * k + (1 - c) * (k @ k)
 
-    def forward(
-        self,
-        joint_pos: torch.Tensor,
-        joint_vel: torch.Tensor,
-        gravity_b: torch.Tensor,
-        ang_vel_b: torch.Tensor,
-    ) -> dict[str, torch.Tensor]:
-        """Dimensionless fields; ``foot_velocity_relative`` is each sole's velocity minus
-        the centre of mass's, in the heading frame (add the CoM velocity for ``z*``'s)."""
+    def chain(self, joint_pos: torch.Tensor, joint_vel: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Forward kinematics in the base frame: per link its motion from the zero pose
+        (``rot``, ``trans``), its angular velocity relative to the base (``omega``) and the
+        velocity of the base-frame origin attached to it (``v0``); per joint its axis and a
+        point on it in the current pose (``axis``, ``origin``, ``(N, J, 3)``)."""
         n = joint_pos.shape[0]
         device, dtype = joint_pos.device, joint_pos.dtype
         links = len(self.parent)
@@ -173,6 +169,8 @@ class KinematicAnchors(torch.nn.Module):
         v0 = [None] * links  # velocity of the base-frame origin as if attached to the link
         eye = torch.eye(3, device=device, dtype=dtype).expand(n, 3, 3)
         zero3 = torch.zeros(n, 3, device=device, dtype=dtype)
+        axes: list[torch.Tensor | None] = [None] * self.axis.shape[0]
+        origins: list[torch.Tensor | None] = [None] * self.axis.shape[0]
         for i in self.order:
             p = self.parent[i]
             r_p, t_p = (eye, zero3) if p == -1 else (rot[p], trans[p])
@@ -193,10 +191,28 @@ class KinematicAnchors(torch.nn.Module):
             rate = joint_vel[:, j : j + 1]
             omega[i] = w_p + a * rate
             v0[i] = v_p - torch.linalg.cross(a, o, dim=-1) * rate
-        rot_t = torch.stack(rot, 1)  # (N, links, 3, 3)
-        trans_t = torch.stack(trans, 1)
-        omega_t = torch.stack(omega, 1)
-        v0_t = torch.stack(v0, 1)
+            axes[j], origins[j] = a, o
+        zero_j = torch.zeros(n, 3, device=device, dtype=dtype)
+        return {
+            "rot": torch.stack(rot, 1),  # (N, links, 3, 3)
+            "trans": torch.stack(trans, 1),
+            "omega": torch.stack(omega, 1),
+            "v0": torch.stack(v0, 1),
+            "axis": torch.stack([zero_j if a is None else a for a in axes], 1),
+            "origin": torch.stack([zero_j if o is None else o for o in origins], 1),
+        }
+
+    def forward(
+        self,
+        joint_pos: torch.Tensor,
+        joint_vel: torch.Tensor,
+        gravity_b: torch.Tensor,
+        ang_vel_b: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Dimensionless fields; ``foot_velocity_relative`` is each sole's velocity minus
+        the centre of mass's, in the heading frame (add the CoM velocity for ``z*``'s)."""
+        kin = self.chain(joint_pos, joint_vel)
+        rot_t, trans_t, omega_t, v0_t = kin["rot"], kin["trans"], kin["omega"], kin["v0"]
 
         com_links = torch.einsum("nlij,lj->nli", rot_t, self.com0) + trans_t
         total = self.mass.sum()
@@ -245,3 +261,159 @@ class KinematicAnchors(torch.nn.Module):
             ),
             "angular_momentum": dimensionless(to_heading(momentum), "angular_momentum"),
         }
+
+
+class DriveLoads(torch.nn.Module):
+    """Each foot's load from the drives' torques: the static balance of each leg.
+
+    The card gives every joint's drive (an implicit PD: stiffness, damping, effort limit)
+    and the action's scale and offset, so the torque each joint applies follows from the
+    commanded action and the joint's state. Below a joint, the leg is held by that torque,
+    its own links' weights and the ground's wrench on the foot (inertia neglected):
+
+        a_j . [ sum_l (c_l - o_j) x m_l g + (p - o_j) x F + M ] = -tau_j,
+
+    for every joint ``j`` on the chain from the base to the foot, with ``F`` and ``M`` the
+    ground's force and moment at the sole point ``p``. A ridge least-squares solve per
+    foot gives the wrench; the load in ``z*`` is ``F``'s vertical part over ``m g``. No
+    parameter is learned: it is as good as the drive model and the statics.
+    """
+
+    def __init__(
+        self,
+        card: dict[str, Any],
+        anchors: KinematicAnchors,
+        ridge: float = 1e-6,
+        moment_prior: float = 1e-2,
+        action_joints: list[str] | None = None,
+    ) -> None:
+        """``action_joints``: the joints the action drives, in its order (all by default);
+        the others hold their default position. ``ridge`` keeps the force solve defined;
+        ``moment_prior`` pulls the ground's moment towards zero (the centre of pressure
+        towards the sole point), so a leg with fewer than six joints still has one wrench."""
+        super().__init__()
+        self.anchors = anchors
+        names = list(card["joints"]["names"])
+        drives = {d["joint"]: d for d in card["drives"]}
+        f32 = torch.float32
+        column = lambda key: torch.as_tensor(  # noqa: E731
+            [float(drives[name][key]) for name in names], dtype=f32
+        )
+        self.register_buffer("stiffness", column("stiffness"))
+        self.register_buffer("damping", column("damping"))
+        self.register_buffer("effort", column("effort_limit"))
+        self.register_buffer("default", torch.as_tensor(card["joints"]["default_pos"], dtype=f32))
+        control = card["control"]
+        self.scale = float(control["action_scale"])
+        self.offset = bool(control.get("action_use_default_offset", True))
+        self.ridge = ridge
+        self.moment_prior = moment_prior
+        acted = action_joints or names
+        self.register_buffer(
+            "action_index", torch.as_tensor([names.index(j) for j in acted], dtype=torch.long)
+        )
+        links, parent, joint_of = len(anchors.parent), anchors.parent, anchors.joint_of
+        # below[j, l]: link l moves with joint j (it is in the subtree of j's child link)
+        below = np.zeros((len(names), links), dtype=np.float32)
+        for leaf in range(links):
+            node = leaf
+            while node != -1:
+                if joint_of[node] >= 0:
+                    below[joint_of[node], leaf] = 1.0
+                node = parent[node]
+        self.register_buffer("below", torch.as_tensor(below))
+        chains = []
+        for foot in anchors.feet:
+            on = np.zeros(len(names), dtype=np.float32)
+            node = foot
+            while node != -1:
+                if joint_of[node] >= 0:
+                    on[joint_of[node]] = 1.0
+                node = parent[node]
+            chains.append(on)
+        self.register_buffer("on_chain", torch.as_tensor(np.stack(chains)))  # (2, J)
+
+    def set_drives(
+        self, stiffness: torch.Tensor, damping: torch.Tensor, effort: torch.Tensor
+    ) -> None:
+        """Use the drives' gains and limits as a capture recorded them (the task's own)."""
+        for name, value in (("stiffness", stiffness), ("damping", damping), ("effort", effort)):
+            getattr(self, name).copy_(torch.as_tensor(value, dtype=torch.float32))
+
+    def torque(
+        self,
+        joint_pos: torch.Tensor,
+        joint_vel: torch.Tensor,
+        action: torch.Tensor | None = None,
+        target: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """``(N, J)``: the torque each implicit PD drive applies, from the joints' PD targets
+        (``target``, as recorded) or from the action that set them."""
+        if target is None:
+            command = torch.zeros_like(joint_pos)
+            command[:, self.action_index] = self.scale * action
+            target = command + (self.default if self.offset else 0.0)
+        tau = self.stiffness * (target - joint_pos) - self.damping * joint_vel
+        return torch.maximum(torch.minimum(tau, self.effort), -self.effort)
+
+    def balance(self, joint_pos: torch.Tensor, gravity_b: torch.Tensor) -> dict[str, torch.Tensor]:
+        """The legs' statics in this pose: per joint the torque its carried links' weight
+        exerts (``gravity_tau``, ``(N, J)``), per foot the map from the ground's wrench at the
+        sole to joint torques (``wrench_map``, ``(N, 2, J, 6)``, zero off the foot's chain)."""
+        anchors = self.anchors
+        kin = anchors.chain(joint_pos, torch.zeros_like(joint_pos))
+        rot, trans = kin["rot"], kin["trans"]
+        axis, origin = kin["axis"], kin["origin"]  # (N, J, 3)
+        com = torch.einsum("nlij,lj->nli", rot, anchors.com0) + trans  # (N, L, 3)
+        g = 9.81 * gravity_b / gravity_b.norm(dim=-1, keepdim=True)  # (N, 3), base frame
+        weight = anchors.mass[None, :, None] * g[:, None, :]  # (N, L, 3)
+        arm = com[:, None, :, :] - origin[:, :, None, :]  # (N, J, L, 3)
+        moment = torch.linalg.cross(arm, weight[:, None].expand_as(arm), dim=-1)
+        gravity_tau = torch.einsum("njli,jl,nji->nj", moment, self.below, axis)
+        soles = (
+            torch.einsum("nfij,fj->nfi", rot[:, anchors.feet], anchors.sole0)
+            + trans[:, anchors.feet]
+        )
+        maps = []
+        for f in range(len(anchors.feet)):
+            lever = torch.linalg.cross(axis, soles[:, f, None, :] - origin, dim=-1)
+            maps.append(torch.cat([lever, axis], dim=-1) * self.on_chain[f][None, :, None])
+        return {"gravity_tau": gravity_tau, "wrench_map": torch.stack(maps, 1), "down": g / 9.81}
+
+    def forward(
+        self,
+        joint_pos: torch.Tensor,
+        joint_vel: torch.Tensor,
+        gravity_b: torch.Tensor,
+        action: torch.Tensor | None = None,
+        target: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """``loads (N, 2)`` in ``m g``; ``force (N, 2, 3)`` in the base frame, newtons.
+
+        ``target``: each joint's PD target as the drives hold it when the state is read
+        (the previous action's); or ``action``, the action that set them.
+        """
+        statics = self.balance(joint_pos, gravity_b)
+        tau = self.torque(joint_pos, joint_vel, action, target)
+        forces, loads = [], []
+        for f in range(statics["wrench_map"].shape[1]):
+            a_matrix = statics["wrench_map"][:, f]  # (N, J, 6)
+            b = -(tau + statics["gravity_tau"]) * self.on_chain[f][None, :]
+            gram = a_matrix.transpose(1, 2) @ a_matrix
+            diagonal = gram.diagonal(dim1=1, dim2=2)
+            force_scale = diagonal[:, :3].mean(-1).clamp_min(1e-9)
+            moment_scale = diagonal[:, 3:].mean(-1).clamp_min(1e-9)
+            weights = torch.cat(
+                [
+                    (self.ridge * force_scale)[:, None].expand(-1, 3),
+                    (self.moment_prior * moment_scale)[:, None].expand(-1, 3),
+                ],
+                dim=-1,
+            )
+            reg = torch.diag_embed(weights)
+            wrench = torch.linalg.solve(gram + reg, a_matrix.transpose(1, 2) @ b[..., None])
+            force = wrench[:, :3, 0]
+            forces.append(force)
+            weight = 9.81 * self.anchors.mass.sum()
+            loads.append(-(force * statics["down"]).sum(-1) / weight)
+        return {"loads": torch.stack(loads, -1), "force": torch.stack(forces, 1)}

@@ -11,6 +11,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from humanoid_transfer.transfer.latent.pact.anchors import (  # noqa: E402
+    DriveLoads,
     KinematicAnchors,
     tilt_from_gravity,
 )
@@ -81,3 +82,37 @@ def test_the_tilt_undoes_the_projected_gravity():
     np.testing.assert_allclose(down.numpy(), np.tile([0.0, 0.0, -1.0], (64, 1)), atol=1e-9)
     # a pure roll-pitch rotation keeps the base's forward axis in the vertical x-z plane
     assert tilt[:, 1, 0].abs().max() < 1e-12
+
+
+@pytest.mark.parametrize("body", BODIES)
+def test_drive_loads_recover_the_ground_wrench_that_made_the_torques(body):
+    """Torques built from a known wrench on one foot and the legs' weight give it back."""
+    card, anchors, _, q, rng = _setup(body)
+    drive = DriveLoads(card, anchors).double()
+    pose = torch.as_tensor(q)[None]
+    statics = drive.balance(pose, UPRIGHT)
+    weight = 9.81 * float(anchors.mass.sum())
+    wrench = torch.tensor([[5.0, -3.0, 0.6 * weight, 0.0, 0.0, 0.0]], dtype=torch.float64)
+    tau = -statics["gravity_tau"] - torch.einsum("njk,nk->nj", statics["wrench_map"][:, 0], wrench)
+    # a target that makes the drives apply exactly these torques at rest
+    drive.effort.fill_(1e9)
+    target = pose + tau / drive.stiffness.clamp_min(1e-9)
+    out = drive(pose, torch.zeros_like(pose), UPRIGHT, target=target)
+    np.testing.assert_allclose(out["loads"][0, 0].item(), 0.6, atol=0.02)
+    # the other foot's chain only carries its own weight: no load
+    assert abs(out["loads"][0, 1].item()) < 0.02
+
+
+def test_drive_targets_follow_the_action_on_the_joints_it_drives():
+    card = json.loads((REPO / REGISTRY["g1"]["card"]).read_text("utf-8"))
+    names = card["joints"]["names"]
+    anchors = KinematicAnchors(card)
+    acted = [names[3], names[0]]
+    drive = DriveLoads(card, anchors, action_joints=acted)
+    pose = torch.as_tensor(card["joints"]["default_pos"], dtype=torch.float32)[None]
+    tau = drive.torque(pose, torch.zeros_like(pose), action=torch.tensor([[1.0, -2.0]]))
+    expected = torch.zeros_like(pose)
+    expected[0, 3] = drive.stiffness[3] * drive.scale * 1.0
+    expected[0, 0] = drive.stiffness[0] * drive.scale * -2.0
+    expected = expected.clamp(-drive.effort, drive.effort)
+    assert torch.allclose(tau, expected, atol=1e-4)

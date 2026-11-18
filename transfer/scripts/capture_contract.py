@@ -157,6 +157,37 @@ from humanoid_transfer.transfer.tasks.tracking.balance import balance_state
 COMMAND = "base_velocity"
 
 
+def drive_parameters(robot) -> dict | None:
+    """Per joint, the drives' stiffness, damping and effort limit as the simulation holds
+    them, and the default joint positions; None if any cannot be read."""
+    try:
+        count = len(robot.joint_names)
+        out = {
+            key: np.full(count, np.nan, dtype=np.float32)
+            for key in ("drive_stiffness", "drive_damping", "drive_effort_limit")
+        }
+        for actuator in robot.actuators.values():
+            index = actuator.joint_indices
+            if isinstance(index, slice):
+                index = list(range(count))[index]
+            index = [int(i) for i in (index.tolist() if hasattr(index, "tolist") else index)]
+            for key, value in (
+                ("drive_stiffness", actuator.stiffness),
+                ("drive_damping", actuator.damping),
+                ("drive_effort_limit", actuator.effort_limit),
+            ):
+                row = value[0] if isinstance(value, torch.Tensor) and value.ndim == 2 else value
+                row = row.detach().cpu().numpy() if isinstance(row, torch.Tensor) else row
+                out[key][index] = np.broadcast_to(np.asarray(row, dtype=np.float32), len(index))
+        out["default_joint_pos"] = robot.data.default_joint_pos[0].cpu().numpy()
+        if any(np.isnan(v).any() for v in out.values()):
+            raise ValueError("a joint without an actuator model")
+        return out
+    except Exception as error:  # noqa: BLE001
+        print(f"[capture] drive parameters not recorded: {error}")
+        return None
+
+
 def main() -> int:
     from isaaclab_tasks.utils import parse_env_cfg
 
@@ -237,6 +268,16 @@ def main() -> int:
     )  # fmt: skip
     if args_cli.joints:
         keys += ("joint_pos", "joint_vel", "projected_gravity")
+    # With --joints, also each joint's PD target before the step (the previous action's, as
+    # the drives hold it) and the drives' gains once: what the PACT drive-load anchors read.
+    # Never allowed to fail a capture: without these attributes the keys are left out.
+    drives = drive_parameters(robot) if args_cli.joints else None
+    if drives is not None:
+        try:
+            robot.data.joint_pos_target.cpu()
+            keys += ("joint_pos_target",)
+        except Exception as error:  # noqa: BLE001
+            print(f"[capture] joint_pos_target not recorded: {error}")
     if args_cli.policy_obs:
         keys += ("policy_obs",)
     replay = getattr(term, "replay", None)
@@ -274,6 +315,8 @@ def main() -> int:
             record["joint_pos"].append(robot.data.joint_pos.cpu().numpy())
             record["joint_vel"].append(robot.data.joint_vel.cpu().numpy())
             record["projected_gravity"].append(robot.data.projected_gravity_b.cpu().numpy())
+        if "joint_pos_target" in record:
+            record["joint_pos_target"].append(robot.data.joint_pos_target.cpu().numpy())
         if args_cli.policy_obs:
             record["policy_obs"].append(obs["policy"].cpu().numpy())
         if replay is not None:
@@ -302,6 +345,8 @@ def main() -> int:
         for k, v in record.items()
     }
     units = term.units
+    if drives is not None:
+        arrays.update(drives)
     if replay is not None:
         arrays["replay_chain"] = term.replay_chain.cpu().numpy()
         arrays["replay_file"] = np.array(str(args_cli.replay_plans))

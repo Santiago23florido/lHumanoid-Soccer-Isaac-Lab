@@ -67,3 +67,24 @@ def test_split_keeps_environments_whole(tmp_path):
     assert set(windows.group[test] % 1000) == set(range(24, 32))
     assert not set(windows.group[test]) & set(windows.group[~test])
     assert {g // 1000 for g in windows.group} == {0, 1}
+
+
+def test_extra_arrays_are_read_at_each_windows_last_step(tmp_path):
+    path = _capture(tmp_path / "c.npz")
+    data = dict(np.load(path))
+    data["joint_pos_target"] = data["joint_pos"] + 0.5
+    data["drive_stiffness"] = np.array([100.0, 50.0], dtype=np.float32)
+    np.savez(path, **data)
+    windows = load_body(
+        "x",
+        [path],
+        history=3,
+        leg_length=1.0,
+        joint_names=("j0", "j1"),
+        extra=("joint_pos_target",),
+        constants=("drive_stiffness",),
+    )
+    np.testing.assert_array_equal(
+        windows.extra["joint_pos_target"], windows.joint_obs[:, :, -1, 0] + 0.5
+    )
+    np.testing.assert_array_equal(windows.constants["drive_stiffness"], [100.0, 50.0])

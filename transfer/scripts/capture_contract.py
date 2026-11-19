@@ -242,7 +242,17 @@ def make_pact(inner, term, robot):
     if isinstance(offset, torch.Tensor) and not torch.allclose(offset[0], default[joints]):
         raise ValueError("PACT's targets are relative to the default pose; the action's are not")
     checkpoint = torch.load(args_cli.pact_model, map_location="cpu", weights_only=False)
-    print(f"[capture] PACT {args_cli.pact_model} drives {body}; view {term.view}")
+    # The view is in the tracker's own units when the command observes in them
+    # (``observe_units``), else in the contract's.
+    norm = term.generator.skill_norm
+    if getattr(term.cfg, "observe_units", None):
+        from humanoid_transfer.transfer.latent.contract import load_contract
+
+        norm = load_contract(term.cfg.observe_units, inner.device).generator.skill_norm
+    print(
+        f"[capture] PACT {args_cli.pact_model} drives {body}; view {term.view}, units "
+        f"{term.cfg.observe_units or 'the contract'}"
+    )
     return PactDriver(
         checkpoint,
         descriptor,
@@ -253,8 +263,8 @@ def make_pact(inner, term, robot):
         joints,
         scale,
         term.view,
-        term.generator.skill_norm.mean,
-        term.generator.skill_norm.std,
+        norm.mean,
+        norm.std,
         float(inner.step_dt),
         inner.num_envs,
         inner.device,

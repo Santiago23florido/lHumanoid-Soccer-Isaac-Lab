@@ -224,13 +224,19 @@ def main() -> int:
     agent_cfg.experiment_name = f"pact_adapt_{args.body}"
     agent_cfg.run_name = args.run_name
     agent_cfg.obs_groups = {"actor": ["policy", "pact"], "critic": ["critic"]}
+    # The view's units: the tracker's own with ``observe_units``, else the contract's.
+    norm = term.generator.skill_norm
+    if getattr(term.cfg, "observe_units", None):
+        from humanoid_transfer.transfer.latent.contract import load_contract
+
+        norm = load_contract(term.cfg.observe_units, inner.device).generator.skill_norm
     agent_cfg.actor = PactActorCfg(
         checkpoint=str(args.pact_model.resolve()),
         repo=str(REPO),
         body=args.body,
         view=int(term.view),
-        skill_mean=term.generator.skill_norm.mean.cpu().tolist(),
-        skill_std=term.generator.skill_norm.std.cpu().tolist(),
+        skill_mean=norm.mean.cpu().tolist(),
+        skill_std=norm.std.cpu().tolist(),
         control_dt=float(inner.step_dt),
         action_joints=joints,
         action_scale=scale,

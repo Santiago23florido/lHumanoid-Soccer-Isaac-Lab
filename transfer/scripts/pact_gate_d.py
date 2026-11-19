@@ -38,6 +38,11 @@ captures, and the previous round's model is the start::
         --init logs/pact/models/<previous>.pt --steps 8000 --save logs/pact/models/<next>.pt
 
 (one command; ``pact_dagger.sh`` runs the rounds).
+
+Windows: a DAgger capture holds many episode starts (PACT falls where the tracker did not),
+and the driver acts there with its history refilled by the first reading. Windows that
+cross the start of an episode begun inside the capture therefore repeat that reading
+(:func:`window_rows`) and are trained on; the offline metric keeps G-D0's complete windows.
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -59,7 +65,6 @@ from humanoid_transfer.transfer.latent.pact.anchors import (  # noqa: E402
     DriveLoads,
     KinematicAnchors,
 )
-from humanoid_transfer.transfer.latent.pact.data import _window_ends, load_body  # noqa: E402
 from humanoid_transfer.transfer.latent.pact.descriptors import (  # noqa: E402
     GRAVITY,
     contact_joints,
@@ -95,6 +100,36 @@ def unclamped(estimate: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.nda
     return (np.abs((estimate - mean) / std) < PLAN_LIMIT).all(-1)
 
 
+def window_rows(
+    done: np.ndarray, history: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """``(t, env, rows (N, history), start (N,))``: every step with a label in its episode
+    (``t + 1`` in the capture, no reset at ``t``) whose window either lies inside one
+    episode (no reset in ``[t - history, t]``, ``t >= history``: G-D0's windows) or crosses
+    the start of an episode that began inside the capture (``start``). The rows before the
+    start repeat its first reading: the driver refills its history at a reset, as the
+    observation manager's history buffers do, so a policy acts there and must learn there.
+    An episode that began before the capture has no known start and keeps G-D0's rule.
+    Ordered by step, then environment."""
+    steps, envs = done.shape
+    first = np.full((steps, envs), -1, dtype=np.int64)
+    current = np.full(envs, -1, dtype=np.int64)
+    for s in range(steps):
+        first[s] = current
+        current = np.where(done[s], s + 1, current)
+    ended = np.zeros((steps + 1, envs), dtype=np.int64)
+    ended[1:] = np.cumsum(done, axis=0)
+    tt = np.arange(steps)
+    resets = ended[tt + 1] - ended[np.maximum(tt - history, 0)]  # resets in [t - h, t]
+    full = (tt[:, None] >= history) & (resets == 0)
+    starting = (first >= 0) & (tt[:, None] - first < history) & ~done.astype(bool)
+    valid = (full | starting) & (tt[:, None] + 1 < steps)
+    t, env = np.nonzero(valid)
+    base = np.maximum(first[t, env], 0)
+    rows = np.maximum(t[:, None] + np.arange(-history + 1, 1)[None], base[:, None])
+    return t, env, rows, starting[t, env]
+
+
 class BodyData:
     """One body's samples, from its map capture and any DAgger captures: inputs and labels.
 
@@ -127,7 +162,7 @@ class BodyData:
         ]
         for i, part in enumerate(parts):
             part["group"] = i * 1000 + part["group"]
-            part["evaluate"] = part["test"] & (i == 0)
+            part["evaluate"] = part["test"] & (i == 0) & ~part["start"]
         for key in parts[0]:
             if key not in ("view", "times", "controlled"):
                 setattr(self, key, np.concatenate([part[key] for part in parts]))
@@ -138,50 +173,41 @@ class BodyData:
 
     def _samples(self, path: Path, args, stride: int) -> dict:
         h = args.history
-        w = load_body(
-            self.name,
-            [path],
-            h,
-            self.descriptor.leg_length,
-            self.descriptor.joint_names,
-            extra=("joint_pos_target",),
-            constants=DRIVES + ("default_joint_pos",),
-        )
-        drive = DriveLoads(self.card, self.anchors)
-        drive.set_drives(*(w.constants[k] for k in DRIVES))
-        analytic = analytic_z(self.anchors, w, self.time_unit)
-        physics = physics_bases(drive, w, analytic, self.time_unit)
-
         data = np.load(path)
+        names = tuple(str(n) for n in data["joint_names"])
+        if names != tuple(self.descriptor.joint_names):
+            raise ValueError(f"{path}: joints {names[:4]}... differ from the card's")
         done = data["done"]
-        steps = done.shape[0]
-        t, env = _window_ends(done, h)
-        # Also clean at t - h (the target in force at the window's first step was set inside
-        # the episode) and at t (the label, set at t, is read at t + 1).
-        keep = (t - h >= 0) & (t + 1 < steps) & ~done[t, env]
-        keep &= ~done[np.maximum(t - h, 0), env]
-        keep = np.nonzero(keep)[0][::stride]
-        t, env = t[keep], env[keep]
+        t, env, rows, start = window_rows(done, h)
+        keep = np.arange(len(t))[::stride]
+        t, env, rows, start = t[keep], env[keep], rows[keep], start[keep]
 
         q0 = data["default_joint_pos"].astype(np.float32)
-        q = data["joint_pos"]
-        target = data["joint_pos_target"]
-        rows = t[:, None] + np.arange(-h + 1, 1)[None]
+        q, target = data["joint_pos"], data["joint_pos_target"]
+        qd = data["joint_vel"] * self.time_unit
         cols = env[:, None]
+        q_w, qd_w = q[rows, cols], qd[rows, cols]  # (N, h, J)
         out: dict = {}
         out["joint_obs"] = (
-            np.stack(
-                [
-                    q[rows, cols] - q0,
-                    data["joint_vel"][rows, cols] * self.time_unit,
-                    target[rows, cols] - q0,
-                ],
-                axis=-1,
-            )
+            np.stack([q_w - q0, qd_w, target[rows, cols] - q0], axis=-1)
             .transpose(0, 2, 1, 3)
             .astype(np.float32)
         )  # (N, J, h, 3)
-        out["imu"] = w.imu[keep]
+        imu = np.concatenate(
+            [data["projected_gravity"], data["base_ang_vel"] * self.time_unit], axis=-1
+        )
+        out["imu"] = imu[rows, cols].astype(np.float32)
+        w = SimpleNamespace(
+            joint_obs=np.stack([q_w, qd_w], axis=-1).transpose(0, 2, 1, 3).astype(np.float32),
+            imu=out["imu"],
+            z=data["skill_state"][t, env].astype(np.float32),
+            extra={"joint_pos_target": target[t, env].astype(np.float32)},
+        )
+        drive = DriveLoads(self.card, self.anchors)
+        drive.set_drives(*(np.asarray(data[k]) for k in DRIVES))
+        analytic = analytic_z(self.anchors, w, self.time_unit)
+        physics = physics_bases(drive, w, analytic, self.time_unit)
+
         if "action_joints" in data.files:
             joints = data["action_joints"]
             label = np.zeros((len(t), len(q0)), np.float32)
@@ -194,10 +220,10 @@ class BodyData:
         out["label"] = label.astype(np.float32)
         out["hold"] = (target[t, env] - q0).astype(np.float32)
         out["controlled"] = controlled
-        out["anchor_in"] = with_physics(analytic[keep], physics[keep])
-        out["learned"] = residual_targets(w.z[keep], analytic[keep], physics[keep])
-        out["z"] = w.z[keep]
-
+        out["anchor_in"] = with_physics(analytic, physics)
+        out["learned"] = residual_targets(w.z, analytic, physics)
+        out["z"] = w.z
+        out["start"] = start
         mean, std = self.skill
         obs = data["policy_obs"]
         estimate = data["estimate"]

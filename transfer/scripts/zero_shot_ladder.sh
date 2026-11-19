@@ -86,8 +86,15 @@ g1, nao = 0.6545728842979989, 0.24801
 print(math.sqrt(nao / g1), math.sqrt(g1 / nao))")"
 fi
 read -r speed_scale turn_scale <<< "$scale"
-walk_zs="logs/contract/walk_zs_${body}_${tag}/generator.pt"
-task_zs="logs/contract/${generator_name}_zs_${body}_${tag}/generator.pt"
+# ZS_ENCODER_TAG: use another tag's refitted encoder (its "encoder" stage), e.g. to deploy two
+# policies of one body through the same state estimate.
+encoder_tag="${ZS_ENCODER_TAG:-$tag}"
+walk_zs="logs/contract/walk_zs_${body}_${encoder_tag}/generator.pt"
+task_zs="logs/contract/${generator_name}_zs_${body}_${encoder_tag}/generator.pt"
+# ZS_PACT_MODEL: the shared PACT policy drives the body in every capture; the tracker of
+# <run> stays the labeller (capture_contract.py --pact-model). The tag should say so.
+pact=()
+if [ -n "${ZS_PACT_MODEL:-}" ]; then pact=(--pact-model "$ZS_PACT_MODEL" --pact-body "$body"); fi
 mkdir -p "$rollouts"
 
 "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt" > /dev/null
@@ -121,7 +128,7 @@ capture() {
     until assets_online; do sleep 60; done
     "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task_id" \
       --driver-policy "$policy" --steps "${ZS_STEPS:-900}" --settle-steps "${ZS_SETTLE:-100}" "$@" \
-      --output "$rollouts/zs_${tag}_${name}.npz" > "$log" 2>&1
+      "${pact[@]}" --output "$rollouts/zs_${tag}_${name}.npz" > "$log" 2>&1
     grep -aqE "Unable to open the usd file at path: https|USD file not found at path at: 'https" "$log" || break
     echo "capture $name: an asset could not be opened (attempt $attempt); retrying"
   done

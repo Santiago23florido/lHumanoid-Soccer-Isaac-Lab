@@ -97,6 +97,10 @@ from rsl_rl.runners import OnPolicyRunner  # noqa: E402
 ACTOR = "humanoid_transfer.transfer.latent.pact.actor:PactActor"
 COMMAND = "base_velocity"
 
+# As Isaac Lab's rsl_rl/train.py, which trained the from-scratch trackers G-N2 is compared with.
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 
 class _BodyTerm(ManagerTermBase):
     """A PACT input term: the body's card, units and default pose, read once."""

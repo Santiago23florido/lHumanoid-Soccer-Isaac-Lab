@@ -19,6 +19,7 @@ stage), split by gait probe (probes with index % 4 == 0 are the test set):
   correction to the drive loads, the CoM velocity directly (odometry is an input only: on
   the training bodies' expert captures it errs by several times the CoM velocity's spread,
   in transitions and wherever a loaded foot rolls);
+- ``pact_kl``: ``pact_kd`` without the odometry (the drive loads only; G-A3b);
 - ``mlp_k``: one MLP per body, trained on that body (the in-body reference).
 
 The shared arms train on every body but ``--hold-out``. Metric: RMSE over the 27 fields in
@@ -93,6 +94,13 @@ def with_physics(analytic: np.ndarray, physics: np.ndarray) -> np.ndarray:
     z[:, S["com_velocity"]] = physics[:, :3]
     z[:, S["foot_load"]] = physics[:, 3:]
     z[:, S["foot_velocity"]] = analytic[:, S["foot_velocity"]] + np.tile(physics[:, :3], 2)
+    return z
+
+
+def with_loads(analytic: np.ndarray, physics: np.ndarray) -> np.ndarray:
+    """The analytic ``z*`` with the drive loads in the load slots (``pact_kl``'s input)."""
+    z = analytic.copy()
+    z[:, S["foot_load"]] = physics[:, 3:]
     return z
 
 
@@ -197,12 +205,10 @@ def main() -> int:
             z = with_physics(analytic[i][rows], physics[i][rows])
             predictions["physics"][i] = (z - z_mean) / z_std
 
-    for arm in [a for a in arms if a in ("pact_k", "pact_kd")]:
-        uses_physics = arm == "pact_kd"
-        inputs = [
-            with_physics(a, p) if uses_physics else a
-            for a, p in zip(analytic, physics, strict=True)
-        ]
+    for arm in [a for a in arms if a in ("pact_k", "pact_kd", "pact_kl")]:
+        uses_physics = arm in ("pact_kd", "pact_kl")
+        complete = {"pact_kd": with_physics, "pact_kl": with_loads}.get(arm)
+        inputs = [complete(a, p) if complete else a for a, p in zip(analytic, physics, strict=True)]
         targets = [
             residual_targets(w.z, a, p) if uses_physics else targets_of(w.z, a)
             for w, a, p in zip(windows, analytic, physics, strict=True)
@@ -304,7 +310,13 @@ def main() -> int:
         errors = {arm: predictions[arm][i] - truth for arm in arms if i in predictions[arm]}
         for arm, err in errors.items():
             entry[arm] = field_rmse(err)
-        for a_arm, b_arm in (("pact_kd", "pact_k"), ("pact_kd", "mlp_k"), ("physics", "pact_k")):
+        for a_arm, b_arm in (
+            ("pact_kd", "pact_k"),
+            ("pact_kd", "mlp_k"),
+            ("physics", "pact_k"),
+            ("pact_kl", "pact_k"),
+            ("pact_kl", "pact_kd"),
+        ):
             if a_arm in errors and b_arm in errors:
                 _, _, diff, se = bootstrap_rmse(
                     (errors[a_arm] ** 2).mean(1),

@@ -63,6 +63,7 @@ simulation_app = AppLauncher(args).app
 
 import time  # noqa: E402
 from datetime import datetime  # noqa: E402
+from importlib import metadata  # noqa: E402
 
 import gymnasium as gym  # noqa: E402
 import humanoid_transfer.tasks  # noqa: E402,F401  (registers the tasks)
@@ -87,7 +88,7 @@ from isaaclab.managers import ManagerTermBase  # noqa: E402
 from isaaclab.managers import ObservationGroupCfg as ObsGroup  # noqa: E402
 from isaaclab.managers import ObservationTermCfg as ObsTerm  # noqa: E402
 from isaaclab.utils import configclass  # noqa: E402
-from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # noqa: E402
+from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg  # noqa: E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry  # noqa: E402
 from pact_check_anchors import sole_override  # noqa: E402
@@ -214,6 +215,9 @@ def main() -> int:
         raise ValueError("PACT's targets are relative to the default pose; the action's are not")
 
     agent_cfg = load_cfg_from_registry(args.task, "rsl_rl_cfg_entry_point")
+    # As Isaac Lab's train.py: the critic's legacy fields become rsl-rl 5's, before the
+    # actor is replaced.
+    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, metadata.version("rsl-rl-lib"))
     agent_cfg.seed = args.seed
     agent_cfg.max_iterations = args.max_iterations
     agent_cfg.save_interval = args.save_interval

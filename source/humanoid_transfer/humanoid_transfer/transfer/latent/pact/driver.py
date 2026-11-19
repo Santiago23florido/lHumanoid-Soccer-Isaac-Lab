@@ -85,6 +85,15 @@ class PactDriver:
         self.z_mean, self.z_std = as_t(checkpoint["z_mean"]), as_t(checkpoint["z_std"])
         self.a_mean, self.a_std = as_t(checkpoint["a_mean"]), as_t(checkpoint["a_std"])
         self.table = stack_bodies([descriptor], [contacts]).to(device)
+        residual = checkpoint.get("residual")
+        if residual is not None:  # a body added by PPO (G-N2): its E_b and descriptor residuals
+            from humanoid_transfer.transfer.latent.pact.actor import BodyResidual
+
+            shifted = BodyResidual(self.model.embodiment, self.table, dims.body_tokens, dims.width)
+            with torch.no_grad():
+                shifted.delta_e.copy_(torch.as_tensor(residual["delta_e"]))
+                shifted.delta_d.copy_(torch.as_tensor(residual["delta_d"]))
+            self.model.embodiment = shifted.to(device).eval()
         self.anchors, self.drive = anchors.to(device), drive.to(device)
         self.q0 = default_joint_pos.to(device)
         self.action_joints = action_joints

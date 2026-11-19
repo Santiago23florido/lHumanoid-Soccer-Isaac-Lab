@@ -13,7 +13,8 @@
 #
 # Captures: logs/pact/dagger/<tag>/r<k>/<body>.npz; scores:
 # transfer/results/icml_gate_d1_<tag>_r<k>_<body>.json; models: logs/pact/models/d1_<tag>_r<k>.pt;
-# status: logs/pact/dagger_<tag>.status
+# status: logs/pact/dagger_<tag>.status. PACT_DAGGER_FIRST=<k> numbers the first round k (to
+# score a model trained on rounds 1..k-1 as round k, e.g. the aggregate's final policy).
 set -uo pipefail
 root="${PACT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root"
@@ -24,6 +25,8 @@ tag="${4:-main}"
 shift $(($# < 4 ? $# : 4))
 python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 train_steps="${PACT_DAGGER_STEPS:-8000}"
+first="${PACT_DAGGER_FIRST:-1}"
+last=$((first + rounds - 1))
 status="logs/pact/dagger_${tag}.status"
 mkdir -p logs/pact
 note() { echo "$1 $(date +%Y-%m-%d_%H:%M)" >> "$status"; }
@@ -73,8 +76,8 @@ setup() {  # setup <body>: the tracker (teacher), task and contract the co-execu
     || { note "$1: export FAILED ($run/$checkpoint.pt)"; return 1; }
 }
 
-note "start model=$model rounds=$rounds bodies=$bodies steps=$train_steps"
-for round in $(seq 1 "$rounds"); do
+note "start model=$model rounds=$first..$last bodies=$bodies steps=$train_steps"
+for round in $(seq "$first" "$last"); do
   out="logs/pact/dagger/$tag/r$round"
   mkdir -p "$out"
   for body in $bodies; do
@@ -101,7 +104,7 @@ for round in $(seq 1 "$rounds"); do
       && note "$body r$round: $(tail -1 "$log" | cut -c1-200)" \
       || note "$body r$round: scoring FAILED"
   done
-  if [ "$round" -lt "$rounds" ]; then
+  if [ "$round" -lt "$last" ]; then
     next="logs/pact/models/d1_${tag}_r${round}.pt"
     "$python" -u transfer/scripts/pact_gate_d.py --bodies "$(echo $bodies | tr ' ' ',')" \
       --dagger "logs/pact/dagger/$tag/r*/{body}.npz" --init "$model" --steps "$train_steps" \

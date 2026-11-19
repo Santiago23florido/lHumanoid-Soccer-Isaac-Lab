@@ -213,3 +213,39 @@ def test_the_residual_moves_the_action_and_the_checkpoint_keeps_the_policy_layou
     fresh.load_state_dict(saved["state"])  # strict: the residual wrapper is unwrapped
     assert torch.equal(saved["residual"]["delta_e"], actor.policy.embodiment.delta_e.detach())
     assert saved["residual"]["delta_d"].shape == (joints, DIMS.width)
+
+
+def test_the_driver_runs_an_adapted_checkpoint_as_the_actor_does(setup):
+    s, n = setup, 2
+    actor = _actor(s, n, "bitfit").eval()
+    gen = torch.Generator().manual_seed(8)
+    with torch.no_grad():
+        residual = actor.policy.embodiment
+        residual.delta_e.add_(torch.randn(residual.delta_e.shape, generator=gen))
+        residual.delta_d.add_(torch.randn(residual.delta_d.shape, generator=gen))
+        for p in actor.tuned:
+            if p.ndim == 1 and p is not actor.distribution.std_param:
+                p.add_(0.1 * torch.randn(p.shape, generator=gen))
+    saved = actor.adapted_checkpoint(s["checkpoint"])
+    driver = PactDriver(
+        saved, s["descriptor"], s["contacts"], s["anchors"], s["drive"], s["q0"],
+        ACTION_JOINTS, SCALE, VIEW, s["skill_mean"], s["skill_std"], DT, n, "cpu",
+    )  # fmt: skip
+    time_unit = float(np.sqrt(s["descriptor"].leg_length / GRAVITY))
+    joints, imu = History(DIMS.history), History(DIMS.history)
+    fresh = torch.zeros(n, dtype=torch.bool)
+    for k in range(4):
+        q, qd, g, w, t = _state(s["card"], n, seed=30 + k)
+        policy_obs = torch.randn(n, 70 + VIEW * 30 + 27, generator=gen)
+        expected = driver(policy_obs, q, qd, t, g, w)
+        with torch.no_grad():
+            flat = torch.cat(
+                [
+                    joints.append(joint_features(q, qd, t, s["q0"], time_unit), fresh),
+                    imu.append(imu_features(g, w, time_unit), fresh),
+                    anchor_inputs(s["anchors"], s["drive"], q, qd, g, w, t),
+                ],
+                dim=1,
+            )
+            got = actor({"policy": policy_obs, "pact": flat})
+        torch.testing.assert_close(got, expected, atol=1e-5, rtol=1e-4)

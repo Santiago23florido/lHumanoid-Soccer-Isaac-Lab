@@ -15,6 +15,14 @@
 # transfer/results/icml_gate_d1_<tag>_r<k>_<body>.json; models: logs/pact/models/d1_<tag>_r<k>.pt;
 # status: logs/pact/dagger_<tag>.status. PACT_DAGGER_FIRST=<k> numbers the first round k (to
 # score a model trained on rounds 1..k-1 as round k, e.g. the aggregate's final policy).
+#
+# PACT_DAGGER_ENV=train captures in the body's training task (<Body>Track-v0) with the plans
+# its tracker trained on (procedural share 0.5, the base tasks, starts inside a plan, the
+# contract_left termination) instead of the gait probes; those rounds are not scored by probe
+# (the status line keeps the capture's falls and contract error).
+# PACT_DAGGER_TEACHER_SHARE=<f>: the tracker drives that share of the environments.
+# PACT_DAGGER_GLOB: the DAgger captures training aggregates (default: this tag's rounds).
+# PACT_DAGGER_TRAIN_LAST=1 also trains after the last round.
 set -uo pipefail
 root="${PACT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root"
@@ -27,6 +35,10 @@ python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 train_steps="${PACT_DAGGER_STEPS:-8000}"
 first="${PACT_DAGGER_FIRST:-1}"
 last=$((first + rounds - 1))
+where="${PACT_DAGGER_ENV:-probes}"
+share="${PACT_DAGGER_TEACHER_SHARE:-0}"
+aggregate="${PACT_DAGGER_GLOB:-logs/pact/dagger/$tag/r*/{body}.npz}"
+train_last="${PACT_DAGGER_TRAIN_LAST:-0}"
 status="logs/pact/dagger_${tag}.status"
 mkdir -p logs/pact
 note() { echo "$1 $(date +%Y-%m-%d_%H:%M)" >> "$status"; }
@@ -76,7 +88,7 @@ setup() {  # setup <body>: the tracker (teacher), task and contract the co-execu
     || { note "$1: export FAILED ($run/$checkpoint.pt)"; return 1; }
 }
 
-note "start model=$model rounds=$first..$last bodies=$bodies steps=$train_steps"
+note "start model=$model rounds=$first..$last bodies=$bodies steps=$train_steps env=$where share=$share"
 for round in $(seq "$first" "$last"); do
   out="logs/pact/dagger/$tag/r$round"
   mkdir -p "$out"
@@ -88,26 +100,41 @@ for round in $(seq "$first" "$last"); do
     if [ ! -f "$file" ]; then
       for attempt in 1 2 3; do
         until assets_online; do sleep 60; done
-        "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task" \
-          --driver-policy "$policy" --pact-model "$model" --pact-body "$body" \
-          --steps 900 --settle-steps 100 --contract-from-truth --reference autonomous \
-          --num-envs 213 --gait-probes transfer/probes/gait_probes.json --joints --policy-obs \
-          --output "$file" > "$log" 2>&1
+        if [ "$where" = train ]; then
+          (
+            export HUMANOID_PROCEDURAL=0.5 HUMANOID_TASKS="$root/transfer/results/base_tasks_xf.json"
+            "$python" -u transfer/scripts/capture_contract.py --headless \
+              --task-id "${task%-Play-v0}-v0" --driver-policy "$policy" --pact-model "$model" \
+              --pact-body "$body" --teacher-share "$share" --steps 900 --settle-steps 100 \
+              --contract-from-truth --reference autonomous --num-envs 213 --joints --policy-obs \
+              --output "$file" > "$log" 2>&1
+          )
+        else
+          "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task" \
+            --driver-policy "$policy" --pact-model "$model" --pact-body "$body" \
+            --teacher-share "$share" --steps 900 --settle-steps 100 --contract-from-truth \
+            --reference autonomous --num-envs 213 --gait-probes transfer/probes/gait_probes.json \
+            --joints --policy-obs --output "$file" > "$log" 2>&1
+        fi
         grep -aqE "Unable to open the usd file at path: https|USD file not found at path at: 'https" "$log" || break
         note "$body r$round: an asset could not be opened (attempt $attempt); retrying"
         rm -f "$file"
       done
     fi
     if [ ! -f "$file" ]; then note "$body r$round: capture FAILED, see $log"; continue; fi
+    if [ "$where" = train ]; then
+      note "$body r$round (train env): $(tail -1 "$log" | cut -c1-200)"
+      continue
+    fi
     "$python" transfer/scripts/evaluate_competence.py --capture "$file" --output "$result" \
       > "logs/pact/dagger_${tag}_r${round}_${body}_score.log" 2>&1 \
       && note "$body r$round: $(tail -1 "$log" | cut -c1-200)" \
       || note "$body r$round: scoring FAILED"
   done
-  if [ "$round" -lt "$last" ]; then
+  if [ "$round" -lt "$last" ] || [ "$train_last" = 1 ]; then
     next="logs/pact/models/d1_${tag}_r${round}.pt"
     "$python" -u transfer/scripts/pact_gate_d.py --bodies "$(echo $bodies | tr ' ' ',')" \
-      --dagger "logs/pact/dagger/$tag/r*/{body}.npz" --init "$model" --steps "$train_steps" \
+      --dagger "$aggregate" --init "$model" --steps "$train_steps" \
       --arms hold,pact_d --save "$next" \
       --output "transfer/results/icml_gate_d1_${tag}_train_r${round}.json" \
       > "logs/pact/dagger_${tag}_train_r${round}.log" 2>&1 \

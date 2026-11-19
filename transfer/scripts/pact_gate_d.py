@@ -242,10 +242,13 @@ class BodyData:
         dt_star = float(data["control_dt"]) / self.time_unit
         out["times"] = (np.arange(1, view + 1) * dt_star).astype(np.float32)
         out["group"] = env.astype(np.int64)
-        probe = data["probe_index"][env]
-        if not np.array_equal(probe, env % PROBES):
-            raise ValueError(f"{path}: environments are not laid out probe by probe")
-        out["test"] = probe % 4 == 0
+        if "probe_index" in data.files:
+            probe = data["probe_index"][env]
+            if not np.array_equal(probe, env % PROBES):
+                raise ValueError(f"{path}: environments are not laid out probe by probe")
+            out["test"] = probe % 4 == 0
+        else:  # a capture in the training task's own plans (pact_dagger.sh, PACT_DAGGER_ENV=train)
+            out["test"] = np.zeros(len(env), bool)
         return out
 
     @staticmethod

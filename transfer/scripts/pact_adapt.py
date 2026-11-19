@@ -256,6 +256,8 @@ def main() -> int:
         runner.learn(num_learning_iterations=warmup, init_at_random_ep_len=True)
         for p in tuned:
             p.requires_grad_(True)
+        # rsl-rl resumes at the last iteration it ran; the next one is ``warmup``.
+        runner.current_learning_iteration = warmup
         # The adaptive schedule raised the rate while the actor could not move (KL 0).
         runner.alg.learning_rate = args.learning_rate
         for group in runner.alg.optimizer.param_groups:

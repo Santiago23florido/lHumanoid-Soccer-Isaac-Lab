@@ -86,6 +86,13 @@ class PactDims:
     anchor_inputs: bool = False
     """Entity queries also read the analytic anchors (:mod:`.anchors`): the centroid its
     13 fields, each contact its 7, with what is not known exactly set to zero."""
+    timed_plan: bool = False
+    """The decoder reads a plan of any length: each step tagged by its time ahead in the
+    body's own unit ``sqrt(L/g)`` instead of a learned per-index embedding (bodies see plans
+    of different step counts over the same dimensionless span), each entity both as its
+    value and as its difference to the current estimate, and each step's path (where the
+    reference will be: CoM ahead and sideways in leg lengths, heading in radians). Steps a
+    body does not have are masked."""
 
 
 @dataclass
@@ -357,10 +364,15 @@ class JointDecoder(nn.Module):
         super().__init__()
         w = dims.width
         self.dims = dims
-        self.plan_centroid = nn.Linear(CENTROID_SIZE, w)
-        self.plan_contact = nn.Linear(CONTACT_SIZE, w)
+        values = 2 if dims.timed_plan else 1
+        self.plan_centroid = nn.Linear(values * CENTROID_SIZE, w)
+        self.plan_contact = nn.Linear(values * CONTACT_SIZE, w)
         self.plan_contact_side = nn.Linear(w, w)
-        self.step = nn.Parameter(torch.randn(dims.plan_steps, w) * 0.02)
+        if dims.timed_plan:
+            self.plan_time = nn.Sequential(nn.Linear(1, w), nn.GELU(), nn.Linear(w, w))
+            self.plan_path = nn.Linear(3, w)
+        else:
+            self.step = nn.Parameter(torch.randn(dims.plan_steps, w) * 0.02)
         self.bias = GraphBias(dims.heads, dims.max_distance)
         self.cross = nn.ModuleList(
             Block(w, dims.heads, dims.ff_mult, cross=True) for _ in range(dims.decoder_layers)
@@ -376,10 +388,21 @@ class JointDecoder(nn.Module):
         bodies: BodyBatch,
         centroid: torch.Tensor,
         contacts: torch.Tensor,
+        time: torch.Tensor | None = None,
+        path: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """``centroid (B, H, 13)``, ``contacts (B, H, K, 7)`` -> ``(B, H * (1 + K), W)``."""
+        """``centroid (B, H, 13)``, ``contacts (B, H, K, 7)`` -> ``(B, H * (1 + K), W)``.
+
+        With ``dims.timed_plan`` the entities carry 26 and 14 numbers (value, then its
+        difference to the estimate), ``time (B, H)`` and ``path (B, H, 3)`` are required.
+        """
         batch, steps = centroid.shape[:2]
-        step = self.step[:steps][None]
+        if self.dims.timed_plan:
+            if time is None or path is None:
+                raise ValueError("a timed plan needs each step's time and path")
+            step = self.plan_time(time[..., None]) + self.plan_path(path)
+        else:
+            step = self.step[:steps][None]
         side = self.plan_contact_side(_gather(joints, bodies.contact_joint))
         c = self.plan_centroid(centroid) + step
         k = self.plan_contact(contacts) + step[:, :, None] + side[:, None]
@@ -393,16 +416,31 @@ class JointDecoder(nn.Module):
         embodiment: torch.Tensor,
         plan_centroid: torch.Tensor,
         plan_contacts: torch.Tensor,
+        plan_time: torch.Tensor | None = None,
+        plan_path: torch.Tensor | None = None,
+        plan_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """``-> (B, J)`` joint position targets (padded joints are zero)."""
-        memory = torch.cat(
-            [latent, self.plan_tokens(joints, bodies, plan_centroid, plan_contacts), embodiment],
-            dim=1,
-        )
+        """``-> (B, J)`` joint position targets (padded joints are zero).
+
+        ``plan_mask (B, H)``: True on the plan steps a body has (all when None).
+        """
+        plan = self.plan_tokens(joints, bodies, plan_centroid, plan_contacts, plan_time, plan_path)
+        memory = torch.cat([latent, plan, embodiment], dim=1)
+        memory_mask = None
+        if plan_mask is not None:
+            per_step = 1 + plan_contacts.shape[2]
+            memory_mask = torch.cat(
+                [
+                    plan_mask.new_ones(latent.shape[:2]),
+                    plan_mask.repeat_interleave(per_step, dim=1),
+                    plan_mask.new_ones(embodiment.shape[:2]),
+                ],
+                dim=1,
+            )
         bias = self.bias(bodies.distance, bodies.ancestor)
         x = joints
         for cross, own in zip(self.cross, self.self_attention, strict=True):
-            x = cross(x, memory=memory)
+            x = cross(x, memory=memory, key_mask=memory_mask)
             x = own(x, bias=bias, key_mask=bodies.mask)
         return self.head(x)[..., 0] * bodies.mask
 

@@ -29,6 +29,9 @@ from humanoid_transfer.transfer.latent.pact.tokens import split
 
 SKILL = 27
 
+PLAN_LIMIT = 50.0
+"""The clamp on a tracker's plan view, normalised units (``tracking/command._PLAN_LIMIT``)."""
+
 
 def view_steps(observation_width: int, body_width: int) -> int:
     """Plan steps in a tracker's view: its policy observation is ``body_width`` numbers of

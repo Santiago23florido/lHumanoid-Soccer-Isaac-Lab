@@ -30,6 +30,14 @@ Usage::
 
     python transfer/scripts/pact_gate_d.py
     python transfer/scripts/pact_gate_d.py --hold-out nao --output <json>
+
+DAgger (G-D1): each round's captures (``capture_contract.py --pact-model``) join the map
+captures, and the previous round's model is the start::
+
+    python transfer/scripts/pact_gate_d.py --dagger "logs/pact/dagger/<tag>/r*/{body}.npz"
+        --init logs/pact/models/<previous>.pt --steps 8000 --save logs/pact/models/<next>.pt
+
+(one command; ``pact_dagger.sh`` runs the rounds).
 """
 
 from __future__ import annotations
@@ -59,6 +67,7 @@ from humanoid_transfer.transfer.latent.pact.descriptors import (  # noqa: E402
 )
 from humanoid_transfer.transfer.latent.pact.model import PactDims, stack_bodies  # noqa: E402
 from humanoid_transfer.transfer.latent.pact.policy import (  # noqa: E402
+    PLAN_LIMIT,
     SKILL,
     PactPolicy,
     plan_from_view,
@@ -79,8 +88,21 @@ CONTRACTS = "g1=walk_dagger3e,nao=walk_dagger2e,h1=walk_dagger3e,cassie=walk_dag
 """The contract each body's co-executions ran under (``pact_coexecute.sh``)."""
 
 
+def unclamped(estimate: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+    """``(...)`` bool: rows whose estimate the tracker's view holds unclamped. A body far out
+    of the plan's range (fallen) is seen clamped at ``PLAN_LIMIT`` normalised units; the
+    clamped view is what the tracker, and so its label, saw: those rows are kept."""
+    return (np.abs((estimate - mean) / std) < PLAN_LIMIT).all(-1)
+
+
 class BodyData:
-    """One body's samples: inputs, labels and its constants."""
+    """One body's samples, from its map capture and any DAgger captures: inputs and labels.
+
+    In a map capture the tracker drove, and the label is the target it set (read at the
+    next step); in a DAgger capture (``capture_contract.py --pact-model``) PACT drove and
+    the label is the tracker's own action on that state, ``q0 + scale * a`` on the action's
+    joints. The offline metric reads the map capture's test probes only (``evaluate``).
+    """
 
     def __init__(self, body, args, registry):
         entry = registry[body]
@@ -88,10 +110,36 @@ class BodyData:
         unit = entry.get("leg_length_unit")
         self.descriptor = describe(card, leg_length=unit)
         self.contacts = contact_joints(card)
-        path = REPO / args.captures.format(body=body)
+        self.anchors = KinematicAnchors(card, unit, sole_override(body))
+        self.time_unit = float(np.sqrt(self.descriptor.leg_length / GRAVITY))
+        self.card, self.name = card, body
+        contract = dict(c.split("=") for c in args.contracts.split(","))[body]
+        norm = torch.load(
+            REPO / f"logs/contract/{contract}/generator.pt", map_location="cpu", weights_only=False
+        )["generator"]
+        self.skill = norm["skill_norm.mean"].numpy(), norm["skill_norm.std"].numpy()
+        paths = [REPO / args.captures.format(body=body)]
+        if args.dagger:
+            paths += sorted(REPO.glob(args.dagger.format(body=body)))
+        parts = [
+            self._samples(path, args, args.stride if i == 0 else args.dagger_stride)
+            for i, path in enumerate(paths)
+        ]
+        for i, part in enumerate(parts):
+            part["group"] = i * 1000 + part["group"]
+            part["evaluate"] = part["test"] & (i == 0)
+        for key in parts[0]:
+            if key not in ("view", "times", "controlled"):
+                setattr(self, key, np.concatenate([part[key] for part in parts]))
+        self.view, self.times = parts[0]["view"], parts[0]["times"]
+        self.controlled = parts[0]["controlled"]
+        self.captures = [str(path.relative_to(REPO)) for path in paths]
+        self.capture_samples = [int(len(part["label"])) for part in parts]
+
+    def _samples(self, path: Path, args, stride: int) -> dict:
         h = args.history
         w = load_body(
-            body,
+            self.name,
             [path],
             h,
             self.descriptor.leg_length,
@@ -99,11 +147,9 @@ class BodyData:
             extra=("joint_pos_target",),
             constants=DRIVES + ("default_joint_pos",),
         )
-        anchors = KinematicAnchors(card, unit, sole_override(body))
-        drive = DriveLoads(card, anchors)
+        drive = DriveLoads(self.card, self.anchors)
         drive.set_drives(*(w.constants[k] for k in DRIVES))
-        self.time_unit = float(np.sqrt(self.descriptor.leg_length / GRAVITY))
-        analytic = analytic_z(anchors, w, self.time_unit)
+        analytic = analytic_z(self.anchors, w, self.time_unit)
         physics = physics_bases(drive, w, analytic, self.time_unit)
 
         data = np.load(path)
@@ -114,7 +160,7 @@ class BodyData:
         # the episode) and at t (the label, set at t, is read at t + 1).
         keep = (t - h >= 0) & (t + 1 < steps) & ~done[t, env]
         keep &= ~done[np.maximum(t - h, 0), env]
-        keep = np.nonzero(keep)[0][:: args.stride]
+        keep = np.nonzero(keep)[0][::stride]
         t, env = t[keep], env[keep]
 
         q0 = data["default_joint_pos"].astype(np.float32)
@@ -122,7 +168,8 @@ class BodyData:
         target = data["joint_pos_target"]
         rows = t[:, None] + np.arange(-h + 1, 1)[None]
         cols = env[:, None]
-        self.joint_obs = (
+        out: dict = {}
+        out["joint_obs"] = (
             np.stack(
                 [
                     q[rows, cols] - q0,
@@ -134,49 +181,60 @@ class BodyData:
             .transpose(0, 2, 1, 3)
             .astype(np.float32)
         )  # (N, J, h, 3)
-        self.imu = w.imu[keep]
-        self.label = (target[t + 1, env] - q0).astype(np.float32)
-        self.hold = (target[t, env] - q0).astype(np.float32)
-        self.controlled = target.reshape(-1, target.shape[-1]).std(0) > 1e-6
-        self.anchor_in = with_physics(analytic[keep], physics[keep])
-        self.learned = residual_targets(w.z[keep], analytic[keep], physics[keep])
-        self.z = w.z[keep]
+        out["imu"] = w.imu[keep]
+        if "action_joints" in data.files:
+            joints = data["action_joints"]
+            label = np.zeros((len(t), len(q0)), np.float32)
+            label[:, joints] = data["action_scale"] * data["action_teacher"][t, env]
+            controlled = np.zeros(len(q0), bool)
+            controlled[joints] = True
+        else:
+            label = target[t + 1, env] - q0
+            controlled = target.reshape(-1, target.shape[-1]).std(0) > 1e-6
+        out["label"] = label.astype(np.float32)
+        out["hold"] = (target[t, env] - q0).astype(np.float32)
+        out["controlled"] = controlled
+        out["anchor_in"] = with_physics(analytic[keep], physics[keep])
+        out["learned"] = residual_targets(w.z[keep], analytic[keep], physics[keep])
+        out["z"] = w.z[keep]
 
-        contract = dict(c.split("=") for c in args.contracts.split(","))[body]
-        norm = torch.load(
-            REPO / f"logs/contract/{contract}/generator.pt", map_location="cpu", weights_only=False
-        )["generator"]
-        mean, std = norm["skill_norm.mean"].numpy(), norm["skill_norm.std"].numpy()
+        mean, std = self.skill
         obs = data["policy_obs"]
         estimate = data["estimate"]
-        self.view = self._view(obs, estimate, mean, std)
-        tail = obs[t, env, obs.shape[-1] - (self.view * (SKILL + 3) + SKILL) :]
-        upcoming, est, self.path = plan_from_view(tail, self.view, mean, std)
-        error = float(np.abs(est - estimate[t, env]).max())
+        view = self._view(obs, estimate, mean, std)
+        tail = obs[t, env, obs.shape[-1] - (view * (SKILL + 3) + SKILL) :]
+        upcoming, est, path_ahead = plan_from_view(tail, view, mean, std)
+        inside = unclamped(estimate[t, env], mean, std)
+        error = float(np.abs(est - estimate[t, env])[inside].max()) if inside.any() else 0.0
         if error > 1e-3:
-            raise ValueError(f"{body}: decoded estimate differs from the capture's by {error}")
-        self.plan = upcoming.astype(np.float32)
-        self.relative = (upcoming - est[:, None]).astype(np.float32)
-        self.path = self.path.astype(np.float32)
+            raise ValueError(f"{path}: decoded estimate differs from the capture's by {error}")
+        out["clamped"] = ~inside
+        out["plan"] = upcoming.astype(np.float32)
+        out["relative"] = (upcoming - est[:, None]).astype(np.float32)
+        out["path"] = path_ahead.astype(np.float32)
+        out["view"] = view
         dt_star = float(data["control_dt"]) / self.time_unit
-        self.times = (np.arange(1, self.view + 1) * dt_star).astype(np.float32)
-        self.group = env.astype(np.int64)
+        out["times"] = (np.arange(1, view + 1) * dt_star).astype(np.float32)
+        out["group"] = env.astype(np.int64)
         probe = data["probe_index"][env]
         if not np.array_equal(probe, env % PROBES):
-            raise ValueError(f"{body}: environments are not laid out probe by probe")
-        self.test = probe % 4 == 0
-        self.name = body
+            raise ValueError(f"{path}: environments are not laid out probe by probe")
+        out["test"] = probe % 4 == 0
+        return out
 
     @staticmethod
     def _view(obs, estimate, mean, std) -> int:
-        """The view length whose decoded estimate matches the capture's (rows 20-200)."""
+        """The view length whose decoded estimate matches the capture's (rows 20-200, where
+        the view is not clamped)."""
+        rows = slice(20, 200)
+        inside = unclamped(estimate[rows], mean, std)
         for view in range(1, 20):
             width = view * (SKILL + 3) + SKILL
             if width > obs.shape[-1]:
                 break
             start = obs.shape[-1] - width + view * SKILL
-            zhat = obs[20:200, :, start : start + SKILL] * std + mean
-            if np.abs(zhat - estimate[20:200]).max() < 1e-3:
+            zhat = obs[rows, :, start : start + SKILL] * std + mean
+            if inside.any() and np.abs(zhat - estimate[rows])[inside].max() < 1e-3:
                 return view
         raise ValueError("no plan view decodes to the capture's estimate")
 
@@ -186,6 +244,18 @@ def main() -> int:
     parser.add_argument("--bodies", default="g1,nao,h1,cassie")
     parser.add_argument("--hold-out", default="")
     parser.add_argument("--captures", default="logs/pact/coexec/{body}_map.npz")
+    parser.add_argument(
+        "--dagger",
+        default="",
+        help="glob of a body's DAgger captures, e.g. logs/pact/dagger/r*/{body}.npz",
+    )
+    parser.add_argument("--dagger-stride", type=int, default=2)
+    parser.add_argument(
+        "--init",
+        type=Path,
+        default=None,
+        help="start pact_d from this checkpoint and its normalisers",
+    )
     parser.add_argument("--contracts", default=CONTRACTS)
     parser.add_argument("--history", type=int, default=4)
     parser.add_argument("--stride", type=int, default=1, help="keep every n-th window")
@@ -223,17 +293,25 @@ def main() -> int:
     def pooled(key):
         return np.concatenate([getattr(bodies[i], key)[train_rows[i]] for i in train_index])
 
-    z = pooled("z")
-    z_mean, z_std = z.mean(0), np.maximum(z.std(0), 1e-3)
-    a = pooled("anchor_in")
-    a_mean, a_std = a.mean(0), np.maximum(a.std(0), 1e-3)
-    t_all = pooled("learned")
-    t_mean, t_std = t_all.mean(0), np.maximum(t_all.std(0), 1e-3)
+    init = torch.load(args.init, map_location="cpu", weights_only=False) if args.init else None
+    if init is not None:
+        z_mean, z_std, a_mean, a_std, t_mean, t_std = (
+            np.asarray(init[k]) for k in ("z_mean", "z_std", "a_mean", "a_std", "t_mean", "t_std")
+        )
+    else:
+        z = pooled("z")
+        z_mean, z_std = z.mean(0), np.maximum(z.std(0), 1e-3)
+        a = pooled("anchor_in")
+        a_mean, a_std = a.mean(0), np.maximum(a.std(0), 1e-3)
+        t_all = pooled("learned")
+        t_mean, t_std = t_all.mean(0), np.maximum(t_all.std(0), 1e-3)
     label_scale = float(
         np.sqrt(
             np.mean([np.mean(bodies[i].label[:, bodies[i].controlled] ** 2) for i in train_index])
         )
     )
+    if init is not None:
+        label_scale = float(init["label_scale"])
     as_t = lambda x: torch.as_tensor(np.asarray(x, dtype=np.float32), device=device)  # noqa: E731
     table = stack_bodies([b.descriptor for b in bodies], [b.contacts for b in bodies]).to(device)
     count = table.mask.shape[1]
@@ -297,7 +375,7 @@ def main() -> int:
     seconds: dict[str, float] = {}
     if "hold" in arms:
         for i, b in enumerate(bodies):
-            predictions["hold"][i] = b.hold[b.test]
+            predictions["hold"][i] = b.hold[b.evaluate]
 
     if "pact_d" in arms:
         dims = PactDims(
@@ -308,6 +386,10 @@ def main() -> int:
             timed_plan=True,
         )
         model = PactPolicy(dims).to(device)
+        if init is not None:
+            if PactDims(**init["dims"]) != dims:
+                raise ValueError("--init was trained with other dimensions")
+            model.load_state_dict(init["state"])
         per = max(1, args.batch // len(train_index))
 
         def step_pact():
@@ -329,7 +411,7 @@ def main() -> int:
         for i, b in enumerate(bodies):
             out = []
             with torch.no_grad():
-                for rows in chunks(np.nonzero(b.test)[0]):
+                for rows in chunks(np.nonzero(b.evaluate)[0]):
                     x = batch(i, rows)
                     x.pop("label"), x.pop("learned")
                     which = torch.full((len(rows),), i, device=device, dtype=torch.long)
@@ -393,7 +475,7 @@ def main() -> int:
             params[f"mlp_d/{b.name}"] = sum(p.numel() for p in model.parameters())
             out = []
             with torch.no_grad():
-                for rows in chunks(np.nonzero(b.test)[0]):
+                for rows in chunks(np.nonzero(b.evaluate)[0]):
                     full = np.zeros((len(rows), len(b.controlled)), np.float32)
                     full[:, moved] = model(features(rows)).cpu().numpy()
                     out.append(full)
@@ -409,14 +491,15 @@ def main() -> int:
     }
     for i, b in enumerate(bodies):
         moved = b.controlled
-        truth = b.label[b.test][:, moved]
-        groups = b.group[b.test]
+        truth = b.label[b.evaluate][:, moved]
+        groups = b.group[b.evaluate]
         variance = float(truth.var(0).mean())
         entry: dict = {
             "held_out": b.name == args.hold_out,
             "view": b.view,
             "controlled_joints": int(moved.sum()),
-            "test_samples": int(b.test.sum()),
+            "test_samples": int(b.evaluate.sum()),
+            "captures": dict(zip(b.captures, b.capture_samples, strict=True)),
             "label_variance_rad2": variance,
         }
         sq = {

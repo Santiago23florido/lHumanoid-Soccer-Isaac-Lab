@@ -120,3 +120,14 @@ def test_gradients_reach_every_policy_parameter():
     (learned.square().mean() + targets.square().mean()).backward()
     missing = [n for n, p in model.named_parameters() if p.grad is None]
     assert not missing, missing
+
+
+def test_the_plan_limit_is_the_trackers():
+    import re
+
+    from humanoid_transfer.transfer.latent.pact.policy import PLAN_LIMIT
+
+    source = (
+        REPO / "source/humanoid_transfer/humanoid_transfer/transfer/tasks/tracking/command.py"
+    ).read_text("utf-8")
+    assert float(re.search(r"^_PLAN_LIMIT = ([0-9.]+)", source, re.M).group(1)) == PLAN_LIMIT

@@ -16,7 +16,9 @@ Budgets are nested (the first k of one permutation), the same draw for every arm
 adaptation runs a fixed number of steps, no early stopping. Metric as G-A3 (encoder) or
 G-X (translator) on the held-out body's test probes or chains. Cost: tuned parameters
 (counting only the held-out body's own tokens), adaptation seconds, simulated seconds of
-the body's data. Pretrained models are cached in ``logs/pact/models/``.
+the body's data. Every arm is also compared, paired over the same bootstrap draws, with
+the budget's best arm (``minus_best``), which the registered selection rule reads.
+Pretrained models are cached in ``logs/pact/models/``.
 
 Usage::
 
@@ -241,12 +243,13 @@ def run_translator(args, device) -> dict:
             }
             print(f"k={k} {arm}: {entry['arms'][arm]}", flush=True)
         boot = {arm: gx.bootstrap_rmse(v, chain_rows, counts) for arm, v in values.items()}
+        entry["best"] = best = min(values, key=lambda a: entry["arms"][a]["rmse"])
         for arm in values:
-            for ref in ("zero", "scratch"):
+            for name, ref in (("zero", "zero"), ("scratch", "scratch"), ("best", best)):
                 if ref in values and arm != ref:
                     row = entry["arms"][arm]
-                    row[f"minus_{ref}"] = row["rmse"] - entry["arms"][ref]["rmse"]
-                    row[f"minus_{ref}_se"] = float(np.std(boot[arm] - boot[ref]))
+                    row[f"minus_{name}"] = row["rmse"] - entry["arms"][ref]["rmse"]
+                    row[f"minus_{name}_se"] = float(np.std(boot[arm] - boot[ref]))
         report["budgets"][k] = entry
     return report
 
@@ -461,8 +464,9 @@ def run_encoder(args, device) -> dict:
                 "adapt_seconds": round(seconds, 1),
             }
             print(f"k={k} {arm}: all {entry['arms'][arm]['rmse']['all']:.4f}", flush=True)
+        entry["best"] = best = min(errors, key=lambda a: entry["arms"][a]["rmse"]["all"])
         for arm in errors:
-            for ref in ("zero", "scratch"):
+            for name, ref in (("zero", "zero"), ("scratch", "scratch"), ("best", best)):
                 if ref in errors and arm != ref:
                     _, _, diff, se = bootstrap_rmse(
                         (errors[arm] ** 2).mean(1),
@@ -471,8 +475,8 @@ def run_encoder(args, device) -> dict:
                         args.bootstrap,
                         args.seed,
                     )
-                    entry["arms"][arm][f"minus_{ref}"] = diff
-                    entry["arms"][arm][f"minus_{ref}_se"] = se
+                    entry["arms"][arm][f"minus_{name}"] = diff
+                    entry["arms"][arm][f"minus_{name}_se"] = se
         report["budgets"][k] = entry
     return report
 

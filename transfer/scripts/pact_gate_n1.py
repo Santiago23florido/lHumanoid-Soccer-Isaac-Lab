@@ -156,7 +156,7 @@ def run_translator(args, device) -> dict:
     held_pairs = [(s, h) for s in seen]
 
     MODELS.mkdir(parents=True, exist_ok=True)
-    path = MODELS / f"n1_translator_{args.hold_out}_s{args.seed}.pt"
+    path = MODELS / f"n1_translator_{args.hold_out}_s{args.seed}_p{args.pretrain_steps}.pt"
     pretrained = CrossBodyTranslator(dims, window).to(device)
     if path.exists():
         pretrained.load_state_dict(torch.load(path, map_location=device))
@@ -353,7 +353,9 @@ def run_encoder(args, device) -> dict:
 
     rng = np.random.default_rng(args.seed)
     MODELS.mkdir(parents=True, exist_ok=True)
-    path = MODELS / f"n1_encoder_{args.encoder}_{args.hold_out}_s{args.seed}.pt"
+    path = (
+        MODELS / f"n1_encoder_{args.encoder}_{args.hold_out}_s{args.seed}_p{args.pretrain_steps}.pt"
+    )
     torch.manual_seed(args.seed)
     pretrained = SharedAnchored(dims).to(device)
     if path.exists():

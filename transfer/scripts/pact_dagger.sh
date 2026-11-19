@@ -37,7 +37,9 @@ first="${PACT_DAGGER_FIRST:-1}"
 last=$((first + rounds - 1))
 where="${PACT_DAGGER_ENV:-probes}"
 share="${PACT_DAGGER_TEACHER_SHARE:-0}"
-aggregate="${PACT_DAGGER_GLOB:-logs/pact/dagger/$tag/r*/{body}.npz}"
+# (A brace inside ${...:-...} would end the expansion early: the default is set apart.)
+this_tag="logs/pact/dagger/$tag/r*/{body}.npz"
+aggregate="${PACT_DAGGER_GLOB:-$this_tag}"
 train_last="${PACT_DAGGER_TRAIN_LAST:-0}"
 status="logs/pact/dagger_${tag}.status"
 mkdir -p logs/pact

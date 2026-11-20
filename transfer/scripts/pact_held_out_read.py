@@ -114,6 +114,7 @@ def main() -> int:
     parser.add_argument("--bootstrap", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--against", default="", help="another PACT tag, e.g. pact_final")
     args = parser.parse_args()
     report = read(args.pact_tag, args.bootstrap, args.seed)
     output = args.output or REPO / f"transfer/results/icml_held_out_{args.pact_tag}.json"
@@ -141,6 +142,33 @@ def main() -> int:
                 f"{c['falls']['tracker']:.0f} ({c['falls_diff']:+.0f} ± {c['falls_se']:.1f}); "
                 f"largest ratio {c['largest_ratio']:.2f}; passes {c['passes']}"
             )
+    if args.against:
+        # An arm against another PACT model (an adoption rule): held-out falls summed over
+        # both bodies, both generators and the sidestep commands; SE by bootstrap over
+        # environments, the two runs independent.
+        rng = np.random.default_rng(args.seed + 1)
+        pairs, total = [], {"new": 0.0, "old": 0.0}
+        for body in SEED:
+            old = [falls_per_env(body, f"{args.against}_{body}", g) for g in HELD_OUT]
+            new = [falls_per_env(body, f"{args.pact_tag}_{body}", g) for g in HELD_OUT]
+            if any(x is None for x in old + new):
+                print(f"{body}: incomplete for --against")
+                continue
+            old_all, new_all = np.concatenate(old), np.concatenate(new)
+            total["old"] += old_all.sum()
+            total["new"] += new_all.sum()
+            pairs += [boot_se(old_all, args.bootstrap, rng), boot_se(new_all, args.bootstrap, rng)]
+        se = float(np.sqrt(np.sum(np.square(pairs)))) if pairs else float("nan")
+        diff = total["new"] - total["old"]
+        report["against"] = {
+            "tag": args.against, "falls_new": total["new"], "falls_old": total["old"],
+            "diff": diff, "se": se, "drops_by_2se": bool(diff < -2 * se),
+        }  # fmt: skip
+        output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(
+            f"{args.pact_tag} against {args.against}: held-out falls {total['new']:.0f} vs "
+            f"{total['old']:.0f} ({diff:+.0f} ± {se:.1f}); drops by > 2 SE: {diff < -2 * se}"
+        )
     print(f"written {output}")
     return 0
 

@@ -70,6 +70,7 @@ from humanoid_transfer.transfer.latent.pact.descriptors import (  # noqa: E402
     contact_joints,
     describe,
 )
+from humanoid_transfer.transfer.latent.pact.mirror import SampleMirror  # noqa: E402
 from humanoid_transfer.transfer.latent.pact.model import PactDims, stack_bodies  # noqa: E402
 from humanoid_transfer.transfer.latent.pact.policy import (  # noqa: E402
     PLAN_LIMIT,
@@ -170,6 +171,8 @@ class BodyData:
         self.controlled = parts[0]["controlled"]
         self.captures = [str(path.relative_to(REPO)) for path in paths]
         self.capture_samples = [int(len(part["label"])) for part in parts]
+        q0 = np.asarray(np.load(paths[0])["default_joint_pos"], dtype=np.float32)
+        self.mirror = SampleMirror.for_body(REPO, body, self.descriptor.joint_names, q0)
 
     def _samples(self, path: Path, args, stride: int) -> dict:
         h = args.history
@@ -293,6 +296,11 @@ def main() -> int:
     parser.add_argument("--batch", type=int, default=512)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--anchor-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--mirror",
+        action="store_true",
+        help="train pact_d on each sample or its mirror image, at random (pact/mirror.py)",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bootstrap", type=int, default=2000)
     parser.add_argument("--arms", default="hold,pact_d,mlp_d")
@@ -349,34 +357,59 @@ def main() -> int:
     for i, b in enumerate(bodies):
         controlled[i, : len(b.controlled)] = torch.as_tensor(b.controlled, device=device)
 
-    def batch(i: int, rows: np.ndarray) -> dict[str, torch.Tensor]:
+    def batch(i: int, rows: np.ndarray, augment: bool = False) -> dict[str, torch.Tensor]:
         b = bodies[i]
         n, j, v = len(rows), b.joint_obs.shape[1], b.view
+        raw = {
+            "joint_obs": b.joint_obs[rows],
+            "imu": b.imu[rows],
+            "anchor_in": b.anchor_in[rows],
+            "plan": b.plan[rows],
+            "relative": b.relative[rows],
+            "path": b.path[rows],
+            "label": b.label[rows],
+            "learned": b.learned[rows],
+        }
+        if augment and args.mirror:  # each sample or its mirror image, at random
+            flip = rng.random(n) < 0.5
+            m = b.mirror
+            for key, reflect in (
+                ("joint_obs", m.joint_obs),
+                ("imu", m.imu),
+                ("anchor_in", m.skill),
+                ("plan", m.skill),
+                ("relative", m.skill),
+                ("path", m.path),
+                ("label", m.positions),
+                ("learned", m.learned),
+            ):
+                raw[key] = raw[key].copy()
+                raw[key][flip] = reflect(raw[key][flip])
         obs = np.zeros((n, count, args.history, 3), np.float32)
-        obs[:, :j] = b.joint_obs[rows]
+        obs[:, :j] = raw["joint_obs"]
         plan = np.zeros((n, steps_max, SKILL), np.float32)
-        plan[:, :v] = (b.plan[rows] - z_mean) / z_std
+        plan[:, :v] = (raw["plan"] - z_mean) / z_std
         rel = np.zeros((n, steps_max, SKILL), np.float32)
-        rel[:, :v] = b.relative[rows] / z_std
+        rel[:, :v] = raw["relative"] / z_std
         path = np.zeros((n, steps_max, 3), np.float32)
-        path[:, :v] = b.path[rows]
+        path[:, :v] = raw["path"]
         times = np.zeros((n, steps_max), np.float32)
         times[:, :v] = b.times
         mask = np.zeros((n, steps_max), bool)
         mask[:, :v] = True
         label = np.zeros((n, count), np.float32)
-        label[:, :j] = b.label[rows]
+        label[:, :j] = raw["label"]
         return {
             "joint_obs": as_t(obs),
-            "imu": as_t(b.imu[rows]),
-            "anchor_in": as_t((b.anchor_in[rows] - a_mean) / a_std),
+            "imu": as_t(raw["imu"]),
+            "anchor_in": as_t((raw["anchor_in"] - a_mean) / a_std),
             "plan": as_t(plan),
             "plan_relative": as_t(rel),
             "plan_time": as_t(times),
             "plan_path": as_t(path),
             "plan_mask": torch.as_tensor(mask, device=device),
             "label": as_t(label),
-            "learned": as_t((b.learned[rows] - t_mean) / t_std),
+            "learned": as_t((raw["learned"] - t_mean) / t_std),
         }
 
     def fit(model: nn.Module, step_fn, label: str) -> float:
@@ -422,7 +455,7 @@ def main() -> int:
         per = max(1, args.batch // len(train_index))
 
         def step_pact():
-            parts = [batch(i, rng.choice(train_rows[i], per)) for i in train_index]
+            parts = [batch(i, rng.choice(train_rows[i], per), augment=True) for i in train_index]
             x = {k: torch.cat([p[k] for p in parts]) for k in parts[0]}
             which = torch.cat(
                 [torch.full((per,), i, device=device, dtype=torch.long) for i in train_index]

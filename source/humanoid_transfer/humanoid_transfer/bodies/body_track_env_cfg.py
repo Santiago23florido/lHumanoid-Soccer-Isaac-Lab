@@ -57,6 +57,7 @@ from ..transfer.tasks.tracking import (
     contract_privileged,
     contract_view,
 )
+from ..transfer.tasks.tracking.contact_reward import contact_schedule
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 REGISTRY = REPO_ROOT / "transfer" / "bodies" / "bodies.json"
@@ -80,6 +81,8 @@ PROCEDURAL_DUTY = (
 )
 """The procedural biped's duty range (``ReferenceCommandCfg.procedural_duty``); unset keeps
 the family's, "0.55,0.95" restricts it to walks."""
+CONTACT_REWARD = float(os.environ.get("HUMANOID_CONTACT_REWARD", "0"))
+"""Weight of the plan's contact schedule in the reward (``tracking/contact_reward.py``); 0: off."""
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_g1.json"
 """A new body has no estimator of its own yet: its reward reads loads at the G1's
 measured precision, in the dimensionless log space every body shares."""
@@ -179,6 +182,11 @@ class BodyTrackRewards(RewardsCfg):
         func=contract_likelihood,
         weight=1.0,
         params={"command_name": COMMAND, "kernels": OCTAVES, "weights": OCTAVE_WEIGHTS},
+    )
+    contact_schedule = (
+        RewTerm(func=contact_schedule, weight=CONTACT_REWARD, params={"command_name": COMMAND})
+        if CONTACT_REWARD
+        else None
     )
 
 

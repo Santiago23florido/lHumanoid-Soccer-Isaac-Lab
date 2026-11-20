@@ -55,22 +55,26 @@ setup() {  # setup <body> <variant>: the teacher and conditions of the co-execut
       ;;
     *) note "$1: unknown body"; return 1 ;;
   esac
-  case "$2" in
-    walk | walkplain)  # the walking-family fine-tune (pact_walk_teachers.sh)
-      run="$(latest_run "logs/rsl_rl/${1}_track" "walkfam_$1")"
-      [ -n "$run" ] || { note "$1 $2: no walkfam run"; return 1; }
-      checkpoint="$(latest_checkpoint "$run")"
-      ;;
-  esac
+  # A fine-tuned teacher (pact_walk_teachers.sh): variant <tag> (symmetrised) or <tag>plain,
+  # from the latest <stamp>_<run tag>_<body> run (walk -> walkfam, contact -> contactsched).
+  local family="${2%plain}" runtag=""
+  case "$family" in walk) runtag=walkfam ;; contact) runtag=contactsched ;; esac
+  if [ -n "$runtag" ]; then
+    run="$(latest_run "logs/rsl_rl/${1}_track" "${runtag}_$1")"
+    [ -n "$run" ] || { note "$1 $2: no ${runtag} run"; return 1; }
+    checkpoint="$(latest_checkpoint "$run")"
+  fi
   policy="$run/exported/$checkpoint.pt"
-  case "$2" in sym | walk) policy="$run/exported/${checkpoint}_sym_pact.pt" ;; esac
+  case "$2" in sym | walk | contact) policy="$run/exported/${checkpoint}_sym_pact.pt" ;; esac
   [ -f "$policy" ] || { note "$1 $2: no policy $policy"; return 1; }
 }
 
 ladder() {  # ladder <body> <variant>: W20's L4 for the G1 and the NAO, base tasks and sidestep
   local body="$1" v="$2" seed tag units
   seed=$([ "$body" = g1 ] && echo 41 || echo 31)
-  tag="walkfam_${body}_${v}" units=$([ "$body" = g1 ] && echo task || echo own)
+  local family="${v%plain}" runtag=walkfam
+  [ "$family" = contact ] && runtag=contactsched
+  tag="${runtag}_${body}_${v}" units=$([ "$body" = g1 ] && echo task || echo own)
   local sidestep="left 0 0.25 0
 left_fast 0 0.45 0
 right 0 -0.35 0"
@@ -81,7 +85,7 @@ right 0 -0.35 0"
     ( export HUMANOID_SYMMETRY=loss HUMANOID_HEADS=0 HUMANOID_PLAN_TRUST=0 HUMANOID_PROCEDURAL=0.7
       unset HUMANOID_TASKS HUMANOID_TASK_WEIGHTS HUMANOID_PLAN_CONTACT HUMANOID_OBSERVE_UNITS
       [ "$1" = own ] && export ZS_OBSERVE=own
-      [ "$v" = walk ] && export ZS_SYMMETRIZE=1
+      case "$v" in walk | contact) export ZS_SYMMETRIZE=1 ;; esac
       ZS_REFERENCE=autonomous ZS_ESTIMATOR=kinematic ZS_TASK_ID="$task" ZS_TASK="$2" \
         ZS_GENERATOR="logs/contract/${3}/generator.pt" ZS_COMMANDS="$4" ZS_TEACHER_ROLLOUT=play \
         ZS_ENCODER_TAG="xs_${body}_s${seed}_sym" \
@@ -130,7 +134,7 @@ for body in $bodies; do
       (
         export HUMANOID_PROCEDURAL=0.5 HUMANOID_TASKS="$root/transfer/results/base_tasks_xf.json"
         # The walking-family teachers are read on the walking family they were tuned on.
-        case "$v" in walk | walkplain) export HUMANOID_PROCEDURAL_DUTY=0.55,0.95 ;; esac
+        case "$v" in walk* | contact*) export HUMANOID_PROCEDURAL_DUTY=0.55,0.95 ;; esac
         capture "logs/pact/teachers/${body}_${v}_train.log" --task-id "${task%-Play-v0}-v0" \
           --driver-policy "$policy" --steps 900 --settle-steps 100 --contract-from-truth \
           --reference autonomous --num-envs 213 --joints --policy-obs --output "$train"
@@ -138,7 +142,7 @@ for body in $bodies; do
       [ -f "$train" ] && note "$body $v train: $(tail -1 "logs/pact/teachers/${body}_${v}_train.log" | cut -c1-160)" \
         || note "$body $v train FAILED"
     fi
-    case "$body:$v" in g1:walk* | nao:walk*) ladder "$body" "$v" ;; esac
+    case "$body:$v" in g1:walk* | nao:walk* | g1:contact* | nao:contact*) ladder "$body" "$v" ;; esac
   done
 done
 note "done"

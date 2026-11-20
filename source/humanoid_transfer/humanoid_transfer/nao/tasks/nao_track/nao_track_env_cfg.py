@@ -54,6 +54,7 @@ from ....transfer.tasks.tracking import (
     contract_privileged,
     contract_view,
 )
+from ....transfer.tasks.tracking.contact_reward import contact_schedule
 from ...assets import nao_kinematics as nk
 from ...assets.nao import NAO_STAND_JOINT_POS, get_nao_stand_cfg
 
@@ -87,6 +88,8 @@ PROCEDURAL_DUTY = (
 )
 """The procedural biped's duty range (``ReferenceCommandCfg.procedural_duty``); unset keeps
 the family's, "0.55,0.95" restricts it to walks."""
+CONTACT_REWARD = float(os.environ.get("HUMANOID_CONTACT_REWARD", "0"))
+"""Weight of the plan's contact schedule in the reward (``tracking/contact_reward.py``); 0: off."""
 LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
 """Range of the procedural stances' load-profile warp
 (``ReferenceCommandCfg.procedural_load_shape``)."""
@@ -240,6 +243,11 @@ class NaoTrackRewards(RewardsCfg):
         func=contract_likelihood,
         weight=1.0,
         params={"command_name": COMMAND, "kernels": OCTAVES, "weights": OCTAVE_WEIGHTS},
+    )
+    contact_schedule = (
+        RewTerm(func=contact_schedule, weight=CONTACT_REWARD, params={"command_name": COMMAND})
+        if CONTACT_REWARD
+        else None
     )
 
 

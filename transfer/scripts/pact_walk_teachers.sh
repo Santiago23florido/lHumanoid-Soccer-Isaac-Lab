@@ -15,6 +15,10 @@ cd "$root"
 bodies="${1:-g1 nao h1 cassie}"
 iterations="${2:-1000}"
 duty="${HUMANOID_PROCEDURAL_DUTY:-0.55,0.95}"
+# PACT_TEACHER_TAG names the runs (<stamp>_<tag>_<body>); PACT_TEACHER_FROM, if set, starts
+# from the latest <from>_<body> run instead of the trackers the co-executions used.
+run_tag="${PACT_TEACHER_TAG:-walkfam}"
+from_tag="${PACT_TEACHER_FROM:-}"
 python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 status=logs/pact/walk_teachers.status
 mkdir -p logs/pact
@@ -54,10 +58,14 @@ conditions() {  # conditions <body>: the start run, task, contract and mirror of
   esac
 }
 
-note "start bodies=$bodies iterations=$iterations duty=$duty"
+note "start bodies=$bodies iterations=$iterations duty=$duty tag=$run_tag from=${from_tag:-trackers} contact=${HUMANOID_CONTACT_REWARD:-0}"
 for body in $bodies; do
   ( conditions "$body" || exit 1
-    name="walkfam_${body}"
+    name="${run_tag}_${body}"
+    if [ -n "$from_tag" ]; then
+      start="$(latest_run "logs/rsl_rl/${body}_track" "${from_tag}_${body}")"
+      [ -n "$start" ] || { note "$name: no ${from_tag}_${body} run to start from"; exit 1; }
+    fi
     if ! ls -d logs/rsl_rl/"${body}"_track/*_"$name" > /dev/null 2>&1; then
       checkpoint="$(latest_checkpoint "$start")"
       note "$name: from $start/$checkpoint"

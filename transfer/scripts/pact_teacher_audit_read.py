@@ -38,15 +38,40 @@ BODIES = ("g1", "nao", "h1", "cassie")
 GROUPS = ("grid", "manoeuvre", "twin")
 
 
+WALK_DUTY = 0.55
+"""The paper's scope: probes asking a mean duty of at least this (walks, no flight phase)."""
+
+
 def probes(path: Path) -> dict | None:
     if not path.exists():
         return None
     report = json.loads(path.read_text("utf-8"))
     rows = [p for p in report["probes"] if p.get("representable", True)]
+    walks = [p for p in rows if float(np.mean(p["duty"])) >= WALK_DUTY]
     return {
         **{g: int(report["summary"][g]["passed"]) for g in GROUPS},
         "falls": int(sum(p["falls"] for p in rows)),
+        "walk_passed": int(sum(p["passes"] for p in walks)),
+        "walk_probes": len(walks),
+        "walk_falls": int(sum(p["falls"] for p in walks)),
     }
+
+
+def sources(body: str, v: str) -> tuple[Path, Path, str | None]:
+    """``(probe score, training-task capture, ladder tag)`` of a teacher variant."""
+    results, teachers = REPO / "transfer/results", REPO / "logs/pact/teachers"
+    if v == "plain":
+        score, train = results / f"icml_competence_{body}.json", REPO / "logs/pact/dagger/train/r0"
+        train = train / f"{body}.npz"
+    else:
+        score, train = (
+            results / f"icml_teacher_{body}_{v}_probes.json",
+            teachers / f"{body}_{v}_train.npz",
+        )
+    tag = None
+    if body in SEED:
+        tag = f"xs_{body}_s{SEED[body]}_{v}" if v in ("plain", "sym") else f"walkfam_{body}_{v}"
+    return score, train, tag
 
 
 def training_task(path: Path, draws: int, rng: np.random.Generator) -> dict | None:
@@ -64,29 +89,16 @@ def training_task(path: Path, draws: int, rng: np.random.Generator) -> dict | No
     }
 
 
-def read(draws: int, seed: int) -> dict:
+def read(draws: int, seed: int, variants: tuple[str, ...] = ("plain", "sym")) -> dict:
     rng = np.random.default_rng(seed)
     teacher = {c: teacher_directed(c) for c in COMMANDS}
-    report: dict = {"bootstrap": draws, "bodies": {}}
+    report: dict = {"bootstrap": draws, "walk_duty": WALK_DUTY, "bodies": {}}
     for body in BODIES:
         entry = {}
-        for v in ("plain", "sym"):
-            row = {
-                "probes": probes(
-                    REPO / "transfer/results" / f"icml_competence_{body}.json"
-                    if v == "plain"
-                    else REPO / "transfer/results" / f"icml_teacher_{body}_sym_probes.json"
-                ),
-                "training_task": training_task(
-                    REPO / "logs/pact/dagger/train/r0" / f"{body}.npz"
-                    if v == "plain"
-                    else REPO / "logs/pact/teachers" / f"{body}_sym_train.npz",
-                    draws,
-                    rng,
-                ),
-            }
-            if body in SEED:
-                tag = f"xs_{body}_s{SEED[body]}_{v}"
+        for v in variants:
+            score, train, tag = sources(body, v)
+            row = {"probes": probes(score), "training_task": training_task(train, draws, rng)}
+            if tag is not None:
                 row["base_tasks"] = base(body, tag)
                 row["sidestep"] = {g: sidestep_reading(body, tag, g, teacher) for g in HELD_OUT}
             entry[v] = row
@@ -98,17 +110,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--bootstrap", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--variants", default="plain,sym", help="e.g. plain,sym,walk,walkplain")
     parser.add_argument(
         "--output", type=Path, default=REPO / "transfer/results/icml_teacher_audit.json"
     )
     args = parser.parse_args()
-    report = read(args.bootstrap, args.seed)
+    report = read(args.bootstrap, args.seed, tuple(args.variants.split(",")))
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     for body, entry in report["bodies"].items():
         for v, row in entry.items():
             p, t = row["probes"], row["training_task"]
             cells = [
-                f"probes {p['grid']}/{p['manoeuvre']}/{p['twin']} falls {p['falls']}"
+                f"probes {p['grid']}/{p['manoeuvre']}/{p['twin']} falls {p['falls']} "
+                f"walks {p['walk_passed']}/{p['walk_probes']}"
                 if p
                 else "probes -",
                 f"train term {t['terminations']:.0f}±{t['terminations_se']:.0f} "

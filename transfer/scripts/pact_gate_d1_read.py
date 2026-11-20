@@ -31,9 +31,15 @@ BODIES = ("g1", "nao", "h1", "cassie")
 GROUPS = ("grid", "manoeuvre", "twin")
 
 
-def probe_table(path: Path) -> dict[str, dict]:
+def probe_table(path: Path, min_duty: float = 0.0) -> dict[str, dict]:
+    """Representable probes whose asked duty (mean of the feet) is at least ``min_duty``
+    (0.55: the walking family the paper is scoped to; 0: every probe)."""
     probes = json.loads(path.read_text("utf-8"))["probes"]
-    return {p["name"]: p for p in probes if p.get("representable", True)}
+    return {
+        p["name"]: p
+        for p in probes
+        if p.get("representable", True) and float(np.mean(p["duty"])) >= min_duty
+    }
 
 
 def paired(student: dict, teacher: dict, names: list[str], key, draws: int, seed: int):
@@ -48,21 +54,30 @@ def paired(student: dict, teacher: dict, names: list[str], key, draws: int, seed
     return float(s.sum()), float(t.sum()), float(d.sum()), float(boots.std(ddof=1))
 
 
-def read(tag: str, draws: int, seed: int) -> dict:
-    report: dict = {"gate": "G-D1", "tag": tag, "bootstrap": draws, "bodies": {}}
+def read(
+    tag: str,
+    draws: int,
+    seed: int,
+    min_duty: float = 0.0,
+    teachers: str = "transfer/results/icml_competence_{body}.json",
+) -> dict:
+    report: dict = {
+        "gate": "G-D1", "tag": tag, "bootstrap": draws, "min_duty": min_duty,
+        "teachers": teachers, "bodies": {},
+    }  # fmt: skip
     for body in BODIES:
-        teacher_path = REPO / f"transfer/results/icml_competence_{body}.json"
+        teacher_path = REPO / teachers.format(body=body)
         rounds = sorted(
             REPO.glob(f"transfer/results/icml_gate_d1_{tag}_r*_{body}.json"),
             key=lambda p: int(p.stem.split("_r")[-1].split("_")[0]),
         )
         if not teacher_path.exists() or not rounds:
             continue
-        teacher = probe_table(teacher_path)
+        teacher = probe_table(teacher_path, min_duty)
         entry: dict = {"tracker": str(teacher_path.relative_to(REPO)), "rounds": {}}
         for path in rounds:
             k = int(path.stem.split("_r")[-1].split("_")[0])
-            student = probe_table(path)
+            student = probe_table(path, min_duty)
             names = sorted(set(student) & set(teacher))
             row: dict = {"capture_score": str(path.relative_to(REPO))}
             for group in (*GROUPS, "all"):
@@ -87,8 +102,14 @@ def main() -> int:
     parser.add_argument("--bootstrap", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--min-duty", type=float, default=0.0, help="0.55: the walking probes only")
+    parser.add_argument(
+        "--teachers",
+        default="transfer/results/icml_competence_{body}.json",
+        help="the reference probe scores, e.g. the audited teachers'",
+    )
     args = parser.parse_args()
-    report = read(args.tag, args.bootstrap, args.seed)
+    report = read(args.tag, args.bootstrap, args.seed, args.min_duty, args.teachers)
     output = args.output or REPO / f"transfer/results/icml_gate_d1_{args.tag}.json"
     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     for body, entry in report["bodies"].items():

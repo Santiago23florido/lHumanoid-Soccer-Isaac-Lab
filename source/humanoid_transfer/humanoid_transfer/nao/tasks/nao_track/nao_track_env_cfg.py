@@ -80,6 +80,13 @@ OBSERVE_UNITS = os.environ.get("HUMANOID_OBSERVE_UNITS") or None
 """The contract whose units the tracker observes in (``ReferenceCommandCfg.observe_units``)."""
 """How plans and histories are read between the generator's grid and this body's steps
 (``ReferenceCommandCfg.resample_space``)."""
+PROCEDURAL_DUTY = (
+    tuple(float(v) for v in os.environ["HUMANOID_PROCEDURAL_DUTY"].split(","))
+    if os.environ.get("HUMANOID_PROCEDURAL_DUTY")
+    else None
+)
+"""The procedural biped's duty range (``ReferenceCommandCfg.procedural_duty``); unset keeps
+the family's, "0.55,0.95" restricts it to walks."""
 LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
 """Range of the procedural stances' load-profile warp
 (``ReferenceCommandCfg.procedural_load_shape``)."""
@@ -317,6 +324,7 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             plan_contact=PLAN_CONTACT,
             observe_units=OBSERVE_UNITS,
             procedural_load_shape=LOAD_SHAPE,
+            procedural_duty=PROCEDURAL_DUTY,
             load_precision=str(LOAD_PRECISION),
             # The NAO has no states of its experts: each task seeds its history from
             # its expert's z* windows, as the walk does.

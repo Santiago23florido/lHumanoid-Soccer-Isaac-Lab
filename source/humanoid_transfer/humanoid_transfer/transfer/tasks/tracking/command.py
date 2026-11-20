@@ -233,7 +233,10 @@ class ReferenceCommand(UniformVelocityCommand):
         """Envs whose episode follows the point-mass biped instead of the task's generator."""
         self.biped = None
         if cfg.procedural_fraction > 0.0 or cfg.procedural_probes:
-            ranges = GaitRanges(load_shape=tuple(float(v) for v in cfg.procedural_load_shape))
+            duty = {"duty": tuple(map(float, cfg.procedural_duty))} if cfg.procedural_duty else {}
+            ranges = GaitRanges(
+                load_shape=tuple(float(v) for v in cfg.procedural_load_shape), **duty
+            )
             # Probes that name a load profile need the shaped biped, whatever the ranges.
             named = any("load_shape" in p for p in (cfg.procedural_probes or []))
             self.biped = PointMassBiped(
@@ -1262,6 +1265,10 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     """``procedural_calibration.json``: the biped's model error per component."""
 
     procedural_seed: int = 0
+
+    procedural_duty: tuple[float, float] | None = None
+    """Range of the biped's mean duty (``GaitRanges.duty``); None keeps the family's
+    (0.30, 0.95), which reaches flight phases. (0.55, 0.95): walks only, the paper's scope."""
 
     procedural_load_shape: tuple[float, float] = (1.0, 1.0)
     """Range of the time warp of a walking stance's half-sine of load (``GaitRanges.load_shape``,

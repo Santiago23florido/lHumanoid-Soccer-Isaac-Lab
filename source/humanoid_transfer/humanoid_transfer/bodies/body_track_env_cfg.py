@@ -73,6 +73,13 @@ RESAMPLE_SPACE = os.environ.get("HUMANOID_RESAMPLE", "linear")
 PLAN_CONTACT = os.environ.get("HUMANOID_PLAN_CONTACT", "as_drawn")
 OBSERVE_UNITS = os.environ.get("HUMANOID_OBSERVE_UNITS") or None
 LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
+PROCEDURAL_DUTY = (
+    tuple(float(v) for v in os.environ["HUMANOID_PROCEDURAL_DUTY"].split(","))
+    if os.environ.get("HUMANOID_PROCEDURAL_DUTY")
+    else None
+)
+"""The procedural biped's duty range (``ReferenceCommandCfg.procedural_duty``); unset keeps
+the family's, "0.55,0.95" restricts it to walks."""
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_g1.json"
 """A new body has no estimator of its own yet: its reward reads loads at the G1's
 measured precision, in the dimensionless log space every body shares."""
@@ -247,6 +254,7 @@ class BodyTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             plan_contact=PLAN_CONTACT,
             observe_units=OBSERVE_UNITS,
             procedural_load_shape=LOAD_SHAPE,
+            procedural_duty=PROCEDURAL_DUTY,
             load_precision=str(LOAD_PRECISION),
             tasks=task_specs(TASKS, REPO_ROOT, own_states=False) if TASKS else None,
             task_weights=TASK_WEIGHTS,

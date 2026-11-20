@@ -211,7 +211,19 @@ class BodyData:
         analytic = analytic_z(self.anchors, w, self.time_unit)
         physics = physics_bases(drive, w, analytic, self.time_unit)
 
-        if "action_joints" in data.files:
+        relabelled = None
+        if args.labels:  # another teacher's actions on the same states (pact_relabel.py)
+            relabelled = path.with_name(f"{path.stem}.labels_{args.labels}.npz")
+        if relabelled is not None:
+            if not relabelled.exists():
+                raise FileNotFoundError(f"{relabelled}: run pact_relabel.py --name {args.labels}")
+            with np.load(relabelled) as labels:
+                joints = labels["action_joints"]
+                label = np.zeros((len(t), len(q0)), np.float32)
+                label[:, joints] = labels["action_scale"] * labels["action_teacher"][t, env]
+            controlled = np.zeros(len(q0), bool)
+            controlled[joints] = True
+        elif "action_joints" in data.files:
             joints = data["action_joints"]
             label = np.zeros((len(t), len(q0)), np.float32)
             label[:, joints] = data["action_scale"] * data["action_teacher"][t, env]
@@ -296,6 +308,11 @@ def main() -> int:
     parser.add_argument("--batch", type=int, default=512)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--anchor-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--labels",
+        default="",
+        help="train on another teacher's labels: <capture>.labels_<name>.npz (pact_relabel.py)",
+    )
     parser.add_argument(
         "--mirror",
         action="store_true",

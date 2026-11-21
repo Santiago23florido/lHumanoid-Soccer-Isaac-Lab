@@ -7,7 +7,8 @@ and share of the draw. This prints, at the last refresh, the score per period an
 for each speed bin, the range of the draw's boost over the uniform one, and for one cell
 (``--cell P:duty:forward``, default the probes' failing 1.8:0.57:0.05) its boost over the
 run and whether its score fell over the run's last 30 % (the drop of a least-squares line
-through those refreshes against that line's standard error).
+through those refreshes against that line's standard error). A bias curriculum's record also
+holds each cell's signed mean contact error (its duty bias); the cell's is printed.
 
     python transfer/scripts/pact_curriculum_read.py logs/pact/curriculum/contactcur_h1.npz
 """
@@ -61,10 +62,12 @@ def read(path: Path, cell_spec: str) -> dict:
             FAMILY["period"], FAMILY["duty"],
         )[0]
     )  # fmt: skip
+    kind = str(record["kind"]) if "kind" in record else "disagreement"
     boost = share / np.maximum(bank, 1e-12)
     tail = score[int(len(score) * (1.0 - TAIL)) :, cell]
     drop, se = trend(tail)
     return {
+        "kind": kind,
         "refreshes": len(score),
         "last_step": int(record["step"][-1]),
         "duty_bins": duty_bins,
@@ -83,6 +86,7 @@ def read(path: Path, cell_spec: str) -> dict:
             "tail_drop": drop,
             "tail_drop_se": se,
             "still_falling": bool(drop > se),
+            "signed_last": float(record["value"][-1, cell]) if "value" in record else None,
         },
     }
 
@@ -98,7 +102,7 @@ def main() -> int:
     score = np.array(out["score_last"]).reshape(PERIOD_BINS, duty_bins, len(FORWARD_EDGES) + 1)
     seen = np.array(out["seen_last"]).reshape(score.shape)
     low = FAMILY["duty"][0]
-    print(f"{args.record.name}: {out['refreshes']} refreshes to step {out['last_step']}")
+    print(f"{args.record.name} ({out['kind']}): {out['refreshes']} refreshes to step {out['last_step']}")
     for f in range(score.shape[2]):
         print(f"  forward bin {f}: rows period bins, columns mean duty from {low:.2f} by 0.05 (* unseen)")
         for p in range(PERIOD_BINS):
@@ -115,6 +119,8 @@ def main() -> int:
         f"{c['score_last']:.3f}; last {c['tail_refreshes']} refreshes drop {c['tail_drop']:+.4f} "
         f"(SE {c['tail_drop_se']:.4f}) -> {'still falling' if c['still_falling'] else 'not falling'}"
     )
+    if c["signed_last"] is not None:
+        print(f"  cell's signed contact error (duty bias) at the last refresh: {c['signed_last']:+.4f}")
     if args.output:
         args.output.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
     return 0

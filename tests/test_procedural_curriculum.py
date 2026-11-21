@@ -156,3 +156,44 @@ def test_the_draw_follows_the_credited_cell() -> None:
     expected = 0.5 * uniform / float((score * big.bank_share).sum())
     assert math.isfinite(share) and share == pytest.approx(expected, rel=0.15)
     assert share > 10 * uniform
+
+
+def test_the_bias_score_cancels_read_lag_and_keeps_half_the_draw_uniform() -> None:
+    cells = torch.tensor([0, 0, 1, 1, 2, 2, 3, 3])
+    curriculum = SegmentCurriculum(cells, 4, refresh=1, decay=0.0, min_count=1.0, score="bias")
+    cell = torch.tensor([0, 0, 1, 1, 2, 2, 3, 3])
+    # Cell 0 lags a step at a lift and at a touchdown (+1 then -1): no bias. Cell 1 holds its
+    # stance too long (+0.5 twice), cell 2 too short (-0.5 twice), cell 3 a little (+0.25).
+    error = torch.tensor([1.0, -1.0, 0.5, 0.5, -0.5, -0.5, 0.25, 0.25])
+    curriculum.credit(cell, error, torch.ones(8, dtype=torch.bool))
+    torch.testing.assert_close(curriculum.score, torch.tensor([0.0, 0.5, 0.5, 0.25]))
+    g = torch.Generator().manual_seed(0)
+    drawn = cells[curriculum.sample(200000, g)]
+    share = torch.bincount(drawn, minlength=4).float() / len(drawn)
+    expected = 0.5 * torch.full((4,), 0.25) + 0.5 * torch.tensor([0.0, 0.5, 0.5, 0.25]) / 1.25
+    torch.testing.assert_close(share, expected, atol=0.01, rtol=0)
+    torch.testing.assert_close(
+        torch.from_numpy(curriculum.record()["draw_share"][-1]), expected, atol=1e-6, rtol=0
+    )
+    # Opposite biases cancel in a cell, and an unseen cell takes the count-weighted mean |bias|.
+    again = SegmentCurriculum(cells, 4, refresh=1, decay=0.0, min_count=2.0, score="bias")
+    again.credit(
+        torch.tensor([0, 0, 1, 1, 2]),
+        torch.tensor([0.4, -0.4, 0.3, 0.3, 0.9]),
+        torch.ones(5, dtype=torch.bool),
+    )
+    torch.testing.assert_close(again.score, torch.tensor([0.0, 0.3, 0.15, 0.15]))
+
+
+def test_a_bias_curriculum_biped_before_its_first_refresh_is_the_uniform_biped() -> None:
+    off, on = _biped(curriculum=False), _biped(curriculum="bias")
+    assert on.curriculum.kind == "bias" and _biped(curriculum=True).curriculum.kind == "disagreement"
+    ids = torch.arange(off.num_envs)
+    for _ in range(on.curriculum.refresh_steps - 1):
+        for biped in (off, on):
+            biped.advance()
+        on.credit(torch.rand(on.num_envs) - 0.5, torch.ones(on.num_envs, dtype=torch.bool))
+    for x, y in zip(off.plan(ids), on.plan(ids)):
+        assert torch.equal(x, y)
+    with pytest.raises(ValueError):
+        SegmentCurriculum(torch.zeros(3), 1, score="rank")

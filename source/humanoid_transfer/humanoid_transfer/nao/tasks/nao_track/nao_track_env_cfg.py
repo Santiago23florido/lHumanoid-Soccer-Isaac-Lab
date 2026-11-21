@@ -90,9 +90,12 @@ PROCEDURAL_DUTY = (
 the family's, "0.55,0.95" restricts it to walks."""
 CONTACT_REWARD = float(os.environ.get("HUMANOID_CONTACT_REWARD", "0"))
 """Weight of the plan's contact schedule in the reward (``tracking/contact_reward.py``); 0: off."""
-CURRICULUM = os.environ.get("HUMANOID_CURRICULUM", "0") == "1"
-"""Draw the procedural plans by the tracker's contact disagreement (``latent/curriculum.py``);
-its record goes to ``HUMANOID_CURRICULUM_LOG`` (an ``.npz``) when that is set."""
+CURRICULUM_MODE = os.environ.get("HUMANOID_CURRICULUM", "0")
+"""Draw the procedural plans by the tracker's contact error (``latent/curriculum.py``): "1" by
+its disagreement, "bias" by its signed contact error; its record goes to
+``HUMANOID_CURRICULUM_LOG`` (an ``.npz``) when that is set."""
+CURRICULUM = CURRICULUM_MODE in ("1", "bias")
+CURRICULUM_SCORE = "bias" if CURRICULUM_MODE == "bias" else "disagreement"
 CURRICULUM_LOG = os.environ.get("HUMANOID_CURRICULUM_LOG") or None
 LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
 """Range of the procedural stances' load-profile warp
@@ -338,6 +341,7 @@ class NaoTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             procedural_load_shape=LOAD_SHAPE,
             procedural_duty=PROCEDURAL_DUTY,
             procedural_curriculum=CURRICULUM,
+            procedural_curriculum_score=CURRICULUM_SCORE,
             procedural_curriculum_log=CURRICULUM_LOG,
             load_precision=str(LOAD_PRECISION),
             # The NAO has no states of its experts: each task seeds its history from

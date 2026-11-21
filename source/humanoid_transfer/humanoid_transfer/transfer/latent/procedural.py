@@ -469,9 +469,9 @@ class PointMassBiped:
         shaped: Whether stances may carry other load profiles than the half-sine
             (``GaitRanges.load_shape``); None: whenever the ranges let the exponent vary. Probes
             that fix an exponent need it on. Off, the biped is the half-sine one, bit for bit.
-        curriculum: Draw segments by the tracker's contact disagreement (:mod:`.curriculum`,
-            fed by :meth:`credit`). Off, or before its first refresh, the draw is uniform,
-            bit for bit.
+        curriculum: Draw segments by the tracker's contact error (:mod:`.curriculum`, fed by
+            :meth:`credit`): True or ``"disagreement"``, or ``"bias"``. Off, or before its
+            first refresh, the draw is uniform, bit for bit.
     """
 
     def __init__(
@@ -486,7 +486,7 @@ class PointMassBiped:
         seed: int = 0,
         graph: bool = True,
         shaped: bool | None = None,
-        curriculum: bool = False,
+        curriculum: bool | str = False,
     ) -> None:
         self.num_envs = n = num_envs
         self.use_graph = graph
@@ -572,8 +572,9 @@ class PointMassBiped:
             self.bank["period"], self.bank["duty"], self.bank["forward"], ranges.period, ranges.duty
         )
         """Each bank segment's curriculum cell: computed always, drawn by only with the curriculum."""
+        kind = "disagreement" if curriculum is True else curriculum
         self.curriculum = (
-            SegmentCurriculum(self.bank_cell, cell_count(ranges.duty)) if curriculum else None
+            SegmentCurriculum(self.bank_cell, cell_count(ranges.duty), score=kind) if kind else None
         )
         self.goal = self._draw(n)
         self.next = self._draw(n)
@@ -727,8 +728,8 @@ class PointMassBiped:
         return torch.where(self.fallen, float(NO_CELL), row).round().long()
 
     def credit(self, miss: torch.Tensor, mask: torch.Tensor) -> bool:
-        """Feed the curriculum one control step: each env's share of feet off its plan's
-        contact ``(n,)``, and whether the step counts ``(n,)``. Returns whether the draw was
+        """Feed the curriculum one control step: each env's contact error ``(n,)`` (as
+        :meth:`.SegmentCurriculum.credit`), and whether the step counts ``(n,)``. Returns whether the draw was
         refreshed; nothing without a curriculum."""
         if self.curriculum is None:
             return False

@@ -21,6 +21,17 @@ prioritisation, Schaul et al. 2016; per-level scores, Jiang et al. 2021).
   zero (a foot's touchdown read one step late is already a disagreement), so every cell
   keeps being drawn.
 
+That floor also caps the draw: a proportional draw gives a cell at most its score over the
+mean, and a floor near the mean keeps every boost under 2. The ``"bias"`` score removes it.
+
+* **Bias score.** Per cell, ``|mean signed contact error|``: per step, each foot's reached
+  minus planned contact (+1 in contact while the plan swings, -1 the other way), averaged
+  over the feet. Over a cell's steps that is the duty the feet hold minus the duty asked,
+  what the gait probes judge. One step of read lag adds +1 at a lift and -1 at a touchdown
+  and cancels.
+* **Bias draw.** :data:`UNIFORM_SHARE` of the draws are the family's uniform one, the rest in
+  proportion to the score, so every cell keeps at least that share of its uniform draw.
+
 The scores are the tracker's, not a body's range: the same rule runs on every body.
 """
 
@@ -52,6 +63,14 @@ MIN_COUNT = 200.0
 
 NO_CELL = -1
 """The cell of a step that is in no segment of the bank: standing, recovering or a probe."""
+
+SCORES = ("disagreement", "bias")
+"""``"disagreement"``: the share of feet off the plan's contact, drawn in proportion.
+``"bias"``: ``|mean signed contact error|``, drawn half uniformly and half in proportion."""
+
+UNIFORM_SHARE = 0.5
+"""Share of the bias curriculum's draws left to the family's uniform draw (as prioritised
+level replay mixes new levels with replayed ones): no cell falls under half its share."""
 
 
 def cell_count(duty_range: tuple[float, float]) -> int:
@@ -87,6 +106,7 @@ class SegmentCurriculum:
     Args:
         cells: The cell of each segment of the bank, ``(B,)``.
         count: How many cells there are.
+        score: One of :data:`SCORES`: what :meth:`credit` is fed and how the draw uses it.
     """
 
     def __init__(
@@ -97,7 +117,11 @@ class SegmentCurriculum:
         refresh: int = REFRESH_STEPS,
         decay: float = DECAY,
         min_count: float = MIN_COUNT,
+        score: str = "disagreement",
     ) -> None:
+        if score not in SCORES:
+            raise ValueError(f"score {score!r} is not one of {SCORES}")
+        self.kind = score
         self.cells = cells.long()
         self.count = int(count)
         self.refresh_steps = int(refresh)
@@ -122,8 +146,9 @@ class SegmentCurriculum:
 
     def credit(self, cell: torch.Tensor, miss: torch.Tensor, mask: torch.Tensor) -> bool:
         """Add one control step: each env's cell ``(n,)`` (:data:`NO_CELL` for none), its
-        share of feet off the plan's contact ``(n,)`` and whether it counts ``(n,)``.
-        Returns whether the draw was refreshed."""
+        error ``(n,)`` (share of feet off the plan's contact; for ``"bias"``, the feet's mean
+        reached minus planned contact) and whether it counts ``(n,)``. Returns whether the
+        draw was refreshed."""
         valid = mask & (cell >= 0) & (cell < self.count)
         slot = torch.where(valid, cell.long(), self.count)
         self._window_sums.index_add_(0, slot, torch.where(valid, miss.float(), 0.0))
@@ -143,17 +168,30 @@ class SegmentCurriculum:
         seen = self.counts >= self.min_count
         if not bool(seen.any()):
             return
-        mean = self.sums[seen].sum() / self.counts[seen].sum()
-        score = torch.where(seen, self.sums / self.counts.clamp(min=1e-9), mean)
+        value = self.sums / self.counts.clamp(min=1e-9)
+        if self.kind == "disagreement":
+            mean = self.sums[seen].sum() / self.counts[seen].sum()
+            score = torch.where(seen, value, mean)
+            self.probability = score[self.cells]
+            share = score * self.bank_share
+            share = share / share.sum()
+        else:
+            size = value.abs()
+            mean = (self.counts * size)[seen].sum() / self.counts[seen].sum()
+            score = torch.where(seen, size, mean)
+            weight = score[self.cells]
+            weight = weight / weight.sum().clamp(min=1e-12)
+            self.probability = UNIFORM_SHARE / len(self.cells) + (1.0 - UNIFORM_SHARE) * weight
+            share = score * self.bank_share
+            share = UNIFORM_SHARE * self.bank_share + (1.0 - UNIFORM_SHARE) * share / share.sum()
         self.score = score
-        self.probability = score[self.cells]
-        share = score * self.bank_share
         self.history.append(
             {
                 "step": np.array(self.steps),
                 "score": score.cpu().numpy(),
+                "value": value.cpu().numpy(),
                 "counts": self.counts.cpu().numpy(),
-                "draw_share": (share / share.sum()).cpu().numpy(),
+                "draw_share": share.cpu().numpy(),
             }
         )
 
@@ -165,7 +203,11 @@ class SegmentCurriculum:
 
     def record(self) -> dict[str, np.ndarray]:
         """The refreshes so far, stacked, with each cell's share of the bank."""
-        out = {"bank_share": self.bank_share.cpu().numpy(), "refresh_steps": np.array(self.refresh_steps)}
+        out = {
+            "bank_share": self.bank_share.cpu().numpy(),
+            "refresh_steps": np.array(self.refresh_steps),
+            "kind": np.array(self.kind),
+        }
         if self.history:
             for key in self.history[0]:
                 out[key] = np.stack([h[key] for h in self.history])
@@ -180,7 +222,9 @@ __all__ = [
     "NO_CELL",
     "PERIOD_BINS",
     "REFRESH_STEPS",
+    "SCORES",
     "SegmentCurriculum",
+    "UNIFORM_SHARE",
     "cell_count",
     "segment_cells",
 ]

@@ -250,7 +250,11 @@ class ReferenceCommand(UniformVelocityCommand):
                 device=self.device,
                 seed=cfg.procedural_seed,
                 shaped=ranges.shaped or named,
-                curriculum=cfg.procedural_curriculum and not cfg.procedural_probes,
+                curriculum=(
+                    cfg.procedural_curriculum_score
+                    if cfg.procedural_curriculum and not cfg.procedural_probes
+                    else False
+                ),
             )
             offsets = torch.arange(1, length + 1, dtype=torch.float64) * self.dt_star
             self.biped.set_offsets(offsets)
@@ -1077,12 +1081,16 @@ class ReferenceCommand(UniformVelocityCommand):
     def _credit_curriculum(self) -> None:
         """Feed the biped's curriculum the step just simulated: each procedural env's share
         of feet whose contact state is not its due plan row's (the contact reward's reading,
-        ``contact_reward.py``), and save the curriculum's record at each refresh."""
+        ``contact_reward.py``), or for the bias score its feet's mean reached minus planned
+        contact, and save the curriculum's record at each refresh."""
         norm = self.generator.skill_norm
         threshold = self.cfg.procedural_curriculum_contact
         planned = norm.inverse(self.due())[:, self._load] > threshold
         reached = norm.inverse(self._true_now)[:, self._load] > threshold
-        miss = (planned != reached).float().mean(dim=-1)
+        if self.biped.curriculum.kind == "bias":
+            miss = (reached.float() - planned.float()).mean(dim=-1)
+        else:
+            miss = (planned != reached).float().mean(dim=-1)
         counts = self.procedural & self.has_plan & ~self.just_reset
         if self.biped.credit(miss, counts) and self.cfg.procedural_curriculum_log:
             path = Path(self.cfg.procedural_curriculum_log)
@@ -1296,6 +1304,10 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     """Draw the biped's segments in proportion to the tracker's contact disagreement on their
     kind of gait (``latent/curriculum.py``); off, the uniform draw, bit for bit. Never with
     probes."""
+
+    procedural_curriculum_score: str = "disagreement"
+    """The curriculum's score (``latent/curriculum.py``, ``SCORES``): ``"disagreement"``, the
+    share of feet off the plan's contact, or ``"bias"``, the feet's signed contact error."""
 
     procedural_curriculum_contact: float = 0.05
     """Load (in the body's weight) above which the curriculum reads a foot as in contact:

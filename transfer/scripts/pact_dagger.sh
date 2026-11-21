@@ -23,6 +23,8 @@
 # PACT_DAGGER_TEACHER_SHARE=<f>: the tracker drives that share of the environments.
 # PACT_DAGGER_GLOB: the DAgger captures training aggregates (default: this tag's rounds).
 # PACT_DAGGER_TRAIN_LAST=1 also trains after the last round.
+# PACT_DAGGER_ARM: the shared arm trained between rounds (pact_gate_d.py; default pact_d, or a
+# baseline or ablation: urma_d, hpt_d, pact_na, pact_nb), from a start model of its kind.
 set -uo pipefail
 root="${PACT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root"
@@ -41,6 +43,7 @@ share="${PACT_DAGGER_TEACHER_SHARE:-0}"
 this_tag="logs/pact/dagger/$tag/r*/{body}.npz"
 aggregate="${PACT_DAGGER_GLOB:-$this_tag}"
 train_last="${PACT_DAGGER_TRAIN_LAST:-0}"
+arm="${PACT_DAGGER_ARM:-pact_d}"
 status="logs/pact/dagger_${tag}.status"
 mkdir -p logs/pact
 note() { echo "$1 $(date +%Y-%m-%d_%H:%M)" >> "$status"; }
@@ -137,10 +140,10 @@ for round in $(seq "$first" "$last"); do
     next="logs/pact/models/d1_${tag}_r${round}.pt"
     "$python" -u transfer/scripts/pact_gate_d.py --bodies "$(echo $bodies | tr ' ' ',')" \
       --dagger "$aggregate" --init "$model" --steps "$train_steps" \
-      --arms hold,pact_d --save "$next" \
+      --arms "hold,$arm" --save "$next" \
       --output "transfer/results/icml_gate_d1_${tag}_train_r${round}.json" \
       > "logs/pact/dagger_${tag}_train_r${round}.log" 2>&1 \
-      && { model="$next"; note "trained $next: $(grep -a 'pact_d R' "logs/pact/dagger_${tag}_train_r${round}.log" | cut -c1-200)"; } \
+      && { model="$next"; note "trained $next ($arm): $(grep -a -e 'pact_d R' -e '^saved' "logs/pact/dagger_${tag}_train_r${round}.log" | tail -1 | cut -c1-200)"; } \
       || { note "training r$round FAILED"; break; }
   fi
 done

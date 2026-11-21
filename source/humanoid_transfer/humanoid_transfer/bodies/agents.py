@@ -25,6 +25,15 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 SYMMETRY = os.environ.get("HUMANOID_SYMMETRY", "")
 
 
+ENTROPY = float(os.environ.get("HUMANOID_ENTROPY", "0.008"))
+"""PPO's entropy coefficient. The bonus ``entropy_coef * H`` pushes every action's log std up
+by a constant that does not shrink as the policy converges, while the policy gradient's push
+down does (the advantages stop correlating with the noise), so near convergence the std
+climbs: every tracker's did (the H1's 0.82 -> 1.00 over its last 4500 iterations; the NAO's,
+initialised at 0.5, is 1.22). ``0`` lets PPO's own gradient set the std, for a fine-tune
+judged on contact timing (``nao_stand``'s PPO config documents the same runaway)."""
+
+
 def _mirror(body: str) -> Path:
     return REPO_ROOT / "transfer" / "bodies" / body / "mirror.json"
 
@@ -55,7 +64,7 @@ def _algorithm(augment) -> RslRlPpoAlgorithmCfg:
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.008,
+        entropy_coef=ENTROPY,
         num_learning_epochs=5,
         num_mini_batches=4,
         learning_rate=1.0e-3,

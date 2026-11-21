@@ -9,6 +9,8 @@
 #
 # Runs: logs/rsl_rl/<body>_track/<stamp>_walkfam_<body>; policies:
 # <run>/exported/model_<last>.pt and model_<last>_sym_pact.pt. Status: logs/pact/walk_teachers.status
+# With HUMANOID_CURRICULUM=1 the procedural plans are drawn by the tracker's contact
+# disagreement (latent/curriculum.py); each run's record goes to logs/pact/curriculum/<tag>_<body>.npz.
 set -uo pipefail
 root="${PACT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root"
@@ -58,10 +60,14 @@ conditions() {  # conditions <body>: the start run, task, contract and mirror of
   esac
 }
 
-note "start bodies=$bodies iterations=$iterations duty=$duty tag=$run_tag from=${from_tag:-trackers} contact=${HUMANOID_CONTACT_REWARD:-0}"
+note "start bodies=$bodies iterations=$iterations duty=$duty tag=$run_tag from=${from_tag:-trackers} contact=${HUMANOID_CONTACT_REWARD:-0} curriculum=${HUMANOID_CURRICULUM:-0}"
 for body in $bodies; do
   ( conditions "$body" || exit 1
     name="${run_tag}_${body}"
+    if [ "${HUMANOID_CURRICULUM:-0}" = 1 ]; then
+      mkdir -p logs/pact/curriculum
+      export HUMANOID_CURRICULUM_LOG="$root/logs/pact/curriculum/${name}.npz"
+    fi
     if [ -n "$from_tag" ]; then
       start="$(latest_run "logs/rsl_rl/${body}_track" "${from_tag}_${body}")"
       [ -n "$start" ] || { note "$name: no ${from_tag}_${body} run to start from"; exit 1; }

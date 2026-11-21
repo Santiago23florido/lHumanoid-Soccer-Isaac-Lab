@@ -83,6 +83,10 @@ PROCEDURAL_DUTY = (
 the family's, "0.55,0.95" restricts it to walks."""
 CONTACT_REWARD = float(os.environ.get("HUMANOID_CONTACT_REWARD", "0"))
 """Weight of the plan's contact schedule in the reward (``tracking/contact_reward.py``); 0: off."""
+CURRICULUM = os.environ.get("HUMANOID_CURRICULUM", "0") == "1"
+"""Draw the procedural plans by the tracker's contact disagreement (``latent/curriculum.py``);
+its record goes to ``HUMANOID_CURRICULUM_LOG`` (an ``.npz``) when that is set."""
+CURRICULUM_LOG = os.environ.get("HUMANOID_CURRICULUM_LOG") or None
 LOAD_PRECISION = REPO_ROOT / "transfer" / "results" / "load_log_precision_g1.json"
 """A new body has no estimator of its own yet: its reward reads loads at the G1's
 measured precision, in the dimensionless log space every body shares."""
@@ -263,6 +267,8 @@ class BodyTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
             observe_units=OBSERVE_UNITS,
             procedural_load_shape=LOAD_SHAPE,
             procedural_duty=PROCEDURAL_DUTY,
+            procedural_curriculum=CURRICULUM,
+            procedural_curriculum_log=CURRICULUM_LOG,
             load_precision=str(LOAD_PRECISION),
             tasks=task_specs(TASKS, REPO_ROOT, own_states=False) if TASKS else None,
             task_weights=TASK_WEIGHTS,

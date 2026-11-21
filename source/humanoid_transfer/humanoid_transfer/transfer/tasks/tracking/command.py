@@ -250,6 +250,7 @@ class ReferenceCommand(UniformVelocityCommand):
                 device=self.device,
                 seed=cfg.procedural_seed,
                 shaped=ranges.shaped or named,
+                curriculum=cfg.procedural_curriculum and not cfg.procedural_probes,
             )
             offsets = torch.arange(1, length + 1, dtype=torch.float64) * self.dt_star
             self.biped.set_offsets(offsets)
@@ -1013,6 +1014,8 @@ class ReferenceCommand(UniformVelocityCommand):
             self.vel_command_b[:] = self.replay.command[self.replay_chain] / self.command_scale
         self._true_now = self.true_skill()
         self._frame_now = self.frame()
+        if self.biped is not None and self.biped.curriculum is not None:
+            self._credit_curriculum()
         estimate = self._estimate()
         ready = ~self.just_reset
         refill = ready & self.needs_refill
@@ -1070,6 +1073,21 @@ class ReferenceCommand(UniformVelocityCommand):
         self.needs_refill = self.needs_refill & ~ready
         self.just_reset[:] = False
         self.estimate = estimate
+
+    def _credit_curriculum(self) -> None:
+        """Feed the biped's curriculum the step just simulated: each procedural env's share
+        of feet whose contact state is not its due plan row's (the contact reward's reading,
+        ``contact_reward.py``), and save the curriculum's record at each refresh."""
+        norm = self.generator.skill_norm
+        threshold = self.cfg.procedural_curriculum_contact
+        planned = norm.inverse(self.due())[:, self._load] > threshold
+        reached = norm.inverse(self._true_now)[:, self._load] > threshold
+        miss = (planned != reached).float().mean(dim=-1)
+        counts = self.procedural & self.has_plan & ~self.just_reset
+        if self.biped.credit(miss, counts) and self.cfg.procedural_curriculum_log:
+            path = Path(self.cfg.procedural_curriculum_log)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(path, **self.biped.curriculum.record())
 
     def plan_gain(self) -> torch.Tensor:
         """``(N, length, 27)``: how far each env's plan is trusted at each lead time, by its
@@ -1273,6 +1291,19 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     procedural_duty: tuple[float, float] | None = None
     """Range of the biped's mean duty (``GaitRanges.duty``); None keeps the family's
     (0.30, 0.95), which reaches flight phases. (0.55, 0.95): walks only, the paper's scope."""
+
+    procedural_curriculum: bool = False
+    """Draw the biped's segments in proportion to the tracker's contact disagreement on their
+    kind of gait (``latent/curriculum.py``); off, the uniform draw, bit for bit. Never with
+    probes."""
+
+    procedural_curriculum_contact: float = 0.05
+    """Load (in the body's weight) above which the curriculum reads a foot as in contact:
+    the contact reward's threshold."""
+
+    procedural_curriculum_log: str | None = None
+    """Where the curriculum's record (per-cell score, counts and draw share at every refresh)
+    is saved, an ``.npz``; None: not saved."""
 
     plan_max_load: float | None = None
     """Largest load, in body weights, a generator's plan may ask of one foot; None keeps

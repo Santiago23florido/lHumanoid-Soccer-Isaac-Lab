@@ -70,7 +70,9 @@ def sources(body: str, v: str) -> tuple[Path, Path, str | None]:
         )
     tag = None
     if body in SEED:
-        runtag = "contactsched" if v.startswith("contact") else "walkfam"
+        runtag = (
+            "contactsched" if v.startswith("contact") else "contactcur" if v.startswith("cur") else "walkfam"
+        )
         tag = f"xs_{body}_s{SEED[body]}_{v}" if v in ("plain", "sym") else f"{runtag}_{body}_{v}"
     return score, train, tag
 

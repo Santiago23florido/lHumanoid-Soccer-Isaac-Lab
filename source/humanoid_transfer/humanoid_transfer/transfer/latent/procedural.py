@@ -79,6 +79,7 @@ from dataclasses import dataclass
 import torch
 
 from ...common.skill_state import SKILL_LAYOUT
+from .curriculum import NO_CELL, SegmentCurriculum, cell_count, segment_cells
 
 SKILL = SKILL_LAYOUT.size
 _HEIGHT = SKILL_LAYOUT.slice_of("height").start
@@ -89,8 +90,10 @@ _FEET = SKILL_LAYOUT.slice_of("foot_position")
 _FOOT_VELOCITY = SKILL_LAYOUT.slice_of("foot_velocity")
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
 _MOMENTUM = SKILL_LAYOUT.slice_of("angular_momentum")
-_EXTRA = 3
-"""After ``z*`` in each buffer row: the CoM's ``x, y`` in the biped's world, and its yaw."""
+_EXTRA = 4
+"""After ``z*`` in each buffer row: the CoM's ``x, y`` in the biped's world, its yaw, and the
+curriculum cell of the segment it is in (:mod:`.curriculum`; ``NO_CELL`` standing or
+recovering)."""
 
 STAND, SHIFT, GAIT = 0, 1, 2
 """Modes: holding still, moving the weight over the stance foot, stepping."""
@@ -325,6 +328,7 @@ GAIT_KEYS = (
     "standing",
     "first",
     "duration",
+    "cell",
 )
 
 
@@ -465,6 +469,9 @@ class PointMassBiped:
         shaped: Whether stances may carry other load profiles than the half-sine
             (``GaitRanges.load_shape``); None: whenever the ranges let the exponent vary. Probes
             that fix an exponent need it on. Off, the biped is the half-sine one, bit for bit.
+        curriculum: Draw segments by the tracker's contact disagreement (:mod:`.curriculum`,
+            fed by :meth:`credit`). Off, or before its first refresh, the draw is uniform,
+            bit for bit.
     """
 
     def __init__(
@@ -479,6 +486,7 @@ class PointMassBiped:
         seed: int = 0,
         graph: bool = True,
         shaped: bool | None = None,
+        curriculum: bool = False,
     ) -> None:
         self.num_envs = n = num_envs
         self.use_graph = graph
@@ -560,6 +568,13 @@ class PointMassBiped:
         self.fixed = zeros(dtype=torch.bool)
         self.probe: dict[str, torch.Tensor] = {}
         self.bank = sample_parameters(BANK, ranges, self.min_swing, self.generator, self.device)
+        self.bank_cell = segment_cells(
+            self.bank["period"], self.bank["duty"], self.bank["forward"], ranges.period, ranges.duty
+        )
+        """Each bank segment's curriculum cell: computed always, drawn by only with the curriculum."""
+        self.curriculum = (
+            SegmentCurriculum(self.bank_cell, cell_count(ranges.duty)) if curriculum else None
+        )
         self.goal = self._draw(n)
         self.next = self._draw(n)
         self.spare = self._draw(n)
@@ -579,6 +594,8 @@ class PointMassBiped:
         # A probe that names no load profile is the half-sine: the maps stay
         # the same gaits whatever the family's ranges.
         self.probe["load_shape"][ids] = 1.0
+        # A probe's gait is not a segment of the bank.
+        self.probe["cell"][ids] = float(NO_CELL)
         for key, value in params.items():
             self.probe[key][ids] = value.to(self.device, self.probe[key].dtype)
         self.probe["standing"][ids] = False
@@ -704,6 +721,19 @@ class PointMassBiped:
         for key, value in saved_next.items():
             self.next[key].copy_(value)
 
+    def cell_now(self) -> torch.Tensor:
+        """``(n,)`` the curriculum cell each biped is in now (``NO_CELL``: none)."""
+        row = self.buffer[:, int(math.floor(self.now)) % self.slots, SKILL + 3]
+        return torch.where(self.fallen, float(NO_CELL), row).round().long()
+
+    def credit(self, miss: torch.Tensor, mask: torch.Tensor) -> bool:
+        """Feed the curriculum one control step: each env's share of feet off its plan's
+        contact ``(n,)``, and whether the step counts ``(n,)``. Returns whether the draw was
+        refreshed; nothing without a curriculum."""
+        if self.curriculum is None:
+            return False
+        return self.curriculum.credit(self.cell_now(), miss, mask)
+
     def plan(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """The trajectory ahead of ``ids``, read at the offsets of :meth:`set_offsets`.
 
@@ -737,8 +767,11 @@ class PointMassBiped:
     def _draw(self, n: int) -> dict[str, torch.Tensor]:
         """``n`` segments from the bank of feasible ones; standing, first foot and length fresh."""
         g, dev, r = self.generator, self.device, self.ranges
-        index = torch.randint(0, BANK, (n,), generator=g, device=dev)
+        index = None if self.curriculum is None else self.curriculum.sample(n, g)
+        if index is None:
+            index = torch.randint(0, BANK, (n,), generator=g, device=dev)
         params = {key: self.bank[key][index] for key in _GAIT_SHAPE}
+        params["cell"] = self.bank_cell[index].float()
         params["standing"] = torch.rand(n, generator=g, device=dev) < r.standing
         params["first"] = (torch.rand(n, generator=g, device=dev) < 0.5).long()
         params["duration"] = _uniform(r.segment, n, g, dev)
@@ -1375,7 +1408,8 @@ class PointMassBiped:
         self.record = self._record()
 
     def _record(self) -> torch.Tensor:
-        """``(n, 27 + 3)``: ``z*`` of the biped now, then its CoM ``x, y`` and yaw."""
+        """``(n, 27 + 4)``: ``z*`` of the biped now, then its CoM ``x, y``, its yaw and its
+        segment's curriculum cell."""
         n = self.num_envs
         z = torch.zeros(n, SKILL + _EXTRA, device=self.device)
 
@@ -1401,6 +1435,8 @@ class PointMassBiped:
         z[:, SKILL] = self.com[:, 0]
         z[:, SKILL + 1] = self.com[:, 1]
         z[:, SKILL + 2] = self.yaw
+        idle = self.goal["standing"] | self.recovering
+        z[:, SKILL + 3] = torch.where(idle, float(NO_CELL), self.goal["cell"])
         z = torch.nan_to_num(z, nan=0.0, posinf=0.0, neginf=0.0)
         return torch.where(self.fallen[:, None], self.frozen, z)
 

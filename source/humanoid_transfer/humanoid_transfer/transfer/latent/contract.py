@@ -121,8 +121,13 @@ class ContractDims:
     what is worth its cost in predicting the plan. At inference it is used without noise.
     0: none, the generator as before."""
 
+    stick_weight: float = 0.0
+    """Weight of the contact-complementarity loss (:func:`contact_slip`, ``flow`` only): a
+    loaded foot does not move. 0: none, the generator as before."""
+
 
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
+_FOOT_VELOCITY = SKILL_LAYOUT.slice_of("foot_velocity")
 _LOAD_EPS = 0.01
 _LOG_MAX_LOAD = 2.303
 """``log 10``: by default no plan asks a foot for more than ten body weights
@@ -191,6 +196,7 @@ class ContractGenerator(nn.Module):
         self.max_log_load = _LOG_MAX_LOAD
         self.noise_conditional = dims.noise_conditional
         self.summary_beta = dims.summary_beta
+        self.stick_weight = dims.stick_weight
         if self.noise_conditional:
             # log of the history noise's scale, in units of the encoder's own error: zero is
             # what a deployed body's encoder reads with (see :meth:`condition`).
@@ -368,6 +374,34 @@ def gaussian_kl(
     return log_std_p - log_std_q + (var_q + (mean_q - mean_p) ** 2) / (2 * var_p) - 0.5
 
 
+def contact_slip(
+    generator: ContractGenerator, plan: torch.Tensor, weight: torch.Tensor | None = None
+) -> torch.Tensor:
+    """Contact complementarity of plans ``(B, horizon, skill)`` (normalised ``z*``): each
+    foot's load times its squared sole speed, averaged over feet and samples, batch mean.
+
+    On rigid ground a loaded foot does not slide (Coulomb friction inside its cone:
+    ``λ_n |v| = 0``). The teachers' captures keep it: their firmly loaded feet move at
+    0.002 V. The flow generators' plans do not: they move them at about 0.10 V, from the
+    teacher's own clean history as well as from their chains, at 8 or 32 integration steps
+    (``transfer/scripts/pact_gate_p.py``). A foot that carries load for a whole stance has
+    an exact zero velocity in the data, and a smooth velocity field spreads it.
+
+    The load is the plan's own and is not differentiated: the loss asks a loaded foot to
+    stand still, never a moving foot to unload. The speed is in units of the skill
+    normaliser's spread per dimension, the flow loss's own units. ``weight`` ``(B, 1)``
+    scales each row (the flow time: a one-step estimate is the plan only near t = 1).
+    """
+    physical = generator.skill_norm.inverse(plan)
+    load = physical[..., _LOAD].clamp(min=0.0).detach()
+    velocity = physical[..., _FOOT_VELOCITY] / generator.skill_norm.std[_FOOT_VELOCITY]
+    speed = velocity.unflatten(-1, (load.shape[-1], -1)).pow(2).sum(-1)
+    per_row = (load * speed).mean((1, 2))
+    if weight is not None:
+        per_row = per_row * weight.reshape(-1)
+    return per_row.mean()
+
+
 def contract_loss(
     generator: ContractGenerator,
     window: torch.Tensor,
@@ -385,6 +419,10 @@ def contract_loss(
     for ``cvae``, the negative evidence lower bound, with ``free_bits`` a
     floor on the KL of each intent dimension so the intent cannot collapse.
 
+    With :attr:`ContractGenerator.stick_weight` > 0 (``flow``), the contact complementarity
+    (:func:`contact_slip`) of the plan the predicted velocity points to joins ``total``,
+    weighted by the flow time, and is reported as ``stick``.
+
     With :attr:`ContractGenerator.summary_beta` > 0, the history bottleneck's cost
     (``summary_beta`` times half the summary's squared norm, batch mean) joins ``total``
     and is reported as ``summary_kl`` (the KL itself, without the weight).
@@ -398,8 +436,16 @@ def contract_loss(
         source = torch.randn_like(target)
         t = torch.rand(target.shape[0], 1, device=target.device)
         moved = (1.0 - t) * source + t * target
-        flow = (generator.flow_velocity(moved, t, condition) - (target - source)).pow(2).mean()
-        return _with_bottleneck(generator, summary, {"total": flow, "flow": flow})
+        velocity = generator.flow_velocity(moved, t, condition)
+        flow = (velocity - (target - source)).pow(2).mean()
+        losses = {"total": flow, "flow": flow}
+        if generator.stick_weight > 0.0:
+            # The plan this velocity points to: one Euler step from ``moved`` to t = 1.
+            estimate = generator.residual_norm.inverse(moved + (1.0 - t) * velocity)
+            plan = generator.unwarp(window[:, -1:] + estimate.reshape(residual.shape))
+            stick = contact_slip(generator, plan, t)
+            losses = {"total": flow + generator.stick_weight * stick, "flow": flow, "stick": stick}
+        return _with_bottleneck(generator, summary, losses)
     mean_q, log_std_q = generator.posterior_params(condition, residual)
     mean_p, log_std_p = generator.prior_params(condition)
     intent = mean_q + torch.exp(log_std_q) * torch.randn_like(mean_q)
@@ -499,6 +545,7 @@ __all__ = [
     "ContractClock",
     "ContractDims",
     "ContractGenerator",
+    "contact_slip",
     "contract_loss",
     "gaussian_kl",
     "load_contract",

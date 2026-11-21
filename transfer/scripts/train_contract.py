@@ -137,6 +137,13 @@ def main() -> int:
         help="Weight of a Gaussian bottleneck on the history summary (latent/contract.py, "
         "ContractDims.summary_beta); 0: none.",
     )
+    parser.add_argument(
+        "--stick-weight",
+        type=float,
+        default=0.0,
+        help="Weight of the contact-complementarity loss, a loaded foot does not move "
+        "(latent/contract.py, contact_slip; flow only); 0: none.",
+    )
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--flow-hidden", type=int, default=1024)
     parser.add_argument(
@@ -277,6 +284,7 @@ def main() -> int:
             noise_conditional=args.noise_conditional,
             memory=args.memory,
             summary_beta=args.summary_beta,
+            stick_weight=args.stick_weight,
             channels=args.channels,
             flow_hidden=args.flow_hidden,
         ),

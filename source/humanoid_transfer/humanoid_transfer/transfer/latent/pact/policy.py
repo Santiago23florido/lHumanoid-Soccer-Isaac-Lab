@@ -60,12 +60,17 @@ def plan_from_view(
 
 
 class PactPolicy(nn.Module):
-    """``E_b``, the anchored state encoder and the timed-plan joint decoder."""
+    """``E_b``, the anchored state encoder and the timed-plan joint decoder.
+
+    With ``dims.anchor_inputs`` off (the no-anchor ablation) the encoder does not read the
+    analytic anchors (``anchor_in`` is accepted and ignored); trained without the readout
+    loss, its entity latent is then anchored by nothing.
+    """
 
     def __init__(self, dims: PactDims) -> None:
         super().__init__()
-        if not (dims.anchor_inputs and dims.timed_plan):
-            raise ValueError("PactPolicy reads the anchors and a timed plan")
+        if not dims.timed_plan:
+            raise ValueError("PactPolicy reads a timed plan")
         self.dims = dims
         self.embodiment = EmbodimentEncoder(dims)
         self.state = StateEncoder(dims)
@@ -90,7 +95,8 @@ class PactPolicy(nn.Module):
         targets, padded joints zero. ``plan`` and ``plan_relative`` are ``(B, H, 27)``.
         """
         embodiment, descriptor = self.embodiment(bodies)
-        out = self.state(bodies, descriptor, embodiment, joint_obs, imu, split(anchor_in))
+        anchors = split(anchor_in) if self.dims.anchor_inputs else None
+        out = self.state(bodies, descriptor, embodiment, joint_obs, imu, anchors)
         value_c, value_k = split(plan)
         delta_c, delta_k = split(plan_relative)
         targets = self.decoder(

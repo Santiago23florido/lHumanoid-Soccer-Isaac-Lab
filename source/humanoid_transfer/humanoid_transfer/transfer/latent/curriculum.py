@@ -32,6 +32,16 @@ mean, and a floor near the mean keeps every boost under 2. The ``"bias"`` score 
 * **Bias draw.** :data:`UNIFORM_SHARE` of the draws are the family's uniform one, the rest in
   proportion to the score, so every cell keeps at least that share of its uniform draw.
 
+The bias score does not see a cadence error: a tracker that steps more often than asked with
+the right duty has no duty bias. The ``"gait"`` score is the deviation the gait probes judge.
+
+* **Gait score.** Per cell, the largest of each foot's relative duty error
+  ``|sum(reached - planned contact)| / sum(planned contact)`` and the relative cadence error
+  ``|planned touchdowns / reached touchdowns - 1|`` (a stride period is the steps over the
+  cycles, so the periods' ratio is the touchdowns' inverse ratio), each capped at 1. A step
+  of read lag changes neither, so a perfect tracker scores about zero. Drawn as the bias
+  score.
+
 The scores are the tracker's, not a body's range: the same rule runs on every body.
 """
 
@@ -64,13 +74,28 @@ MIN_COUNT = 200.0
 NO_CELL = -1
 """The cell of a step that is in no segment of the bank: standing, recovering or a probe."""
 
-SCORES = ("disagreement", "bias")
+SCORES = ("disagreement", "bias", "gait")
 """``"disagreement"``: the share of feet off the plan's contact, drawn in proportion.
-``"bias"``: ``|mean signed contact error|``, drawn half uniformly and half in proportion."""
+``"bias"``: ``|mean signed contact error|``, drawn half uniformly and half in proportion.
+``"gait"``: the largest relative duty or cadence error, drawn as ``"bias"``."""
+
+GAIT_CHANNELS = 6
+"""What :meth:`SegmentCurriculum.credit` takes per env for the gait score: each foot's reached
+minus planned contact (2), each foot's planned contact (2), the reached touchdowns and the
+planned touchdowns summed over the feet (2)."""
 
 UNIFORM_SHARE = 0.5
 """Share of the bias curriculum's draws left to the family's uniform draw (as prioritised
 level replay mixes new levels with replayed ones): no cell falls under half its share."""
+
+
+def gait_errors(sums: torch.Tensor) -> torch.Tensor:
+    """``(cells, 3)`` signed relative errors from the gait score's summed channels
+    ``(cells, GAIT_CHANNELS)``: each foot's duty error and the cadence error (the body's
+    stride period over the asked one, minus one)."""
+    duty = sums[:, 0:2] / sums[:, 2:4].clamp(min=1e-9)
+    cadence = sums[:, 5] / sums[:, 4].clamp(min=1e-9) - 1.0
+    return torch.cat([duty, cadence[:, None]], dim=-1).clamp(-1.0, 1.0)
 
 
 def cell_count(duty_range: tuple[float, float]) -> int:
@@ -128,10 +153,11 @@ class SegmentCurriculum:
         self.decay = float(decay)
         self.min_count = float(min_count)
         device = self.cells.device
+        width = (GAIT_CHANNELS,) if score == "gait" else ()
         # One slot past the cells takes the steps that belong to none, without a sync.
-        self._window_sums = torch.zeros(self.count + 1, device=device)
+        self._window_sums = torch.zeros(self.count + 1, *width, device=device)
         self._window_counts = torch.zeros(self.count + 1, device=device)
-        self.sums = torch.zeros(self.count, device=device)
+        self.sums = torch.zeros(self.count, *width, device=device)
         self.counts = torch.zeros(self.count, device=device)
         self.bank_share = torch.bincount(self.cells, minlength=self.count).float()
         self.bank_share = self.bank_share / self.bank_share.sum()
@@ -147,11 +173,12 @@ class SegmentCurriculum:
     def credit(self, cell: torch.Tensor, miss: torch.Tensor, mask: torch.Tensor) -> bool:
         """Add one control step: each env's cell ``(n,)`` (:data:`NO_CELL` for none), its
         error ``(n,)`` (share of feet off the plan's contact; for ``"bias"``, the feet's mean
-        reached minus planned contact) and whether it counts ``(n,)``. Returns whether the
-        draw was refreshed."""
+        reached minus planned contact; for ``"gait"``, ``(n, GAIT_CHANNELS)``) and whether it
+        counts ``(n,)``. Returns whether the draw was refreshed."""
         valid = mask & (cell >= 0) & (cell < self.count)
         slot = torch.where(valid, cell.long(), self.count)
-        self._window_sums.index_add_(0, slot, torch.where(valid, miss.float(), 0.0))
+        keep = valid if miss.dim() == 1 else valid[:, None]
+        self._window_sums.index_add_(0, slot, torch.where(keep, miss.float(), 0.0))
         self._window_counts.index_add_(0, slot, valid.float())
         self.steps += 1
         if self.steps % self.refresh_steps:
@@ -168,7 +195,10 @@ class SegmentCurriculum:
         seen = self.counts >= self.min_count
         if not bool(seen.any()):
             return
-        value = self.sums / self.counts.clamp(min=1e-9)
+        if self.kind == "gait":
+            value = gait_errors(self.sums)
+        else:
+            value = self.sums / self.counts.clamp(min=1e-9)
         if self.kind == "disagreement":
             mean = self.sums[seen].sum() / self.counts[seen].sum()
             score = torch.where(seen, value, mean)
@@ -176,7 +206,7 @@ class SegmentCurriculum:
             share = score * self.bank_share
             share = share / share.sum()
         else:
-            size = value.abs()
+            size = value.abs() if self.kind == "bias" else value.abs().amax(dim=-1).clamp(max=1.0)
             mean = (self.counts * size)[seen].sum() / self.counts[seen].sum()
             score = torch.where(seen, size, mean)
             weight = score[self.cells]
@@ -218,6 +248,7 @@ __all__ = [
     "DECAY",
     "DUTY_BIN",
     "FORWARD_EDGES",
+    "GAIT_CHANNELS",
     "MIN_COUNT",
     "NO_CELL",
     "PERIOD_BINS",
@@ -226,5 +257,6 @@ __all__ = [
     "SegmentCurriculum",
     "UNIFORM_SHARE",
     "cell_count",
+    "gait_errors",
     "segment_cells",
 ]

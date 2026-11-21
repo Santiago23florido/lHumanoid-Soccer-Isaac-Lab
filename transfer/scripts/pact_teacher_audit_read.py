@@ -77,6 +77,8 @@ def sources(body: str, v: str) -> tuple[Path, Path, str | None]:
             if v.startswith("cur")
             else "contactbias"
             if v.startswith("bias")
+            else "contactgait"
+            if v.startswith("gait")
             else "walkfam"
         )
         tag = f"xs_{body}_s{SEED[body]}_{v}" if v in ("plain", "sym") else f"{runtag}_{body}_{v}"

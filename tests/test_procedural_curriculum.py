@@ -9,6 +9,7 @@ import torch
 
 from humanoid_transfer.transfer.latent.curriculum import (
     FORWARD_EDGES,
+    GAIT_CHANNELS,
     NO_CELL,
     PERIOD_BINS,
     SegmentCurriculum,
@@ -197,3 +198,76 @@ def test_a_bias_curriculum_biped_before_its_first_refresh_is_the_uniform_biped()
         assert torch.equal(x, y)
     with pytest.raises(ValueError):
         SegmentCurriculum(torch.zeros(3), 1, score="rank")
+
+
+def _gait_steps(planned: torch.Tensor, reached: torch.Tensor) -> torch.Tensor:
+    """The gait channels of a contact sequence ``(T, 2)`` per step, as the command feeds them."""
+    was_p = torch.cat([planned[:1], planned[:-1]])
+    was_r = torch.cat([reached[:1], reached[:-1]])
+    return torch.cat(
+        [
+            reached.float() - planned.float(),
+            planned.float(),
+            (reached & ~was_r).float().sum(-1, keepdim=True),
+            (planned & ~was_p).float().sum(-1, keepdim=True),
+        ],
+        dim=-1,
+    )
+
+
+def _square(steps: int, period: int, duty: float, shift: int = 0) -> torch.Tensor:
+    t = torch.arange(steps)
+    left = ((t + shift) % period) < round(duty * period)
+    right = ((t + shift + period // 2) % period) < round(duty * period)
+    return torch.stack([left, right], dim=-1)
+
+
+def _gait_score(planned: torch.Tensor, reached: torch.Tensor) -> SegmentCurriculum:
+    steps = len(planned)
+    curriculum = SegmentCurriculum(
+        torch.tensor([0]), 1, refresh=steps, decay=0.0, min_count=1.0, score="gait"
+    )
+    values = _gait_steps(planned, reached)
+    assert values.shape[-1] == GAIT_CHANNELS
+    for t in range(steps):
+        curriculum.credit(torch.tensor([0]), values[t : t + 1], torch.tensor([True]))
+    return curriculum
+
+
+def test_the_gait_score_ignores_read_lag_and_sees_duty_per_foot_and_cadence() -> None:
+    planned = _square(400, 20, 0.6)
+    # A tracker one step late on every transition: no duty or cadence error.
+    late = torch.cat([planned[:1], planned[:-1]])
+    assert float(_gait_score(planned, late).score[0]) < 0.01
+    # Stepping twice as often with the right duty: a cadence error of one half (period 10 of 20).
+    fast = _square(400, 10, 0.6)
+    torch.testing.assert_close(float(_gait_score(planned, fast).score[0]), 0.5, atol=0.02, rtol=0)
+    assert float(_gait_score(planned, fast).history[-1]["value"][0, 2]) < 0  # a shorter period
+    # One foot holding 0.75 against 0.6 and the other 0.45: the feet's mean has no bias, the
+    # score is the worse foot's relative error, 0.25.
+    left = _square(400, 20, 0.75)[:, 0]
+    right = _square(400, 20, 0.45)[:, 1]
+    uneven = torch.stack([left, right], dim=-1)
+    torch.testing.assert_close(float(_gait_score(planned, uneven).score[0]), 0.25, atol=0.02, rtol=0)
+
+
+def test_a_gait_curriculum_draws_half_uniformly_and_starts_as_the_uniform_biped() -> None:
+    cells = torch.tensor([0, 0, 1, 1])
+    curriculum = SegmentCurriculum(cells, 2, refresh=1, decay=0.0, min_count=1.0, score="gait")
+    values = torch.zeros(2, GAIT_CHANNELS)
+    values[:, 2:4] = 1.0  # both feet planned in contact
+    values[:, 4:6] = 1.0  # one touchdown reached and planned
+    values[1, 0:2] = -0.2  # cell 1: each foot short of its contact by a fifth
+    curriculum.credit(torch.tensor([0, 1]), values, torch.ones(2, dtype=torch.bool))
+    torch.testing.assert_close(curriculum.score, torch.tensor([0.0, 0.2]))
+    torch.testing.assert_close(
+        torch.from_numpy(curriculum.record()["draw_share"][-1]), torch.tensor([0.25, 0.75])
+    )
+    off, on = _biped(curriculum=False), _biped(curriculum="gait")
+    ids = torch.arange(off.num_envs)
+    for _ in range(on.curriculum.refresh_steps - 1):
+        for biped in (off, on):
+            biped.advance()
+        on.credit(torch.rand(on.num_envs, GAIT_CHANNELS), torch.ones(on.num_envs, dtype=torch.bool))
+    for x, y in zip(off.plan(ids), on.plan(ids)):
+        assert torch.equal(x, y)

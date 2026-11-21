@@ -92,10 +92,11 @@ CONTACT_REWARD = float(os.environ.get("HUMANOID_CONTACT_REWARD", "0"))
 """Weight of the plan's contact schedule in the reward (``tracking/contact_reward.py``); 0: off."""
 CURRICULUM_MODE = os.environ.get("HUMANOID_CURRICULUM", "0")
 """Draw the procedural plans by the tracker's contact error (``latent/curriculum.py``): "1" by
-its disagreement, "bias" by its signed contact error; its record goes to
+its disagreement, "bias" by its signed contact error, "gait" by its largest relative duty
+or cadence error; its record goes to
 ``HUMANOID_CURRICULUM_LOG`` (an ``.npz``) when that is set."""
-CURRICULUM = CURRICULUM_MODE in ("1", "bias")
-CURRICULUM_SCORE = "bias" if CURRICULUM_MODE == "bias" else "disagreement"
+CURRICULUM = CURRICULUM_MODE in ("1", "bias", "gait")
+CURRICULUM_SCORE = CURRICULUM_MODE if CURRICULUM_MODE in ("bias", "gait") else "disagreement"
 CURRICULUM_LOG = os.environ.get("HUMANOID_CURRICULUM_LOG") or None
 LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
 """Range of the procedural stances' load-profile warp

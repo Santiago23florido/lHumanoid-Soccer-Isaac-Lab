@@ -10,7 +10,8 @@
 # Runs: logs/rsl_rl/<body>_track/<stamp>_walkfam_<body>; policies:
 # <run>/exported/model_<last>.pt and model_<last>_sym_pact.pt. Status: logs/pact/walk_teachers.status
 # With HUMANOID_CURRICULUM=1 the procedural plans are drawn by the tracker's contact
-# disagreement, with HUMANOID_CURRICULUM=bias by its signed contact error, half of them
+# disagreement, with HUMANOID_CURRICULUM=bias by its signed contact error and with
+# HUMANOID_CURRICULUM=gait by its largest relative duty or cadence error, half of them
 # uniformly (latent/curriculum.py); each run's record goes to logs/pact/curriculum/<tag>_<body>.npz.
 set -uo pipefail
 root="${PACT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"

@@ -8,7 +8,8 @@ for each speed bin, the range of the draw's boost over the uniform one, and for 
 (``--cell P:duty:forward``, default the probes' failing 1.8:0.57:0.05) its boost over the
 run and whether its score fell over the run's last 30 % (the drop of a least-squares line
 through those refreshes against that line's standard error). A bias curriculum's record also
-holds each cell's signed mean contact error (its duty bias); the cell's is printed.
+holds each cell's signed mean contact error (its duty bias), a gait curriculum's each foot's
+relative duty error and the relative cadence error; the cell's are printed.
 
     python transfer/scripts/pact_curriculum_read.py logs/pact/curriculum/contactcur_h1.npz
 """
@@ -86,7 +87,9 @@ def read(path: Path, cell_spec: str) -> dict:
             "tail_drop": drop,
             "tail_drop_se": se,
             "still_falling": bool(drop > se),
-            "signed_last": float(record["value"][-1, cell]) if "value" in record else None,
+            "signed_last": (
+                np.atleast_1d(record["value"][-1, cell]).tolist() if "value" in record else None
+            ),
         },
     }
 
@@ -120,7 +123,9 @@ def main() -> int:
         f"(SE {c['tail_drop_se']:.4f}) -> {'still falling' if c['still_falling'] else 'not falling'}"
     )
     if c["signed_last"] is not None:
-        print(f"  cell's signed contact error (duty bias) at the last refresh: {c['signed_last']:+.4f}")
+        names = ["duty bias"] if len(c["signed_last"]) == 1 else ["duty L", "duty R", "cadence"]
+        signed = ", ".join(f"{n} {v:+.4f}" for n, v in zip(names, c["signed_last"]))
+        print(f"  cell's signed errors at the last refresh: {signed}")
     if args.output:
         args.output.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
     return 0

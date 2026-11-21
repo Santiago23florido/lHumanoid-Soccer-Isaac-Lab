@@ -234,6 +234,9 @@ class ReferenceCommand(UniformVelocityCommand):
         self.procedural = torch.zeros(n, dtype=torch.bool, device=self.device)
         """Envs whose episode follows the point-mass biped instead of the task's generator."""
         self.biped = None
+        self._curriculum_previous: tuple[torch.Tensor, torch.Tensor] | None = None
+        """The planned and reached contacts of the step before, for the gait curriculum's
+        touchdowns."""
         if cfg.procedural_fraction > 0.0 or cfg.procedural_probes:
             duty = {"duty": tuple(map(float, cfg.procedural_duty))} if cfg.procedural_duty else {}
             ranges = GaitRanges(
@@ -1081,13 +1084,27 @@ class ReferenceCommand(UniformVelocityCommand):
     def _credit_curriculum(self) -> None:
         """Feed the biped's curriculum the step just simulated: each procedural env's share
         of feet whose contact state is not its due plan row's (the contact reward's reading,
-        ``contact_reward.py``), or for the bias score its feet's mean reached minus planned
-        contact, and save the curriculum's record at each refresh."""
+        ``contact_reward.py``), for the bias score its feet's mean reached minus planned
+        contact, for the gait score each foot's contact error and planned contact and the
+        touchdowns reached and planned (a contact starting against the step before), and save
+        the curriculum's record at each refresh."""
         norm = self.generator.skill_norm
         threshold = self.cfg.procedural_curriculum_contact
         planned = norm.inverse(self.due())[:, self._load] > threshold
         reached = norm.inverse(self._true_now)[:, self._load] > threshold
-        if self.biped.curriculum.kind == "bias":
+        if self.biped.curriculum.kind == "gait":
+            was_planned, was_reached = self._curriculum_previous or (planned, reached)
+            self._curriculum_previous = (planned, reached)
+            miss = torch.cat(
+                [
+                    reached.float() - planned.float(),
+                    planned.float(),
+                    (reached & ~was_reached).float().sum(dim=-1, keepdim=True),
+                    (planned & ~was_planned).float().sum(dim=-1, keepdim=True),
+                ],
+                dim=-1,
+            )
+        elif self.biped.curriculum.kind == "bias":
             miss = (reached.float() - planned.float()).mean(dim=-1)
         else:
             miss = (planned != reached).float().mean(dim=-1)
@@ -1307,7 +1324,8 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     procedural_curriculum_score: str = "disagreement"
     """The curriculum's score (``latent/curriculum.py``, ``SCORES``): ``"disagreement"``, the
-    share of feet off the plan's contact, or ``"bias"``, the feet's signed contact error."""
+    share of feet off the plan's contact, ``"bias"``, the feet's signed contact error, or
+    ``"gait"``, the largest relative duty or cadence error."""
 
     procedural_curriculum_contact: float = 0.05
     """Load (in the body's weight) above which the curriculum reads a foot as in contact:

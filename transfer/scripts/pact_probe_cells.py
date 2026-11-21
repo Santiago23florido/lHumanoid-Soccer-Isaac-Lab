@@ -3,7 +3,8 @@
 Reads ``transfer/results/icml_teacher_<body>_<variant>_probes.json`` (``pact_teacher_audit.sh``,
 stage ``probes``) and, for the grid probes, prints per period and asked duty how many probes
 pass and the body's duty minus the asked one, averaged over the speeds. ``--cell P:duty``
-(repeatable) also prints the passes in those cells summed, per variant.
+(repeatable) also prints the passes in those cells summed, per variant, and every variant's
+walking-probe failures are counted by the check they fail.
 
     python transfer/scripts/pact_probe_cells.py --body h1 --variants contact,mid \\
         --cell 0.8:0.55 --cell 1.2:0.55 --cell 1.8:0.55 --cell 2.6:0.7
@@ -36,6 +37,19 @@ def cells(path: Path) -> dict[tuple[str, float], list[tuple[bool, float]]]:
         key = (period, round(asked * 20) / 20)
         table.setdefault(key, []).append((bool(probe["passes"]), bias))
     return table
+
+
+def failed_checks(path: Path) -> dict[str, int]:
+    """How many walking probes (asked mean duty >= 0.55) fail each check."""
+    counts: dict[str, int] = {}
+    for probe in json.loads(path.read_text(encoding="utf-8"))["probes"]:
+        if not probe.get("representable", True) or probe["passes"]:
+            continue
+        if float(np.mean(probe["duty"])) < WALK_DUTY:
+            continue
+        for check, ok in probe["checks"].items():
+            counts[check] = counts.get(check, 0) + (not ok)
+    return counts
 
 
 def disagreement(path: Path) -> dict[str, float]:
@@ -94,6 +108,8 @@ def main() -> int:
             passed = sum(p for p, _ in entries)
             bias = np.mean([b for _, b in entries]) if entries else float("nan")
             print(f"   cell P{period} d{duty}: {passed}/{len(entries)}, duty bias {bias:+.3f}")
+        failed = failed_checks(path)
+        print("   walking-probe failures by check: " + ", ".join(f"{k} {v}" for k, v in failed.items()))
         if args.disagreement:
             capture = REPO / f"logs/pact/teachers/{args.body}_{variant}_probes.npz"
             if not capture.exists():

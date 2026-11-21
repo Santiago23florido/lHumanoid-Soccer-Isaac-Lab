@@ -79,11 +79,22 @@ class PactDriver:
         device: torch.device | str,
     ) -> None:
         kind = checkpoint.get("kind", "pact")
+        self.routing: dict = {}
         if kind == "urma":  # the end-to-end baseline: same interface, anchors ignored
             from humanoid_transfer.transfer.latent.pact.urma import UrmaDims, UrmaPolicy
 
             dims = UrmaDims(**checkpoint["dims"])
             self.model = UrmaPolicy(dims).to(device).eval()
+        elif kind == "hpt":  # the per-body-stem baseline: this body's stem and head
+            from humanoid_transfer.transfer.latent.pact.hpt import HptDims, HptPolicy
+
+            raw = checkpoint["dims"]
+            dims = HptDims(**{k: tuple(v) if isinstance(v, list) else v for k, v in raw.items()})
+            if descriptor.name not in dims.bodies:
+                raise ValueError(f"this HPT model has no stem for {descriptor.name}")
+            self.model = HptPolicy(dims).to(device).eval()
+            body_id = dims.bodies.index(descriptor.name)
+            self.routing = {"body_ids": torch.full((num_envs,), body_id, device=device)}
         else:
             dims = PactDims(**checkpoint["dims"])
             self.model = PactPolicy(dims).to(device).eval()
@@ -161,5 +172,6 @@ class PactDriver:
             self.times.expand(n, -1),
             path,
             mask,
+            **self.routing,
         )
         return out[:, self.action_joints] / self.action_scale

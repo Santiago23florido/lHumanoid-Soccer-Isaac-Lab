@@ -23,6 +23,8 @@ joints whose target moves in the capture. Arms:
   no readout loss, everything else equal;
 - ``urma_d``: one URMA policy for every body (``latent/pact/urma.py``): the same inputs but
   the anchor inputs, the same BC loss, no anchor loss (the end-to-end baseline);
+- ``hpt_d``: HPT (``latent/pact/hpt.py``): a stem and a head per body around a shared trunk,
+  no descriptors, no anchor (the per-body-stem baseline; not read on a held-out body);
 - ``mlp_d``: one MLP per body on the same inputs, flattened (the in-body reference);
 - ``hold``: the target in force kept (no learning; what persistence alone explains).
 
@@ -74,6 +76,7 @@ from humanoid_transfer.transfer.latent.pact.descriptors import (  # noqa: E402
     contact_joints,
     describe,
 )
+from humanoid_transfer.transfer.latent.pact.hpt import HptDims, HptPolicy  # noqa: E402
 from humanoid_transfer.transfer.latent.pact.mirror import SampleMirror  # noqa: E402
 from humanoid_transfer.transfer.latent.pact.model import PactDims, stack_bodies  # noqa: E402
 from humanoid_transfer.transfer.latent.pact.policy import (  # noqa: E402
@@ -325,7 +328,7 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bootstrap", type=int, default=2000)
-    parser.add_argument("--arms", default="hold,pact_d,mlp_d", help="of hold,pact_d,pact_na,urma_d,mlp_d")
+    parser.add_argument("--arms", default="hold,pact_d,mlp_d", help="of hold,pact_d,pact_na,urma_d,hpt_d,mlp_d")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--output", type=Path, default=REPO / "transfer/results/icml_gate_d0.json")
     parser.add_argument("--save", type=Path, default=None, help="where to save pact_d")
@@ -461,9 +464,9 @@ def main() -> int:
         for i, b in enumerate(bodies):
             predictions["hold"][i] = b.hold[b.evaluate]
 
-    shared = [arm for arm in ("pact_d", "pact_na", "urma_d") if arm in arms]
+    shared = [arm for arm in ("pact_d", "pact_na", "urma_d", "hpt_d") if arm in arms]
     if init is not None and len(shared) != 1:
-        raise ValueError("--init continues one shared model: give one of pact_d, pact_na, urma_d")
+        raise ValueError("--init continues one model: give one of pact_d, pact_na, urma_d, hpt_d")
     for arm in shared:
         if arm in ("pact_d", "pact_na"):
             kind = "pact"
@@ -477,27 +480,41 @@ def main() -> int:
             )
             model = PactPolicy(dims).to(device)
             anchor_weight = args.anchor_weight if anchored else 0.0
-        else:
+        elif arm == "urma_d":
             kind = "urma"
             dims = UrmaDims(history=args.history, plan_steps=steps_max)
             model = UrmaPolicy(dims).to(device)
             anchor_weight = 0.0  # no anchored fields
+        else:
+            kind = "hpt"
+            dims = HptDims(
+                bodies=tuple(names),
+                joints=tuple(len(b.descriptor.joint_names) for b in bodies),
+                history=args.history,
+            )
+            model = HptPolicy(dims).to(device)
+            anchor_weight = 0.0
         if init is not None:
             if init.get("kind", "pact") != kind:
                 raise ValueError(f"--init is a {init.get('kind', 'pact')} model, not {kind}")
-            if type(dims)(**init["dims"]) != dims:
+            saved = {k: tuple(v) if isinstance(v, list) else v for k, v in init["dims"].items()}
+            if type(dims)(**saved) != dims:
                 raise ValueError("--init was trained with other dimensions")
             model.load_state_dict(init["state"])
         per = max(1, args.batch // len(train_index))
 
-        def step_shared(model=model, anchor_weight=anchor_weight):
+        def routed(which: torch.Tensor, kind: str = kind) -> dict:
+            """HPT routes each row to its body's stem and head."""
+            return {"body_ids": which} if kind == "hpt" else {}
+
+        def step_shared(model=model, anchor_weight=anchor_weight, routed=routed):
             parts = [batch(i, rng.choice(train_rows[i], per), augment=True) for i in train_index]
             x = {k: torch.cat([p[k] for p in parts]) for k in parts[0]}
             which = torch.cat(
                 [torch.full((per,), i, device=device, dtype=torch.long) for i in train_index]
             )
             label, learned = x.pop("label"), x.pop("learned")
-            out_learned, out = model(table.take(which), **x)
+            out_learned, out = model(table.take(which), **x, **routed(which))
             moved = controlled[which]
             bc = ((out - label) / label_scale).square()[moved].mean()
             if anchor_weight == 0.0:
@@ -509,17 +526,18 @@ def main() -> int:
         model.eval()
         params[arm] = sum(p.numel() for p in model.parameters())
         for i, b in enumerate(bodies):
+            if kind == "hpt" and i not in train_index:
+                continue  # a body HPT was not trained on has an untrained stem and head
             out = []
             with torch.no_grad():
                 for rows in chunks(np.nonzero(b.evaluate)[0]):
                     x = batch(i, rows)
                     x.pop("label"), x.pop("learned")
                     which = torch.full((len(rows),), i, device=device, dtype=torch.long)
-                    out.append(
-                        model(table.take(which), **x)[1][:, : len(b.controlled)].cpu().numpy()
-                    )
+                    targets = model(table.take(which), **x, **routed(which))[1]
+                    out.append(targets[:, : len(b.controlled)].cpu().numpy())
             predictions[arm][i] = np.concatenate(out)
-        prefix = {"pact_d": "d0", "pact_na": "na0", "urma_d": "u0"}[arm]
+        prefix = {"pact_d": "d0", "pact_na": "na0", "urma_d": "u0", "hpt_d": "h0"}[arm]
         save = (args.save if len(shared) == 1 else None) or REPO / (
             f"logs/pact/models/{prefix}_{args.hold_out or 'all'}_s{args.seed}_p{args.steps}.pt"
         )
@@ -616,6 +634,8 @@ def main() -> int:
             ("mlp_d", "hold"),
             ("urma_d", "pact_d"),
             ("pact_na", "pact_d"),
+            ("hpt_d", "pact_d"),
+            ("hpt_d", "mlp_d"),
             ("urma_d", "mlp_d"),
             ("urma_d", "hold"),
         ):

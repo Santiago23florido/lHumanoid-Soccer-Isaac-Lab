@@ -1,6 +1,6 @@
 """Bodies beyond the G1 and the NAO, described by ``transfer/bodies/bodies.json``.
 
-Registers a contract tracker per body Isaac Lab ships (``H1Track-v0``,
+Registers a contract tracker per body Isaac Lab ships (``H1Track-v0``, ``DigitTrack-v0``,
 ``CassieTrack-v0`` and their play variants). Registration is guarded, so importing
 without gymnasium gives ``REGISTERED = False``.
 """
@@ -15,6 +15,11 @@ TASKS = {
     "CassieTrack-Play-v0": (
         "body_track_env_cfg:CassieTrackEnvCfg_PLAY",
         "agents:CassieTrackPPORunnerCfg",
+    ),
+    "DigitTrack-v0": ("body_track_env_cfg:DigitTrackEnvCfg", "agents:DigitTrackPPORunnerCfg"),
+    "DigitTrack-Play-v0": (
+        "body_track_env_cfg:DigitTrackEnvCfg_PLAY",
+        "agents:DigitTrackPPORunnerCfg",
     ),
 }
 

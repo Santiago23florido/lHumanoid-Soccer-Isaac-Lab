@@ -79,7 +79,7 @@ setup() {  # setup <body>: the tracker (teacher), task and contract the co-execu
       export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger2e/generator.pt" HUMANOID_LOAD_SPACE=linear
       export HUMANOID_POSTURE_CONTRACT="$HUMANOID_CONTRACT"
       ;;
-    h1 | cassie)
+    h1 | cassie | digit)
       run="$(latest_run "logs/rsl_rl/${1}_track" "pact_${1}_s41")"
       if [ -z "$run" ]; then note "$1: no tracker run, skipped"; return 1; fi
       checkpoint="$(latest_checkpoint "$run")"

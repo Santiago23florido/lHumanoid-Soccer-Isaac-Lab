@@ -48,6 +48,11 @@ def cassie_augment(env, obs=None, actions=None):
     return mirror_augmentation(env, obs, actions, mirror=_mirror("cassie"))
 
 
+def digit_augment(env, obs=None, actions=None):
+    """Each Digit sample and its mirror image."""
+    return mirror_augmentation(env, obs, actions, mirror=_mirror("digit"))
+
+
 def _symmetry(augment):
     if SYMMETRY not in ("augment", "loss"):
         return None
@@ -103,3 +108,9 @@ class H1TrackPPORunnerCfg(BodyTrackPPORunnerCfg):
 class CassieTrackPPORunnerCfg(BodyTrackPPORunnerCfg):
     experiment_name = "cassie_track"
     algorithm = _algorithm(cassie_augment)
+
+
+@configclass
+class DigitTrackPPORunnerCfg(BodyTrackPPORunnerCfg):
+    experiment_name = "digit_track"
+    algorithm = _algorithm(digit_augment)

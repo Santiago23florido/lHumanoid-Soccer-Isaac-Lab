@@ -54,7 +54,7 @@ setup() {  # setup <body> <variant>: the teacher and conditions of the co-execut
       export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger2e/generator.pt" HUMANOID_LOAD_SPACE=linear
       export HUMANOID_POSTURE_CONTRACT="$HUMANOID_CONTRACT"
       ;;
-    h1 | cassie)
+    h1 | cassie | digit)
       run="$(latest_run "logs/rsl_rl/${1}_track" "pact_${1}_s41")"
       checkpoint="$(latest_checkpoint "$run")"
       task="$(echo "${1:0:1}" | tr a-z A-Z)${1:1}Track-Play-v0"

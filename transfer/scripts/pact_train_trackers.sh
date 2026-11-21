@@ -16,8 +16,8 @@ python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 status=logs/pact/train_trackers.status
 mkdir -p logs/pact
 note() { echo "$1 $(date +%Y-%m-%d_%H:%M)" >> "$status"; }
-declare -A task_id=([h1]=H1Track-v0 [cassie]=CassieTrack-v0)
-declare -A experiment=([h1]=h1_track [cassie]=cassie_track)
+track_task() { echo "$(echo "${1:0:1}" | tr a-z A-Z)${1:1}Track-v0"; }  # h1 -> H1Track-v0
+
 
 note "start bodies=$bodies iterations=$iterations seed=$seed"
 for body in $bodies; do
@@ -31,11 +31,11 @@ for body in $bodies; do
   export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt"
   unset HUMANOID_POSTURE_CONTRACT HUMANOID_TASK_WEIGHTS HUMANOID_PLAN_CONTACT HUMANOID_OBSERVE_UNITS
   note "$name training"
-  "$python" -u scripts/train.py --task "${task_id[$body]}" --headless --num_envs 4096 \
+  "$python" -u scripts/train.py --task "$(track_task "$body")" --headless --num_envs 4096 \
     --max_iterations "$iterations" --seed "$seed" --run_name "$name" \
     > "logs/pact/train_${name}.log" 2>&1
   code=$?
-  run="$(ls -d logs/rsl_rl/${experiment[$body]}/*_"$name" 2>/dev/null | tail -1)"
+  run="$(ls -d logs/rsl_rl/${body}_track/*_"$name" 2>/dev/null | tail -1)"
   if [ $code -ne 0 ] || [ -z "$run" ]; then
     note "$name FAILED (exit $code), see logs/pact/train_${name}.log"
     continue

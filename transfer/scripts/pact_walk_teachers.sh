@@ -55,7 +55,7 @@ conditions() {  # conditions <body>: the start run, task, contract and mirror of
       export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger2e/generator.pt" HUMANOID_LOAD_SPACE=linear
       export HUMANOID_POSTURE_CONTRACT="$HUMANOID_CONTRACT" HUMANOID_HEADS=0 HUMANOID_PLAN_TRUST=0
       ;;
-    h1 | cassie)
+    h1 | cassie | digit)
       start="$(latest_run "logs/rsl_rl/${1}_track" "pact_${1}_s41")"
       task="$(echo "${1:0:1}" | tr a-z A-Z)${1:1}Track-v0" mirror="transfer/bodies/$1/mirror.json"
       export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt" HUMANOID_LOAD_SPACE=log

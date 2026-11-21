@@ -226,10 +226,13 @@ class BodyTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.contact_forces.track_air_time = False
         self.curriculum.terrain_levels = None
 
-        # Actions: offsets around the posture, at the body's published scale.
+        # Actions: offsets around the posture, at the body's published scale, on the joints
+        # its motors drive: every joint unless the registry names them (``action_joints``,
+        # for a body with passive joints, e.g. a closed-chain leg's).
+        actuated = list(tracker.get("action_joints") or [".*"])
         self.actions.joint_pos = mdp.JointPositionActionCfg(
             asset_name="robot",
-            joint_names=[".*"],
+            joint_names=actuated,
             scale=float(tracker["action_scale"]),
             use_default_offset=True,
         )
@@ -280,6 +283,14 @@ class BodyTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
         )
 
         self.observations = BodyTrackObservationsCfg()
+        if tracker.get("action_joints"):
+            # The joint encoders read the actuated joints, in the actions' order (articulation
+            # order for both), as the NAO's tracker and Isaac Lab's own tasks for such bodies
+            # do; the mirror (``symmetry.py``) maps the two with one joint permutation.
+            joints = SceneEntityCfg("robot", joint_names=actuated)
+            for group in (self.observations.policy, self.observations.critic):
+                group.joint_pos.params = {"asset_cfg": joints}
+                group.joint_vel.params = {"asset_cfg": joints}
 
         # Rewards: nothing that prescribes a motion.
         rewards = self.rewards
@@ -356,3 +367,13 @@ class CassieTrackEnvCfg(BodyTrackEnvCfg):
 @configclass
 class CassieTrackEnvCfg_PLAY(BodyTrackEnvCfg_PLAY):
     body: str = "cassie"
+
+
+@configclass
+class DigitTrackEnvCfg(BodyTrackEnvCfg):
+    body: str = "digit"
+
+
+@configclass
+class DigitTrackEnvCfg_PLAY(BodyTrackEnvCfg_PLAY):
+    body: str = "digit"

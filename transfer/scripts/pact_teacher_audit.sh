@@ -63,16 +63,17 @@ setup() {  # setup <body> <variant>: the teacher and conditions of the co-execut
     *) note "$1: unknown body"; return 1 ;;
   esac
   # A fine-tuned teacher (pact_walk_teachers.sh): variant <tag> (symmetrised) or <tag>plain,
-  # from the latest <stamp>_<run tag>_<body> run (walk -> walkfam, contact -> contactsched).
+  # from the latest <stamp>_<run tag>_<body> run (walk -> walkfam, contact -> contactsched,
+  # mid -> contactmid: a diagnostic specialist on duties 0.50-0.70, never a teacher).
   local family="${2%plain}" runtag=""
-  case "$family" in walk) runtag=walkfam ;; contact) runtag=contactsched ;; esac
+  case "$family" in walk) runtag=walkfam ;; contact) runtag=contactsched ;; mid) runtag=contactmid ;; esac
   if [ -n "$runtag" ]; then
     run="$(latest_run "logs/rsl_rl/${1}_track" "${runtag}_$1")"
     [ -n "$run" ] || { note "$1 $2: no ${runtag} run"; return 1; }
     checkpoint="$(latest_checkpoint "$run")"
   fi
   policy="$run/exported/$checkpoint.pt"
-  case "$2" in sym | walk | contact) policy="$run/exported/${checkpoint}_sym_pact.pt" ;; esac
+  case "$2" in sym | walk | contact | mid) policy="$run/exported/${checkpoint}_sym_pact.pt" ;; esac
   [ -f "$policy" ] || { note "$1 $2: no policy $policy"; return 1; }
 }
 

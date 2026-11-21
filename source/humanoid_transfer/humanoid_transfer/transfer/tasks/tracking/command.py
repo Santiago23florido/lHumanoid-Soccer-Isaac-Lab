@@ -85,6 +85,8 @@ class ReferenceCommand(UniformVelocityCommand):
             self.generator.flow_solver = cfg.flow_solver
         if cfg.flow_steps is not None:
             self.generator.flow_steps = cfg.flow_steps
+        if cfg.plan_max_load is not None:
+            self.generator.max_log_load = math.log(cfg.plan_max_load + LOAD_EPSILON)
         self.encoder = contract.encoder if cfg.use_encoder else None
         if cfg.use_encoder and self.encoder is None:
             raise ValueError(f"{cfg.contract} carries no encoder")
@@ -315,6 +317,8 @@ class ReferenceCommand(UniformVelocityCommand):
                 generator.flow_solver = cfg.flow_solver
             if cfg.flow_steps is not None:
                 generator.flow_steps = cfg.flow_steps
+            if cfg.plan_max_load is not None:
+                generator.max_log_load = math.log(cfg.plan_max_load + LOAD_EPSILON)
             same = (
                 abs(float(generator.grid_step) - grid_step) < _TOLERANCE
                 and generator.history == primary.history
@@ -1269,6 +1273,11 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     procedural_duty: tuple[float, float] | None = None
     """Range of the biped's mean duty (``GaitRanges.duty``); None keeps the family's
     (0.30, 0.95), which reaches flight phases. (0.55, 0.95): walks only, the paper's scope."""
+
+    plan_max_load: float | None = None
+    """Largest load, in body weights, a generator's plan may ask of one foot; None keeps
+    the contracts' ten. The generators model log loads, whose sampling errors multiply a
+    stance's load: task plans asked > 4 W on 3 % of steps, their data on 0.04 %."""
 
     procedural_load_shape: tuple[float, float] = (1.0, 1.0)
     """Range of the time warp of a walking stance's half-sine of load (``GaitRanges.load_shape``,

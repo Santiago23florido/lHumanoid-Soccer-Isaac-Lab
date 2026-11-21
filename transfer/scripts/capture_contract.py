@@ -68,6 +68,12 @@ parser.add_argument(
 )
 parser.add_argument("--reference", choices=("autonomous", "physical"), default=None)
 parser.add_argument(
+    "--plan-max-load",
+    type=float,
+    default=None,
+    help="Cap, in body weights, on the load a generator's plan asks of one foot (default 10).",
+)
+parser.add_argument(
     "--standing-fraction",
     type=float,
     default=None,
@@ -289,6 +295,8 @@ def main() -> int:
         command_cfg.start_fraction = args_cli.start_fraction
     if args_cli.standing_fraction is not None:
         command_cfg.rel_standing_envs = args_cli.standing_fraction
+    if args_cli.plan_max_load is not None:
+        command_cfg.plan_max_load = args_cli.plan_max_load
     if args_cli.resample_seconds is not None:
         command_cfg.resampling_time_range = tuple(args_cli.resample_seconds)
     if args_cli.procedural_fraction is not None:

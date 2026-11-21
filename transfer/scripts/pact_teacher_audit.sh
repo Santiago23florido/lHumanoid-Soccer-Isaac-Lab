@@ -13,6 +13,10 @@
 # The plain variant's captures already exist (logs/pact/coexec/<body>_map.npz,
 # logs/pact/dagger/train/r0/<body>.npz); pact_teacher_audit_read.py reads all of them, with
 # W20's base-task and held-out ladders for the G1 and the NAO. Status: logs/pact/teachers.status
+#
+# PACT_AUDIT_STAGES (default "probes train ladder") selects stages; PACT_PLAN_MAX_LOAD caps the
+# load a generator's plan asks of one foot (capture_contract.py --plan-max-load) in the
+# training task, written to logs/pact/teachers/<body>_<v>_cap<load>_train.npz.
 set -uo pipefail
 root="${PACT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root"
@@ -20,6 +24,9 @@ bodies="${1:-g1 nao h1 cassie}"
 variants="${2:-sym}"
 python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 status=logs/pact/teachers.status
+stages="${PACT_AUDIT_STAGES:-probes train ladder}"
+cap="${PACT_PLAN_MAX_LOAD:-}"
+stage() { case " $stages " in *" $1 "*) return 0 ;; esac; return 1; }
 mkdir -p logs/pact/teachers
 note() { echo "$1 $(date +%Y-%m-%d_%H:%M)" >> "$status"; }
 
@@ -114,13 +121,13 @@ capture() {  # capture <log> <args...>: retried while the asset server is down
   done
 }
 
-note "start bodies=$bodies variants=$variants"
+note "start bodies=$bodies variants=$variants stages=$stages${cap:+ cap=$cap}"
 for body in $bodies; do
   for v in $variants; do
     setup "$body" "$v" || continue
     probes="logs/pact/teachers/${body}_${v}_probes.npz"
     result="transfer/results/icml_teacher_${body}_${v}_probes.json"
-    if [ ! -f "$result" ]; then
+    if stage probes && [ ! -f "$result" ]; then
       capture "logs/pact/teachers/${body}_${v}_probes.log" --task-id "$task" --driver-policy "$policy" \
         --steps 900 --settle-steps 100 --contract-from-truth --reference autonomous --num-envs 213 \
         --gait-probes transfer/probes/gait_probes.json --joints --policy-obs --output "$probes"
@@ -129,19 +136,22 @@ for body in $bodies; do
         && note "$body $v probes: $(tail -1 "logs/pact/teachers/${body}_${v}_probes.log" | cut -c1-160)" \
         || note "$body $v probes FAILED"
     fi
-    train="logs/pact/teachers/${body}_${v}_train.npz"
-    if [ ! -f "$train" ]; then
+    name="${body}_${v}${cap:+_cap$cap}"
+    train="logs/pact/teachers/${name}_train.npz"
+    if stage train && [ ! -f "$train" ]; then
       (
         export HUMANOID_PROCEDURAL=0.5 HUMANOID_TASKS="$root/transfer/results/base_tasks_xf.json"
         # The walking-family teachers are read on the walking family they were tuned on.
         case "$v" in walk* | contact*) export HUMANOID_PROCEDURAL_DUTY=0.55,0.95 ;; esac
-        capture "logs/pact/teachers/${body}_${v}_train.log" --task-id "${task%-Play-v0}-v0" \
+        capture "logs/pact/teachers/${name}_train.log" --task-id "${task%-Play-v0}-v0" \
           --driver-policy "$policy" --steps 900 --settle-steps 100 --contract-from-truth \
-          --reference autonomous --num-envs 213 --joints --policy-obs --output "$train"
+          --reference autonomous --num-envs 213 --joints --policy-obs --output "$train" \
+          ${cap:+--plan-max-load "$cap"}
       )
-      [ -f "$train" ] && note "$body $v train: $(tail -1 "logs/pact/teachers/${body}_${v}_train.log" | cut -c1-160)" \
-        || note "$body $v train FAILED"
+      [ -f "$train" ] && note "$name train: $(tail -1 "logs/pact/teachers/${name}_train.log" | cut -c1-160)" \
+        || note "$name train FAILED"
     fi
+    stage ladder || continue
     case "$body:$v" in g1:walk* | nao:walk* | g1:contact* | nao:contact*) ladder "$body" "$v" ;; esac
   done
 done

@@ -125,7 +125,8 @@ class ContractDims:
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
 _LOAD_EPS = 0.01
 _LOG_MAX_LOAD = 2.303
-"""One percent of body weight: the scale below which a load is a foot in the air."""
+"""``log 10``: by default no plan asks a foot for more than ten body weights
+(:attr:`ContractGenerator.max_log_load` lowers it)."""
 
 _FREQUENCIES = (1.0, 2.0, 4.0, 8.0)
 _TIME_FEATURES = 1 + 2 * len(_FREQUENCIES)
@@ -186,6 +187,8 @@ class ContractGenerator(nn.Module):
         self.flow_steps = dims.flow_steps
         self.flow_solver = dims.flow_solver
         self.warp_loads = dims.warp_loads
+        # The largest load a plan may ask of a foot, in log units of the body's weight.
+        self.max_log_load = _LOG_MAX_LOAD
         self.noise_conditional = dims.noise_conditional
         self.summary_beta = dims.summary_beta
         if self.noise_conditional:
@@ -232,7 +235,7 @@ class ContractGenerator(nn.Module):
             return w
         # Ten body weights is beyond any load a foot carries; it keeps exp finite on
         # the wild histories of a body that is still learning to stand.
-        logged = (w[..., _LOAD] * self.warp_std + self.warp_mean).clamp(max=_LOG_MAX_LOAD)
+        logged = (w[..., _LOAD] * self.warp_std + self.warp_mean).clamp(max=self.max_log_load)
         load = torch.exp(logged) - _LOAD_EPS
         mean, std = self.skill_norm.mean[_LOAD], self.skill_norm.std[_LOAD]
         loads = (load.clamp(min=0.0) - mean) / std

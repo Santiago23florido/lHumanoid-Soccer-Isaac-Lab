@@ -19,6 +19,8 @@ joints whose target moves in the capture. Arms:
 
 - ``pact_d``: one model for every body, BC loss (MSE over one pooled scale) plus G-A3's
   anchor loss on the encoder's six learned fields;
+- ``urma_d``: one URMA policy for every body (``latent/pact/urma.py``): the same inputs but
+  the anchor inputs, the same BC loss, no anchor loss (the end-to-end baseline);
 - ``mlp_d``: one MLP per body on the same inputs, flattened (the in-body reference);
 - ``hold``: the target in force kept (no learning; what persistence alone explains).
 
@@ -78,6 +80,7 @@ from humanoid_transfer.transfer.latent.pact.policy import (  # noqa: E402
     PactPolicy,
     plan_from_view,
 )
+from humanoid_transfer.transfer.latent.pact.urma import UrmaDims, UrmaPolicy  # noqa: E402
 from pact_check_anchors import sole_override  # noqa: E402
 from pact_gate_a import bootstrap_rmse  # noqa: E402
 from pact_gate_a2 import analytic_z  # noqa: E402
@@ -320,7 +323,7 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bootstrap", type=int, default=2000)
-    parser.add_argument("--arms", default="hold,pact_d,mlp_d")
+    parser.add_argument("--arms", default="hold,pact_d,mlp_d", help="of hold,pact_d,urma_d,mlp_d")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--output", type=Path, default=REPO / "transfer/results/icml_gate_d0.json")
     parser.add_argument("--save", type=Path, default=None, help="where to save pact_d")
@@ -456,22 +459,35 @@ def main() -> int:
         for i, b in enumerate(bodies):
             predictions["hold"][i] = b.hold[b.evaluate]
 
-    if "pact_d" in arms:
-        dims = PactDims(
-            observation=3,
-            history=args.history,
-            width=args.width,
-            anchor_inputs=True,
-            timed_plan=True,
-        )
-        model = PactPolicy(dims).to(device)
+    shared = [arm for arm in ("pact_d", "urma_d") if arm in arms]
+    if init is not None and len(shared) != 1:
+        raise ValueError("--init continues one shared model: give one of pact_d, urma_d")
+    for arm in shared:
+        if arm == "pact_d":
+            kind = "pact"
+            dims = PactDims(
+                observation=3,
+                history=args.history,
+                width=args.width,
+                anchor_inputs=True,
+                timed_plan=True,
+            )
+            model = PactPolicy(dims).to(device)
+            anchor_weight = args.anchor_weight
+        else:
+            kind = "urma"
+            dims = UrmaDims(history=args.history, plan_steps=steps_max)
+            model = UrmaPolicy(dims).to(device)
+            anchor_weight = 0.0  # no anchored fields
         if init is not None:
-            if PactDims(**init["dims"]) != dims:
+            if init.get("kind", "pact") != kind:
+                raise ValueError(f"--init is a {init.get('kind', 'pact')} model, not {kind}")
+            if type(dims)(**init["dims"]) != dims:
                 raise ValueError("--init was trained with other dimensions")
             model.load_state_dict(init["state"])
         per = max(1, args.batch // len(train_index))
 
-        def step_pact():
+        def step_shared(model=model, anchor_weight=anchor_weight):
             parts = [batch(i, rng.choice(train_rows[i], per), augment=True) for i in train_index]
             x = {k: torch.cat([p[k] for p in parts]) for k in parts[0]}
             which = torch.cat(
@@ -481,12 +497,14 @@ def main() -> int:
             out_learned, out = model(table.take(which), **x)
             moved = controlled[which]
             bc = ((out - label) / label_scale).square()[moved].mean()
+            if anchor_weight == 0.0:
+                return bc
             anchor = (out_learned - learned).square().mean()
-            return bc + args.anchor_weight * anchor
+            return bc + anchor_weight * anchor
 
-        seconds["pact_d"] = fit(model, step_pact, "pact_d")
+        seconds[arm] = fit(model, step_shared, arm)
         model.eval()
-        params["pact_d"] = sum(p.numel() for p in model.parameters())
+        params[arm] = sum(p.numel() for p in model.parameters())
         for i, b in enumerate(bodies):
             out = []
             with torch.no_grad():
@@ -497,13 +515,15 @@ def main() -> int:
                     out.append(
                         model(table.take(which), **x)[1][:, : len(b.controlled)].cpu().numpy()
                     )
-            predictions["pact_d"][i] = np.concatenate(out)
-        save = args.save or REPO / (
-            f"logs/pact/models/d0_{args.hold_out or 'all'}_s{args.seed}_p{args.steps}.pt"
+            predictions[arm][i] = np.concatenate(out)
+        prefix = "d0" if arm == "pact_d" else "u0"
+        save = (args.save if len(shared) == 1 else None) or REPO / (
+            f"logs/pact/models/{prefix}_{args.hold_out or 'all'}_s{args.seed}_p{args.steps}.pt"
         )
         save.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
+                "kind": kind,
                 "state": model.state_dict(),
                 "dims": vars(dims),
                 "bodies": names,
@@ -587,7 +607,14 @@ def main() -> int:
         for arm, err in sq.items():
             rmse, se, _, _ = bootstrap_rmse(err, None, groups, args.bootstrap, args.seed)
             entry[arm] = {"rmse_rad": rmse, "se": se, "r2": 1.0 - float(err.mean()) / variance}
-        for a_arm, b_arm in (("pact_d", "mlp_d"), ("pact_d", "hold"), ("mlp_d", "hold")):
+        for a_arm, b_arm in (
+            ("pact_d", "mlp_d"),
+            ("pact_d", "hold"),
+            ("mlp_d", "hold"),
+            ("urma_d", "pact_d"),
+            ("urma_d", "mlp_d"),
+            ("urma_d", "hold"),
+        ):
             if a_arm in sq and b_arm in sq:
                 _, _, diff, se = bootstrap_rmse(
                     sq[a_arm], sq[b_arm], groups, args.bootstrap, args.seed

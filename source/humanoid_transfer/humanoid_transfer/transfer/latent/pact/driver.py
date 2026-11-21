@@ -58,7 +58,8 @@ def anchor_inputs(
 
 
 class PactDriver:
-    """A trained PACT policy driving ``num_envs`` copies of one body."""
+    """A trained PACT policy driving ``num_envs`` copies of one body (or the URMA baseline,
+    ``latent/pact/urma.py``, which takes the same inputs; a checkpoint's ``kind`` says which)."""
 
     def __init__(
         self,
@@ -77,8 +78,15 @@ class PactDriver:
         num_envs: int,
         device: torch.device | str,
     ) -> None:
-        dims = PactDims(**checkpoint["dims"])
-        self.model = PactPolicy(dims).to(device).eval()
+        kind = checkpoint.get("kind", "pact")
+        if kind == "urma":  # the end-to-end baseline: same interface, anchors ignored
+            from humanoid_transfer.transfer.latent.pact.urma import UrmaDims, UrmaPolicy
+
+            dims = UrmaDims(**checkpoint["dims"])
+            self.model = UrmaPolicy(dims).to(device).eval()
+        else:
+            dims = PactDims(**checkpoint["dims"])
+            self.model = PactPolicy(dims).to(device).eval()
         self.model.load_state_dict(checkpoint["state"])
         self.device = torch.device(device)
         as_t = lambda x: torch.as_tensor(np.asarray(x), dtype=torch.float32, device=device)  # noqa: E731
@@ -86,6 +94,8 @@ class PactDriver:
         self.a_mean, self.a_std = as_t(checkpoint["a_mean"]), as_t(checkpoint["a_std"])
         self.table = stack_bodies([descriptor], [contacts]).to(device)
         residual = checkpoint.get("residual")
+        if residual is not None and kind != "pact":
+            raise ValueError("a body residual (G-N2) belongs to a PACT model")
         if residual is not None:  # a body added by PPO (G-N2): its E_b and descriptor residuals
             from humanoid_transfer.transfer.latent.pact.actor import BodyResidual
 

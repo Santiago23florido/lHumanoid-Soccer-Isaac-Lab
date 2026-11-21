@@ -9,8 +9,9 @@ What is measured:
 
 ``mass``, ``inertia``, ``leg_length``, ``foot``, ``postures``
     As for the G1 (see that script): the leg length is the hip-pitch joint to the
-    sole with the legs at the zero pose, the sole is the centre of the bottom of the
-    foot's collision bounding box.
+    sole with the legs at the zero pose. The sole is the centre of the foot's contact
+    patch in the default pose (``common/sole.py``): the collision surface's points
+    lowest in the world, from the shapes' own geometry, for every body alike.
 ``tree``
     Each link's parent, from PhysX's articulation metatype.
 ``joint_geometry``
@@ -104,10 +105,25 @@ def _pose(env, robot, joint_pos: torch.Tensor) -> dict[str, np.ndarray]:
     }
 
 
-def _foot_geometry(robot_prim_path: str, link_name: str) -> dict:
-    """Bounding box of a foot's collision prims, in the foot link's own frame."""
+def _foot_contact(robot_prim_path: str, link_name: str, rotation: np.ndarray) -> dict:
+    """A foot's sole: the centre of its contact patch with the link turned by ``rotation`` (its
+    default-pose orientation), from its collision shapes' own geometry (``common/sole.py``).
+
+    Every collision prim under the link is sampled in its own frame (a ``Cylinder``,
+    ``Capsule``, ``Sphere`` or ``Cube`` from its schema attributes, a ``Mesh`` by its points;
+    never an authored ``extent``, which an asset may store already scaled) and moved into the
+    link frame with its full transform, so scale and orientation are the prim's own.
+    """
     from pxr import Usd, UsdGeom, UsdPhysics
     import omni.usd
+
+    from humanoid_transfer.common.sole import (
+        capsule_points,
+        contact_patch,
+        cube_points,
+        cylinder_points,
+        sphere_points,
+    )
 
     stage = omni.usd.get_context().get_stage()
     root = stage.GetPrimAtPath(robot_prim_path)
@@ -117,7 +133,6 @@ def _foot_geometry(robot_prim_path: str, link_name: str) -> dict:
     )
     if link is None:
         raise RuntimeError(f"no prim named {link_name} under {robot_prim_path}")
-
     # Instanceable assets (H1, Cassie, the converted NAO) keep their collision prims
     # behind instance proxies, which a plain PrimRange does not enter.
     collisions = [
@@ -127,90 +142,43 @@ def _foot_geometry(robot_prim_path: str, link_name: str) -> dict:
     ]
     if not collisions:
         raise RuntimeError(f"{link_name} has no collision geometry")
-
-    cache = UsdGeom.BBoxCache(
-        Usd.TimeCode.Default(),
-        [
-            UsdGeom.Tokens.default_,
-            UsdGeom.Tokens.render,
-            UsdGeom.Tokens.proxy,
-            UsdGeom.Tokens.guide,
-        ],
-        useExtentsHint=False,
-    )
-    lows, highs = [], []
-    for prim in collisions:
-        box = cache.ComputeRelativeBound(prim, link).ComputeAlignedRange()
-        lows.append(np.array(box.GetMin()))
-        highs.append(np.array(box.GetMax()))
-    low, high = np.min(lows, axis=0), np.max(highs, axis=0)
-    return {
-        "collision_prims": [str(p.GetPath()).rsplit("/", 1)[-1] for p in collisions],
-        "collision_types": sorted({p.GetTypeName() for p in collisions}),
-        "bbox_min_link": low.round(6).tolist(),
-        "bbox_max_link": high.round(6).tolist(),
-        "sole_point_link": [
-            round(float((low[0] + high[0]) / 2), 6),
-            round(float((low[1] + high[1]) / 2), 6),
-            round(float(low[2]), 6),
-        ],
-        "length": round(float(high[0] - low[0]), 6),
-        "width": round(float(high[1] - low[1]), 6),
-    }
-
-
-def _foot_lowest_face(robot_prim_path: str, link_name: str, rotation: np.ndarray) -> dict:
-    """A foot whose sole is not the link's lowest z (Digit): the collision geometry from its
-    own schema attributes (never an authored ``extent``, which an asset may store already
-    scaled), and the sole as the face lowest in the world with the link at ``rotation``
-    (its default-pose orientation). Registry entries opt in with ``"sole": "lowest_face"``.
-    """
-    from pxr import Usd, UsdGeom, UsdPhysics
-    import omni.usd
-
-    stage = omni.usd.get_context().get_stage()
-    root = stage.GetPrimAtPath(robot_prim_path)
-    link = next(
-        (p for p in Usd.PrimRange(root) if p.GetName() == link_name and p.IsA(UsdGeom.Xformable)),
-        None,
-    )
-    if link is None:
-        raise RuntimeError(f"no prim named {link_name} under {robot_prim_path}")
-    collisions = [
-        p
-        for p in Usd.PrimRange(link, Usd.TraverseInstanceProxies())
-        if p.HasAPI(UsdPhysics.CollisionAPI) and p.IsA(UsdGeom.Gprim)
-    ]
-    if not collisions:
-        raise RuntimeError(f"{link_name} has no collision geometry")
     time = Usd.TimeCode.Default()
     cache = UsdGeom.XformCache(time)
-    corners = []
+    clouds = []
     for prim in collisions:
-        extent = UsdGeom.Boundable.ComputeExtentFromPlugins(UsdGeom.Boundable(prim), time)
-        lo, hi = np.array(extent[0], dtype=float), np.array(extent[1], dtype=float)
-        local = np.array(
-            [[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
-        )
+        if prim.IsA(UsdGeom.Cylinder):
+            shape = UsdGeom.Cylinder(prim)
+            local = cylinder_points(
+                shape.GetRadiusAttr().Get(), shape.GetHeightAttr().Get(), shape.GetAxisAttr().Get()
+            )
+        elif prim.IsA(UsdGeom.Capsule):
+            shape = UsdGeom.Capsule(prim)
+            local = capsule_points(
+                shape.GetRadiusAttr().Get(), shape.GetHeightAttr().Get(), shape.GetAxisAttr().Get()
+            )
+        elif prim.IsA(UsdGeom.Sphere):
+            local = sphere_points(UsdGeom.Sphere(prim).GetRadiusAttr().Get())
+        elif prim.IsA(UsdGeom.Cube):
+            local = cube_points(UsdGeom.Cube(prim).GetSizeAttr().Get())
+        elif prim.IsA(UsdGeom.Mesh):
+            local = np.array(UsdGeom.Mesh(prim).GetPointsAttr().Get(time), dtype=float)
+        else:
+            raise RuntimeError(f"{link_name}: collision prim {prim.GetPath()} ({prim.GetTypeName()})")
         matrix, _ = cache.ComputeRelativeTransform(prim, link)
-        homogeneous = np.c_[local, np.ones(len(local))] @ np.array(matrix, dtype=float)
-        corners.append(homogeneous[:, :3])
-    points = np.concatenate(corners)
-    world = points @ rotation.T
-    lowest = world[:, 2].min()
-    sole = points[world[:, 2] < lowest + 1e-4]
-    sole_world = sole @ rotation.T
-    low, high = points.min(axis=0), points.max(axis=0)
+        clouds.append((np.c_[local, np.ones(len(local))] @ np.array(matrix, dtype=float))[:, :3])
+    points = np.concatenate(clouds)
+    patch = contact_patch(points, rotation)
     return {
         "collision_prims": [str(p.GetPath()).rsplit("/", 1)[-1] for p in collisions],
         "collision_types": sorted({p.GetTypeName() for p in collisions}),
-        "sole_rule": "lowest_face",
-        "bbox_min_link": low.round(6).tolist(),
-        "bbox_max_link": high.round(6).tolist(),
-        "sole_corners_link": sole.round(6).tolist(),
-        "sole_point_link": sole.mean(axis=0).round(6).tolist(),
-        "length": round(float(np.ptp(sole_world[:, 0])), 6),
-        "width": round(float(np.ptp(sole_world[:, 1])), 6),
+        "sole_rule": "contact_patch",
+        "bbox_min_link": points.min(axis=0).round(6).tolist(),
+        "bbox_max_link": points.max(axis=0).round(6).tolist(),
+        "sole_point_link": np.round(patch["sole_point_link"], 6).tolist(),
+        "length": round(patch["length"], 6),
+        "width": round(patch["width"], 6),
+        "patch_length": round(patch["patch_length"], 6),
+        "patch_width": round(patch["patch_width"], 6),
     }
 
 
@@ -389,15 +357,10 @@ def main() -> int:
     zero = _pose(inner, robot, zero_q)
 
     robot_prim = cfg.scene.robot.prim_path.replace("env_.*", "env_0")
-    if entry.get("sole") == "lowest_face":
-        foot_geometry = {
-            name: _foot_lowest_face(
-                robot_prim, name, _quat_to_matrix(default["link_quat_wxyz"][index[name]])
-            )
-            for name in feet
-        }
-    else:
-        foot_geometry = {name: _foot_geometry(robot_prim, name) for name in feet}
+    foot_geometry = {
+        name: _foot_contact(robot_prim, name, _quat_to_matrix(default["link_quat_wxyz"][index[name]]))
+        for name in feet
+    }
 
     def sole_world(posture: dict, foot: str) -> np.ndarray:
         rotation = _quat_to_matrix(posture["link_quat_wxyz"][index[foot]])

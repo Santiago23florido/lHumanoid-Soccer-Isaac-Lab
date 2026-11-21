@@ -146,3 +146,29 @@ def test_the_no_anchor_ablation_ignores_the_anchor_inputs():
         _, after = model(bodies, **x, plan_mask=mask)
     torch.testing.assert_close(before, after)
     assert not any("anchor" in name for name, _ in model.named_parameters())
+
+
+def test_the_no_body_token_ablation_keeps_the_descriptors_and_drops_e_b():
+    """``body_tokens=0``: no ``E_b`` (no body-encoder parameters, all others trained), but the
+    per-joint descriptors still reach the targets."""
+    (g1, g1_contacts), (nao, nao_contacts) = _body("g1"), _body("nao")
+    bodies = stack_bodies([g1, nao], [g1_contacts, nao_contacts])
+    model = PactPolicy(PactDims(**{**vars(DIMS), "body_tokens": 0}))
+    names = [name for name, _ in model.named_parameters()]
+    assert not any(n.startswith(("embodiment.read", "embodiment.layers", "embodiment.queries"))
+                   for n in names)  # fmt: skip
+    x = _inputs(bodies.mask.shape[1], steps=6, seed=8)
+    mask = torch.ones(2, 6, dtype=torch.bool)
+    learned, targets = model(bodies, **x, plan_mask=mask)
+    (learned.square().mean() + targets.square().mean()).backward()
+    missing = [n for n, p in model.named_parameters() if p.grad is None]
+    assert not missing, missing
+    assert (targets[~bodies.mask] == 0).all()
+    model.eval()
+    changed = stack_bodies([g1, nao], [g1_contacts, nao_contacts])
+    changed.joints[0, 0] = changed.joints[0, 0] * 1.5 + 0.1
+    with torch.no_grad():
+        _, before = model(bodies, **x, plan_mask=mask)
+        _, after = model(changed, **x, plan_mask=mask)
+    assert (before[0] - after[0]).abs().max() > 1e-6
+    torch.testing.assert_close(before[1], after[1])

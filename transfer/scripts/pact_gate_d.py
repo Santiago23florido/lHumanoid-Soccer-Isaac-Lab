@@ -21,6 +21,8 @@ joints whose target moves in the capture. Arms:
   anchor loss on the encoder's six learned fields;
 - ``pact_na``: ``pact_d`` without the anchor (the ablation): no analytic anchor inputs and
   no readout loss, everything else equal;
+- ``pact_nb``: ``pact_d`` without ``E_b`` (the ablation): no body tokens, so no body summary
+  is attended; the per-joint descriptor tokens, which identify the joints, are kept;
 - ``urma_d``: one URMA policy for every body (``latent/pact/urma.py``): the same inputs but
   the anchor inputs, the same BC loss, no anchor loss (the end-to-end baseline);
 - ``hpt_d``: HPT (``latent/pact/hpt.py``): a stem and a head per body around a shared trunk,
@@ -328,7 +330,7 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bootstrap", type=int, default=2000)
-    parser.add_argument("--arms", default="hold,pact_d,mlp_d", help="of hold,pact_d,pact_na,urma_d,hpt_d,mlp_d")
+    parser.add_argument("--arms", default="hold,pact_d,mlp_d", help="of hold,pact_d,pact_na,pact_nb,urma_d,hpt_d,mlp_d")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--output", type=Path, default=REPO / "transfer/results/icml_gate_d0.json")
     parser.add_argument("--save", type=Path, default=None, help="where to save pact_d")
@@ -464,19 +466,20 @@ def main() -> int:
         for i, b in enumerate(bodies):
             predictions["hold"][i] = b.hold[b.evaluate]
 
-    shared = [arm for arm in ("pact_d", "pact_na", "urma_d", "hpt_d") if arm in arms]
+    shared = [arm for arm in ("pact_d", "pact_na", "pact_nb", "urma_d", "hpt_d") if arm in arms]
     if init is not None and len(shared) != 1:
-        raise ValueError("--init continues one model: give one of pact_d, pact_na, urma_d, hpt_d")
+        raise ValueError("--init continues one model: give one of pact_d, pact_na, pact_nb, urma_d, hpt_d")
     for arm in shared:
-        if arm in ("pact_d", "pact_na"):
+        if arm in ("pact_d", "pact_na", "pact_nb"):
             kind = "pact"
-            anchored = arm == "pact_d"
+            anchored = arm != "pact_na"
             dims = PactDims(
                 observation=3,
                 history=args.history,
                 width=args.width,
                 anchor_inputs=anchored,
                 timed_plan=True,
+                **({"body_tokens": 0} if arm == "pact_nb" else {}),
             )
             model = PactPolicy(dims).to(device)
             anchor_weight = args.anchor_weight if anchored else 0.0
@@ -537,7 +540,7 @@ def main() -> int:
                     targets = model(table.take(which), **x, **routed(which))[1]
                     out.append(targets[:, : len(b.controlled)].cpu().numpy())
             predictions[arm][i] = np.concatenate(out)
-        prefix = {"pact_d": "d0", "pact_na": "na0", "urma_d": "u0", "hpt_d": "h0"}[arm]
+        prefix = {"pact_d": "d0", "pact_na": "na0", "pact_nb": "nb0", "urma_d": "u0", "hpt_d": "h0"}[arm]
         save = (args.save if len(shared) == 1 else None) or REPO / (
             f"logs/pact/models/{prefix}_{args.hold_out or 'all'}_s{args.seed}_p{args.steps}.pt"
         )
@@ -634,6 +637,8 @@ def main() -> int:
             ("mlp_d", "hold"),
             ("urma_d", "pact_d"),
             ("pact_na", "pact_d"),
+            ("pact_nb", "pact_d"),
+            ("urma_d", "pact_na"),
             ("hpt_d", "pact_d"),
             ("hpt_d", "mlp_d"),
             ("urma_d", "mlp_d"),

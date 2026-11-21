@@ -238,13 +238,21 @@ class Block(nn.Module):
 
 
 class EmbodimentEncoder(nn.Module):
-    """Descriptor tokens -> graph-biased attention -> ``E_b`` by learned queries."""
+    """Descriptor tokens -> graph-biased attention -> ``E_b`` by learned queries.
+
+    With ``dims.body_tokens`` zero (the no-``E_b`` ablation) there is no body summary: the
+    descriptor tokens (each joint's features plus the body's) are still returned, since
+    they identify the joints, and ``E_b`` is empty, so nothing attends to it.
+    """
 
     def __init__(self, dims: PactDims) -> None:
         super().__init__()
         w = dims.width
         self.joint = _mlp(len(JOINT_FEATURES), w)
         self.body = _mlp(len(BODY_FEATURES), w)
+        self.tokens = dims.body_tokens
+        if not self.tokens:
+            return
         self.bias = GraphBias(dims.heads, dims.max_distance)
         self.layers = nn.ModuleList(
             Block(w, dims.heads, dims.ff_mult) for _ in range(dims.body_layers)
@@ -257,6 +265,8 @@ class EmbodimentEncoder(nn.Module):
         descriptor = self.joint(descriptor_inputs(bodies.joints))
         body = self.body(bodies.body)[:, None, :]
         tokens = descriptor + body
+        if not self.tokens:
+            return tokens.new_zeros(tokens.shape[0], 0, tokens.shape[-1]), tokens
         bias = self.bias(bodies.distance, bodies.ancestor)
         for layer in self.layers:
             tokens = layer(tokens, bias=bias, key_mask=bodies.mask)

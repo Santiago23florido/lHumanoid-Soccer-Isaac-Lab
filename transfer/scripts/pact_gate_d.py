@@ -47,6 +47,18 @@ captures, and the previous round's model is the start::
 
 (one command; ``pact_dagger.sh`` runs the rounds).
 
+Adding a body (G-N3): a model trained without a body (``--hold-out``) is adapted to it
+on its first ``--probes`` training probes of the map capture (one seeded permutation, so
+budgets are nested and every arm gets the same probes), for ``--steps`` steps, and read on
+that body's test probes. Each model adapts as its authors add a body: PACT by ``etune``
+(a residual on the body's ``E_b`` and descriptor tokens), ``bitfit`` (also every bias and
+LayerNorm parameter) or ``full``; HPT by ``stem`` (the body's own stem and head, trunk
+frozen) or ``full``; ``zero`` reads the model unadapted (not HPT: it has no stem for an
+unseen body). ``mlp_d`` beside it is the same budget from scratch::
+
+    python transfer/scripts/pact_gate_d.py --hold-out nao --init <model without nao>
+        --arms hold,pact_d,mlp_d --adapt etune --probes 4 --steps 2000 --output <json>
+
 Windows: a DAgger capture holds many episode starts (PACT falls where the tracker did not),
 and the driver acts there with its history refilled by the first reading. Windows that
 cross the start of an episode begun inside the capture therefore repeat that reading
@@ -69,6 +81,10 @@ sys.path.insert(0, str(REPO / "source" / "humanoid_transfer"))
 sys.path.insert(0, str(REPO / "transfer" / "scripts"))
 
 import torch  # noqa: E402
+from humanoid_transfer.transfer.latent.pact.actor import (  # noqa: E402
+    BodyResidual,
+    bias_and_norm,
+)
 from humanoid_transfer.transfer.latent.pact.anchors import (  # noqa: E402
     DriveLoads,
     KinematicAnchors,
@@ -102,6 +118,16 @@ from torch import nn  # noqa: E402
 
 CONTRACTS = "g1=walk_dagger3e,nao=walk_dagger2e,h1=walk_dagger3e,cassie=walk_dagger3e"
 """The contract each body's co-executions ran under (``pact_coexecute.sh``)."""
+ADAPT_LR = {"zero": 0.0, "etune": 1e-3, "bitfit": 1e-3, "full": 1e-4, "stem": 3e-4}
+"""G-N3's learning rates (G-N1's: residuals and biases 1e-3, every weight 1e-4; a body's
+new stem and head, trained from their initialisation, at the trainer's own 3e-4)."""
+PREFIX = {"pact_d": "d0", "pact_na": "na0", "pact_nb": "nb0", "urma_d": "u0", "hpt_d": "h0"}
+"""Saved-model name prefix of each shared arm (``logs/pact/models/``)."""
+ADAPT_ARMS = {
+    "pact": ("zero", "etune", "bitfit", "full"),
+    "urma": ("zero", "bitfit", "full"),
+    "hpt": ("stem", "full"),
+}
 
 
 def unclamped(estimate: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
@@ -293,6 +319,68 @@ class BodyData:
         raise ValueError("no plan view decodes to the capture's estimate")
 
 
+def budget_rows(b: BodyData, probes: int, seed: int) -> tuple[np.ndarray, list[int]]:
+    """``b``'s map-capture training rows in its first ``probes`` training probes of one
+    seeded permutation (budgets nested; every training probe at 0), and those probes."""
+    first = (b.group < 1000) & ~b.test
+    probe = b.group % PROBES
+    ids = np.unique(probe[first])
+    if probes:
+        if probes > len(ids):
+            raise ValueError(f"{b.name} has {len(ids)} training probes, not {probes}")
+        ids = np.random.default_rng(seed).permutation(ids)[:probes]
+    return np.nonzero(first & np.isin(probe, ids))[0], sorted(int(i) for i in ids)
+
+
+def adapt_parameters(
+    model: nn.Module, kind: str, arm: str, dims, table, added: int
+) -> list[nn.Parameter]:
+    """Freeze what ``arm`` does not tune and return what it tunes (G-N3).
+
+    ``table`` is the added body's row of the padded body table. PACT's residual arms wrap
+    its embodiment encoder in :class:`~.actor.BodyResidual` (zero at the start).
+    """
+    if arm not in ADAPT_ARMS[kind]:
+        raise ValueError(f"a {kind} model adapts by {ADAPT_ARMS[kind]}, not {arm!r}")
+    chosen: list[nn.Parameter] = []
+    if kind == "pact" and arm != "zero":
+        device = next(model.parameters()).device
+        residual = BodyResidual(model.embodiment, table, dims.body_tokens, dims.width)
+        model.embodiment = residual.to(device)
+        chosen += [model.embodiment.delta_e, model.embodiment.delta_d]
+    if arm == "bitfit":
+        chosen += bias_and_norm(model)
+    if arm == "stem":
+        chosen += [*model.proprio[added].parameters(), *model.heads[added].parameters()]
+    if arm == "full":
+        chosen += list(model.parameters())
+    ids = {id(p) for p in chosen}
+    for p in model.parameters():
+        p.requires_grad_(id(p) in ids)
+    return [p for p in model.parameters() if p.requires_grad]
+
+
+def driver_state(model: nn.Module, joints: int) -> tuple[dict, dict]:
+    """``model``'s state as :class:`~.driver.PactDriver` loads it, and the checkpoint's extra
+    fields: with a body residual (G-N3's PACT arms), the policy unwrapped and the residual
+    beside it on the body's own ``joints`` (G-N2's layout; its padded rows are masked)."""
+    state = model.state_dict()
+    residual = getattr(model, "embodiment", None)
+    if not isinstance(residual, BodyResidual):
+        return state, {}
+    state = {
+        k.replace("embodiment.inner.", "embodiment.", 1): v
+        for k, v in state.items()
+        if not k.startswith("embodiment.delta_")
+    }
+    return state, {
+        "residual": {
+            "delta_e": residual.delta_e.detach().cpu(),
+            "delta_d": residual.delta_d.detach().cpu()[:joints],
+        }
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--bodies", default="g1,nao,h1,cassie")
@@ -316,7 +404,16 @@ def main() -> int:
     parser.add_argument("--width", type=int, default=128)
     parser.add_argument("--steps", type=int, default=24000)
     parser.add_argument("--batch", type=int, default=512)
-    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--lr", type=float, default=None, help="3e-4; with --adapt, ADAPT_LR")
+    parser.add_argument(
+        "--adapt",
+        default="",
+        choices=("", "zero", "etune", "bitfit", "full", "stem"),
+        help="G-N3: add the --hold-out body to the --init model, tuning this arm",
+    )
+    parser.add_argument(
+        "--probes", type=int, default=0, help="with --adapt: the body's training probes (0: all)"
+    )
     parser.add_argument("--anchor-weight", type=float, default=1.0)
     parser.add_argument(
         "--labels",
@@ -330,7 +427,11 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bootstrap", type=int, default=2000)
-    parser.add_argument("--arms", default="hold,pact_d,mlp_d", help="of hold,pact_d,pact_na,pact_nb,urma_d,hpt_d,mlp_d")
+    parser.add_argument(
+        "--arms",
+        default="hold,pact_d,mlp_d",
+        help="of hold,pact_d,pact_na,pact_nb,urma_d,hpt_d,mlp_d",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--output", type=Path, default=REPO / "transfer/results/icml_gate_d0.json")
     parser.add_argument("--save", type=Path, default=None, help="where to save pact_d")
@@ -358,6 +459,17 @@ def main() -> int:
         return np.concatenate([getattr(bodies[i], key)[train_rows[i]] for i in train_index])
 
     init = torch.load(args.init, map_location="cpu", weights_only=False) if args.init else None
+    added, probes_used = None, None
+    if args.adapt:
+        if init is None or not args.hold_out or init.get("hold_out") != args.hold_out:
+            raise ValueError(
+                "--adapt adds the --hold-out body to an --init model trained without it"
+            )
+        added = names.index(args.hold_out)
+        train_index = [added]
+        train_rows[added], probes_used = budget_rows(bodies[added], args.probes, args.seed)
+        print(f"adding {args.hold_out}: {len(train_rows[added])} samples, probes {probes_used}")
+    lr = args.lr if args.lr is not None else ADAPT_LR[args.adapt] if args.adapt else 3e-4
     if init is not None:
         z_mean, z_std, a_mean, a_std, t_mean, t_std = (
             np.asarray(init[k]) for k in ("z_mean", "z_std", "a_mean", "a_std", "t_mean", "t_std")
@@ -439,15 +551,18 @@ def main() -> int:
             "learned": as_t((raw["learned"] - t_mean) / t_std),
         }
 
-    def fit(model: nn.Module, step_fn, label: str) -> float:
-        opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    def fit(model: nn.Module, step_fn, label: str, tuned: list | None = None) -> float:
+        tuned = list(model.parameters()) if tuned is None else tuned
+        if not tuned or args.steps == 0:
+            return 0.0
+        opt = torch.optim.AdamW(tuned, lr=lr, weight_decay=1e-4)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.steps)
         start = time.time()
         for step in range(args.steps):
             loss = step_fn()
             opt.zero_grad(set_to_none=True)
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(tuned, 1.0)
             opt.step()
             sched.step()
             if step % 2000 == 0 or step == args.steps - 1:
@@ -468,7 +583,9 @@ def main() -> int:
 
     shared = [arm for arm in ("pact_d", "pact_na", "pact_nb", "urma_d", "hpt_d") if arm in arms]
     if init is not None and len(shared) != 1:
-        raise ValueError("--init continues one model: give one of pact_d, pact_na, pact_nb, urma_d, hpt_d")
+        raise ValueError(
+            "--init continues one model: give one of pact_d, pact_na, pact_nb, urma_d, hpt_d"
+        )
     for arm in shared:
         if arm in ("pact_d", "pact_na", "pact_nb"):
             kind = "pact"
@@ -504,13 +621,18 @@ def main() -> int:
             if type(dims)(**saved) != dims:
                 raise ValueError("--init was trained with other dimensions")
             model.load_state_dict(init["state"])
+        tuned = None
+        if args.adapt:
+            one = table.take(torch.tensor([added], device=device))
+            tuned = adapt_parameters(model, kind, args.adapt, dims, one, added)
+            params[f"{arm}/tuned"] = sum(p.numel() for p in tuned)
         per = max(1, args.batch // len(train_index))
 
         def routed(which: torch.Tensor, kind: str = kind) -> dict:
             """HPT routes each row to its body's stem and head."""
             return {"body_ids": which} if kind == "hpt" else {}
 
-        def step_shared(model=model, anchor_weight=anchor_weight, routed=routed):
+        def step_shared(model=model, anchor_weight=anchor_weight, routed=routed, per=per):
             parts = [batch(i, rng.choice(train_rows[i], per), augment=True) for i in train_index]
             x = {k: torch.cat([p[k] for p in parts]) for k in parts[0]}
             which = torch.cat(
@@ -525,10 +647,12 @@ def main() -> int:
             anchor = (out_learned - learned).square().mean()
             return bc + anchor_weight * anchor
 
-        seconds[arm] = fit(model, step_shared, arm)
+        seconds[arm] = fit(model, step_shared, arm, tuned)
         model.eval()
         params[arm] = sum(p.numel() for p in model.parameters())
         for i, b in enumerate(bodies):
+            if args.adapt and i != added:
+                continue  # G-N3 reads the added body
             if kind == "hpt" and i not in train_index:
                 continue  # a body HPT was not trained on has an untrained stem and head
             out = []
@@ -540,15 +664,21 @@ def main() -> int:
                     targets = model(table.take(which), **x, **routed(which))[1]
                     out.append(targets[:, : len(b.controlled)].cpu().numpy())
             predictions[arm][i] = np.concatenate(out)
-        prefix = {"pact_d": "d0", "pact_na": "na0", "pact_nb": "nb0", "urma_d": "u0", "hpt_d": "h0"}[arm]
+        prefix = PREFIX[arm]
+        name = f"{prefix}_{args.hold_out or 'all'}"
+        if args.adapt:
+            name = f"{prefix}_add_{args.hold_out}_{args.adapt}_k{args.probes or 'all'}"
         save = (args.save if len(shared) == 1 else None) or REPO / (
-            f"logs/pact/models/{prefix}_{args.hold_out or 'all'}_s{args.seed}_p{args.steps}.pt"
+            f"logs/pact/models/{name}_s{args.seed}_p{args.steps}.pt"
         )
+        joints = len(bodies[added].descriptor.joint_names) if args.adapt else 0
+        state, extra = driver_state(model, joints)
         save.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
                 "kind": kind,
-                "state": model.state_dict(),
+                "state": state,
+                **extra,
                 "dims": vars(dims),
                 "bodies": names,
                 "hold_out": args.hold_out,
@@ -560,6 +690,9 @@ def main() -> int:
                 "t_std": t_std,
                 "label_scale": label_scale,
                 "views": {b.name: b.view for b in bodies},
+                "added": {"body": args.hold_out, "arm": args.adapt, "probes": probes_used}
+                if args.adapt
+                else None,
             },
             save,
         )
@@ -567,6 +700,8 @@ def main() -> int:
 
     if "mlp_d" in arms:
         for i, b in enumerate(bodies):
+            if args.adapt and i != added:
+                continue
             j, v = b.joint_obs.shape[1], b.view
             inputs = j * args.history * 3 + args.history * 6 + SKILL + v * (2 * SKILL + 3)
             moved = np.nonzero(b.controlled)[0]
@@ -605,7 +740,15 @@ def main() -> int:
             predictions["mlp_d"][i] = np.concatenate(out)
 
     report = {
-        "gate": "G-D0",
+        "gate": "G-N3" if args.adapt else "G-D0",
+        "added": {
+            "body": args.hold_out,
+            "arm": args.adapt,
+            "probes": probes_used,
+            "train_samples": int(len(train_rows[added])),
+        }
+        if args.adapt
+        else None,
         "config": {k: str(v) for k, v in vars(args).items()},
         "parameters": params,
         "train_seconds": {k: round(v, 1) for k, v in seconds.items()},
@@ -613,6 +756,8 @@ def main() -> int:
         "bodies": {},
     }
     for i, b in enumerate(bodies):
+        if args.adapt and i != added:
+            continue
         moved = b.controlled
         truth = b.label[b.evaluate][:, moved]
         groups = b.group[b.evaluate]
@@ -657,7 +802,7 @@ def main() -> int:
             {arm: (round(entry[arm]["rmse_rad"], 4), round(entry[arm]["r2"], 3)) for arm in sq},
             flush=True,
         )
-    if "pact_d" in arms:
+    if "pact_d" in arms and not args.adapt:
         r2 = {name: report["bodies"][name]["pact_d"]["r2"] for name in names}
         report["proceed"] = bool(min(r2.values()) >= 0.9)
         print(f"G-D0: pact_d R² {r2}; proceed to G-D1: {report['proceed']}")

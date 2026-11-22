@@ -86,14 +86,15 @@ def main() -> int:
     parser.add_argument("--mirror", type=Path, required=True, help="The body's measure_mirror.py.")
     parser.add_argument("--contract", type=Path, required=True, help="Fixes the plan's units.")
     parser.add_argument("--view", type=int, default=None, help="Default: from the actor's width.")
+    registry = json.loads((REPO_ROOT / "transfer/bodies/bodies.json").read_text(encoding="utf-8"))
     parser.add_argument(
         "--body",
-        choices=("g1", "nao", "h1", "cassie"),
+        choices=sorted(k for k, v in registry.items() if isinstance(v, dict)),
         default="g1",
         help="g1: every joint, base velocity observed; nao: the actuated joints "
-        "(nao_kinematics.ACTUATED_JOINTS), no base linear velocity; a registered body "
-        "(h1, cassie: bodies/body_track_env_cfg.BodyTrackPolicyCfg): its action joints "
-        "as its measured mirror recorded them, no base linear velocity.",
+        "(nao_kinematics.ACTUATED_JOINTS), no base linear velocity; any other registered body "
+        "(transfer/bodies/bodies.json; bodies/body_track_env_cfg.BodyTrackPolicyCfg): its "
+        "action joints as its measured mirror recorded them, no base linear velocity.",
     )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()

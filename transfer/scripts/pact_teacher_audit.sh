@@ -16,7 +16,10 @@
 #
 # PACT_AUDIT_STAGES (default "probes train ladder") selects stages; PACT_PLAN_MAX_LOAD caps the
 # load a generator's plan asks of one foot (capture_contract.py --plan-max-load) in the
-# training task, written to logs/pact/teachers/<body>_<v>_cap<load>_train.npz.
+# training task, written to logs/pact/teachers/<body>_<v>_cap<load>_train.npz. PACT_AUDIT_SEED
+# (default 0) seeds the training-task capture (the simulation and the procedural plans); a seed
+# other than 0 is written to logs/pact/teachers/<body>_<v>_seed<k>_train.npz (the final audit
+# reads three).
 set -uo pipefail
 root="${PACT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root"
@@ -26,6 +29,7 @@ python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 status=logs/pact/teachers.status
 stages="${PACT_AUDIT_STAGES:-probes train ladder}"
 cap="${PACT_PLAN_MAX_LOAD:-}"
+seed="${PACT_AUDIT_SEED:-0}"
 stage() { case " $stages " in *" $1 "*) return 0 ;; esac; return 1; }
 mkdir -p logs/pact/teachers
 note() { echo "$1 $(date +%Y-%m-%d_%H:%M)" >> "$status"; }
@@ -131,7 +135,7 @@ capture() {  # capture <log> <args...>: retried while the asset server is down
   done
 }
 
-note "start bodies=$bodies variants=$variants stages=$stages${cap:+ cap=$cap}"
+note "start bodies=$bodies variants=$variants stages=$stages${cap:+ cap=$cap} seed=$seed"
 for body in $bodies; do
   for v in $variants; do
     setup "$body" "$v" || continue
@@ -147,6 +151,7 @@ for body in $bodies; do
         || note "$body $v probes FAILED"
     fi
     name="${body}_${v}${cap:+_cap$cap}"
+    [ "$seed" != 0 ] && name="${name}_seed${seed}"
     train="logs/pact/teachers/${name}_train.npz"
     if stage train && [ ! -f "$train" ]; then
       (
@@ -156,7 +161,7 @@ for body in $bodies; do
         capture "logs/pact/teachers/${name}_train.log" --task-id "${task%-Play-v0}-v0" \
           --driver-policy "$policy" --steps 900 --settle-steps 100 --contract-from-truth \
           --reference autonomous --num-envs 213 --joints --policy-obs --output "$train" \
-          ${cap:+--plan-max-load "$cap"}
+          --seed "$seed" --procedural-seed "$seed" ${cap:+--plan-max-load "$cap"}
       )
       [ -f "$train" ] && note "$name train: $(tail -1 "logs/pact/teachers/${name}_train.log" | cut -c1-160)" \
         || note "$name train FAILED"

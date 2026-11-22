@@ -34,7 +34,7 @@ from pact_held_out_read import SEED, base  # noqa: E402
 from w18_compare import COMMANDS, sidestep_reading, teacher_directed  # noqa: E402
 from w19_compare import HELD_OUT  # noqa: E402
 
-BODIES = ("g1", "nao", "h1", "cassie")
+BODIES = ("g1", "nao", "h1", "cassie", "digit")
 GROUPS = ("grid", "manoeuvre", "twin")
 
 

@@ -327,6 +327,15 @@ def main() -> int:
     task_id = entry["measure_task"]
 
     cfg = parse_env_cfg(task_id, num_envs=1)
+    # A card measures the asset. A task's startup events draw one random body (Digit's play
+    # task adds up to 5 kg to its base: two measurements read 72.90 and 68.25 kg), so none
+    # runs here.
+    skipped = []
+    for name, term in list(vars(cfg.events).items()):
+        if getattr(term, "mode", None) == "startup":
+            setattr(cfg.events, name, None)
+            skipped.append(name)
+    print(f"  startup events skipped  : {skipped}")
     env = gym.make(task_id, cfg=cfg)
     inner = env.unwrapped
     robot = inner.scene["robot"]

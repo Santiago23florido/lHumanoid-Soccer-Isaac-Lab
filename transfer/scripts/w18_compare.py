@@ -41,6 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1].parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO_ROOT / "source" / "humanoid_transfer"))
 
+from body_conditions import rollouts_dir  # noqa: E402
 from humanoid_transfer.common.similarity import UnitSystem  # noqa: E402
 from w8_compare import RESULTS  # noqa: E402
 from w16_compare import COMMANDS as ROUGH  # noqa: E402
@@ -91,7 +92,7 @@ def sidestep_reading(body: str, tag: str, arm: str, teacher: dict) -> dict | Non
     for command in COMMANDS:
         path = RESULTS / f"zero_shot_{body}_{tag}_{arm}_own_auto_kin_l4_{command}.json"
         capture = (
-            REPO_ROOT / body / "rollouts" / f"zs_{tag}_{arm}_own_auto_kin_{command}_encoder.npz"
+            rollouts_dir(body) / f"zs_{tag}_{arm}_own_auto_kin_{command}_encoder.npz"
         )
         if not path.exists() or not capture.exists():
             return None

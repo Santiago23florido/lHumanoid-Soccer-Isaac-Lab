@@ -24,10 +24,16 @@ import argparse
 import json
 from pathlib import Path
 
+import sys
+
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[1].parent
-BODIES = ("g1", "nao", "h1", "cassie")
+sys.path.insert(0, str(REPO / "transfer" / "scripts"))
+
+from body_conditions import TEACHERS, registry  # noqa: E402
+
+BODIES = tuple(registry(TEACHERS))
 GROUPS = ("grid", "manoeuvre", "twin")
 
 
@@ -60,15 +66,17 @@ def read(
     seed: int,
     min_duty: float = 0.0,
     teachers: str = "transfer/results/icml_competence_{body}.json",
+    results: str = "transfer/results",
 ) -> dict:
     report: dict = {
         "gate": "G-D1", "tag": tag, "bootstrap": draws, "min_duty": min_duty,
         "teachers": teachers, "bodies": {},
     }  # fmt: skip
     for body in BODIES:
-        teacher_path = REPO / teachers.format(body=body)
+        variant = registry(TEACHERS)[body]["variant"]
+        teacher_path = REPO / teachers.format(body=body, variant=variant)
         rounds = sorted(
-            REPO.glob(f"transfer/results/icml_gate_d1_{tag}_r*_{body}.json"),
+            REPO.glob(f"{results}/icml_gate_d1_{tag}_r*_{body}.json"),
             key=lambda p: int(p.stem.split("_r")[-1].split("_")[0]),
         )
         if not teacher_path.exists() or not rounds:
@@ -106,10 +114,12 @@ def main() -> int:
     parser.add_argument(
         "--teachers",
         default="transfer/results/icml_competence_{body}.json",
-        help="the reference probe scores, e.g. the audited teachers'",
+        help="the reference probe scores, e.g. the final teachers' "
+        "transfer/results/icml_teacher_{body}_{variant}_probes.json",
     )
+    parser.add_argument("--results", default="transfer/results", help="where the rounds' scores are")
     args = parser.parse_args()
-    report = read(args.tag, args.bootstrap, args.seed, args.min_duty, args.teachers)
+    report = read(args.tag, args.bootstrap, args.seed, args.min_duty, args.teachers, args.results)
     output = args.output or REPO / f"transfer/results/icml_gate_d1_{args.tag}.json"
     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     for body, entry in report["bodies"].items():

@@ -25,27 +25,47 @@
 # PACT_DAGGER_TRAIN_LAST=1 also trains after the last round.
 # PACT_DAGGER_ARM: the shared arm trained between rounds (pact_gate_d.py; default pact_d, or a
 # baseline or ablation: urma_d, hpt_d, pact_na, pact_nb), from a start model of its kind.
+# PACT_DAGGER_CAPTURES: the base captures (pact_gate_d.py --captures; default the co-executions'
+# map); PACT_DAGGER_MIN_DUTY: drop probes asking a lower mean duty (0.55: walking only);
+# PACT_DAGGER_SEED: the trainer's seed; PACT_DAGGER_DIR / _RESULTS / _MODELS: where captures,
+# scores and models go (default logs/pact/dagger, transfer/results, logs/pact/models);
+# PACT_DAGGER_ENVS / _CAPTURE_STEPS / _SETTLE: capture size (213 = 71 probes x 3, 900, 100; a
+# smoke run shrinks them). Every body's labeller is its final teacher
+# (transfer/bodies/teachers.json, body_conditions.py); training-task rounds draw the procedural
+# family on HUMANOID_PROCEDURAL_DUTY (default 0.55,0.95: the walking family).
 set -uo pipefail
 root="${PACT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root"
 model="$1"
 rounds="$2"
-bodies="${3:-g1 nao h1 cassie}"
+python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
+bodies="${3:-$("$python" transfer/scripts/body_conditions.py --bodies)}"
 tag="${4:-main}"
 shift $(($# < 4 ? $# : 4))
-python="${PYTHON:-C:/Users/USER/miniconda3/envs/env_isaaclab/python.exe}"
 train_steps="${PACT_DAGGER_STEPS:-8000}"
 first="${PACT_DAGGER_FIRST:-1}"
 last=$((first + rounds - 1))
 where="${PACT_DAGGER_ENV:-probes}"
 share="${PACT_DAGGER_TEACHER_SHARE:-0}"
 # (A brace inside ${...:-...} would end the expansion early: the default is set apart.)
-this_tag="logs/pact/dagger/$tag/r*/{body}.npz"
+captures_root="${PACT_DAGGER_DIR:-logs/pact/dagger}"
+results="${PACT_DAGGER_RESULTS:-transfer/results}"
+models="${PACT_DAGGER_MODELS:-logs/pact/models}"
+envs="${PACT_DAGGER_ENVS:-213}"
+capture_steps="${PACT_DAGGER_CAPTURE_STEPS:-900}"
+settle="${PACT_DAGGER_SETTLE:-100}"
+this_tag="$captures_root/$tag/r*/{body}.npz"
 aggregate="${PACT_DAGGER_GLOB:-$this_tag}"
 train_last="${PACT_DAGGER_TRAIN_LAST:-0}"
 arm="${PACT_DAGGER_ARM:-pact_d}"
+# The base data the aggregate starts from, the probes kept (asked mean duty) and the seed.
+base_captures="logs/pact/coexec/{body}_map.npz"
+captures="${PACT_DAGGER_CAPTURES:-$base_captures}"
+min_duty="${PACT_DAGGER_MIN_DUTY:-0}"
+seed="${PACT_DAGGER_SEED:-0}"
+duty="${HUMANOID_PROCEDURAL_DUTY:-0.55,0.95}"
 status="logs/pact/dagger_${tag}.status"
-mkdir -p logs/pact
+mkdir -p logs/pact "$results" "$models"
 note() { echo "$1 $(date +%Y-%m-%d_%H:%M)" >> "$status"; }
 
 for wait_for in "$@"; do
@@ -53,10 +73,6 @@ for wait_for in "$@"; do
   until [ -f "$wait_for" ]; do sleep 60; done
 done
 
-latest_run() { ls -d "$1"/*_"$2" 2>/dev/null | tail -1; }
-latest_checkpoint() {
-  echo "model_$(ls "$1" | grep -E '^model_[0-9]+\.pt$' | sed 's/model_//; s/\.pt//' | sort -n | tail -1)"
-}
 assets_online() {
   local server=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1 url
   for url in "$server/Isaac/IsaacLab/Robots/Unitree/G1/g1_minimal.usd" \
@@ -65,60 +81,42 @@ assets_online() {
   done
 }
 
-setup() {  # setup <body>: the tracker (teacher), task and contract the co-executions used
-  unset HUMANOID_POSTURE_CONTRACT HUMANOID_OBSERVE_UNITS HUMANOID_TASKS HUMANOID_PROCEDURAL
-  case "$1" in
-    g1)
-      run=logs/rsl_rl/g1_track/2026-11-08_18-22-20_xs_g1_s41 checkpoint=model_7193
-      task=G1Track-Play-v0
-      export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt" HUMANOID_LOAD_SPACE=log
-      ;;
-    nao)
-      run=logs/rsl_rl/nao_track/2026-11-08_21-02-51_xs_nao_s31 checkpoint=model_4497
-      task=NaoTrack-Play-v0
-      export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger2e/generator.pt" HUMANOID_LOAD_SPACE=linear
-      export HUMANOID_POSTURE_CONTRACT="$HUMANOID_CONTRACT"
-      ;;
-    h1 | cassie | digit)
-      run="$(latest_run "logs/rsl_rl/${1}_track" "pact_${1}_s41")"
-      if [ -z "$run" ]; then note "$1: no tracker run, skipped"; return 1; fi
-      checkpoint="$(latest_checkpoint "$run")"
-      task="$(echo "${1:0:1}" | tr a-z A-Z)${1:1}Track-Play-v0"
-      export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt" HUMANOID_LOAD_SPACE=log
-      ;;
-    *) note "$1: unknown body, skipped"; return 1 ;;
-  esac
-  policy="$run/exported/$checkpoint.pt"
-  [ -f "$policy" ] || "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt" > /dev/null \
-    || { note "$1: export FAILED ($run/$checkpoint.pt)"; return 1; }
+setup() {  # setup <body>: the body's final teacher (the labeller), task and conditions
+  unset HUMANOID_OBSERVE_UNITS HUMANOID_TASKS HUMANOID_PROCEDURAL HUMANOID_PROCEDURAL_DUTY
+  local vars
+  vars="$("$python" transfer/scripts/body_conditions.py "$1" --check 2>&1)" \
+    || { note "$1: $vars; skipped"; return 1; }
+  eval "$vars"  # transfer/bodies/teachers.json: run, checkpoint, policy, play_task, conditions
+  task="$play_task"
 }
 
 note "start model=$model rounds=$first..$last bodies=$bodies steps=$train_steps env=$where share=$share"
 for round in $(seq "$first" "$last"); do
-  out="logs/pact/dagger/$tag/r$round"
+  out="$captures_root/$tag/r$round"
   mkdir -p "$out"
   for body in $bodies; do
     setup "$body" || continue
     file="$out/$body.npz"
     log="logs/pact/dagger_${tag}_r${round}_${body}.log"
-    result="transfer/results/icml_gate_d1_${tag}_r${round}_${body}.json"
+    result="$results/icml_gate_d1_${tag}_r${round}_${body}.json"
     if [ ! -f "$file" ]; then
       for attempt in 1 2 3; do
         until assets_online; do sleep 60; done
         if [ "$where" = train ]; then
           (
             export HUMANOID_PROCEDURAL=0.5 HUMANOID_TASKS="$root/transfer/results/base_tasks_xf.json"
+            export HUMANOID_PROCEDURAL_DUTY="$duty"
             "$python" -u transfer/scripts/capture_contract.py --headless \
               --task-id "${task%-Play-v0}-v0" --driver-policy "$policy" --pact-model "$model" \
-              --pact-body "$body" --teacher-share "$share" --steps 900 --settle-steps 100 \
-              --contract-from-truth --reference autonomous --num-envs 213 --joints --policy-obs \
+              --pact-body "$body" --teacher-share "$share" --steps "$capture_steps" --settle-steps "$settle" \
+              --contract-from-truth --reference autonomous --num-envs "$envs" --joints --policy-obs \
               --output "$file" > "$log" 2>&1
           )
         else
           "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task" \
             --driver-policy "$policy" --pact-model "$model" --pact-body "$body" \
-            --teacher-share "$share" --steps 900 --settle-steps 100 --contract-from-truth \
-            --reference autonomous --num-envs 213 --gait-probes transfer/probes/gait_probes.json \
+            --teacher-share "$share" --steps "$capture_steps" --settle-steps "$settle" --contract-from-truth \
+            --reference autonomous --num-envs "$envs" --gait-probes transfer/probes/gait_probes.json \
             --joints --policy-obs --output "$file" > "$log" 2>&1
         fi
         grep -aqE "Unable to open the usd file at path: https|USD file not found at path at: 'https" "$log" || break
@@ -137,11 +135,12 @@ for round in $(seq "$first" "$last"); do
       || note "$body r$round: scoring FAILED"
   done
   if [ "$round" -lt "$last" ] || [ "$train_last" = 1 ]; then
-    next="logs/pact/models/d1_${tag}_r${round}.pt"
+    next="$models/d1_${tag}_r${round}.pt"
     "$python" -u transfer/scripts/pact_gate_d.py --bodies "$(echo $bodies | tr ' ' ',')" \
+      --captures "$captures" --min-duty "$min_duty" --seed "$seed" \
       --dagger "$aggregate" --init "$model" --steps "$train_steps" \
       --arms "hold,$arm" --save "$next" \
-      --output "transfer/results/icml_gate_d1_${tag}_train_r${round}.json" \
+      --output "$results/icml_gate_d1_${tag}_train_r${round}.json" \
       > "logs/pact/dagger_${tag}_train_r${round}.log" 2>&1 \
       && { model="$next"; note "trained $next ($arm): $(grep -a -e 'pact_d R' -e '^saved' "logs/pact/dagger_${tag}_train_r${round}.log" | tail -1 | cut -c1-200)"; } \
       || { note "training r$round FAILED"; break; }

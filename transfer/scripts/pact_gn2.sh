@@ -11,6 +11,11 @@
 #
 #   PACT_ROOT=<repo> bash <snapshot copy> ["h1 cassie"] ["etune bitfit"] [iterations] [dagger tag]
 #
+# PACT_GN2_START: the start model ({body} is filled; default logs/pact/models/gn2_without_<body>.pt,
+# trained here if missing), e.g. the manifest's logs/icml/models/loo_pact_d_{body}_s0.pt. The
+# captures' labeller is the body's final teacher (transfer/bodies/teachers.json); PPO runs on the
+# walking family (HUMANOID_PROCEDURAL_DUTY, default 0.55,0.95).
+#
 # Models: logs/pact/models/gn2_without_<body>.pt; runs: logs/rsl_rl/pact_adapt_<body>/;
 # scores: transfer/results/icml_gate_n2_<body>_<arm>_<it>.json (arm "zero" at it 0);
 # status: logs/pact/gn2.status
@@ -35,24 +40,14 @@ assets_online() {
   done
 }
 latest_run() { ls -d "$1"/*_"$2" 2>/dev/null | tail -1; }
-latest_checkpoint() {
-  echo "model_$(ls "$1" | grep -E '^model_[0-9]+\.pt$' | sed 's/model_//; s/\.pt//' | sort -n | tail -1)"
-}
 
-setup() {  # setup <body>: the conditions its from-scratch tracker trained and was scored in
-  unset HUMANOID_POSTURE_CONTRACT HUMANOID_OBSERVE_UNITS HUMANOID_TASKS HUMANOID_PROCEDURAL \
+setup() {  # setup <body>: the body's final teacher (the captures' labeller) and conditions
+  unset HUMANOID_OBSERVE_UNITS HUMANOID_TASKS HUMANOID_PROCEDURAL HUMANOID_PROCEDURAL_DUTY \
     HUMANOID_SYMMETRY HUMANOID_TASK_WEIGHTS HUMANOID_PLAN_CONTACT
-  case "$1" in
-    h1 | cassie) ;;
-    *) note "$1: G-N2 is registered for h1 and cassie only, skipped"; return 1 ;;
-  esac
-  name="$(echo "${1:0:1}" | tr a-z A-Z)${1:1}"
-  run="$(latest_run "logs/rsl_rl/${1}_track" "pact_${1}_s41")"
-  [ -n "$run" ] || { note "$1: no tracker run (needed only as the capture's labeller)"; return 1; }
-  policy="$run/exported/$(latest_checkpoint "$run").pt"
-  [ -f "$policy" ] || "$python" transfer/scripts/export_actor.py "$run/$(latest_checkpoint "$run").pt" \
-    > /dev/null || { note "$1: export FAILED"; return 1; }
-  export HUMANOID_CONTRACT="$root/logs/contract/walk_dagger3e/generator.pt" HUMANOID_LOAD_SPACE=log
+  local vars
+  vars="$("$python" transfer/scripts/body_conditions.py "$1" --check 2>&1)" \
+    || { note "$1: $vars; skipped"; return 1; }
+  eval "$vars"  # policy, play_task, train_task, conditions (transfer/bodies/teachers.json)
 }
 
 score() {  # score <body> <model> <result>: the model drives the 71 probes, scored as G-D1
@@ -63,7 +58,7 @@ score() {  # score <body> <model> <result>: the model drives the 71 probes, scor
   [ -f "$result" ] && return 0
   for attempt in 1 2 3; do
     until assets_online; do sleep 60; done
-    "$python" -u transfer/scripts/capture_contract.py --headless --task-id "${name}Track-Play-v0" \
+    "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$play_task" \
       --driver-policy "$policy" --pact-model "$model" --pact-body "$body" \
       --steps 900 --settle-steps 100 --contract-from-truth --reference autonomous \
       --num-envs 213 --gait-probes transfer/probes/gait_probes.json --joints --policy-obs \
@@ -82,7 +77,8 @@ score() {  # score <body> <model> <result>: the model drives the 71 probes, scor
 note "start bodies=$bodies arms=$arms iterations=$iterations dagger=$dagger"
 for body in $bodies; do
   setup "$body" || continue
-  model="logs/pact/models/gn2_without_${body}.pt"
+  model="${PACT_GN2_START:-logs/pact/models/gn2_without_${body}.pt}"
+  model="${model//\{body\}/$body}"
   if [ ! -f "$model" ]; then
     note "$body: training the shared policy without it"
     "$python" -u transfer/scripts/pact_gate_d.py --hold-out "$body" --arms hold,pact_d \
@@ -101,7 +97,8 @@ for body in $bodies; do
       # aside; the Play captures that score run without them, as the curve's did.
       (
         export HUMANOID_PROCEDURAL=0.5 HUMANOID_TASKS="$root/transfer/results/base_tasks_xf.json"
-        "$python" -u transfer/scripts/pact_adapt.py --headless --task "${name}Track-v0" \
+        export HUMANOID_PROCEDURAL_DUTY="${HUMANOID_PROCEDURAL_DUTY:-0.55,0.95}"
+        "$python" -u transfer/scripts/pact_adapt.py --headless --task "$train_task" \
           --body "$body" --pact-model "$model" --arm "$arm" --max-iterations "$iterations" \
           --run-name "$tag" > "logs/pact/${tag}.log" 2>&1
       ) || { note "$tag: PPO FAILED"; continue; }

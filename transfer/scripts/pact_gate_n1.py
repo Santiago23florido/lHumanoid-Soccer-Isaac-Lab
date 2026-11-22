@@ -29,6 +29,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -57,6 +58,12 @@ from torch import nn  # noqa: E402
 ARMS = ("zero", "etune", "bitfit", "full", "scratch")
 LR = {"etune": 1e-3, "bitfit": 1e-3, "full": 1e-4, "scratch": 3e-4}
 MODELS = REPO / "logs" / "pact" / "models"
+
+
+def data_key(args) -> str:
+    """A cached pretrained model is reused only for the same bodies and captures."""
+    text = "|".join((args.bodies, args.encoder_captures, args.translator_captures))
+    return hashlib.sha1(text.encode()).hexdigest()[:8]
 
 
 def nested_budgets(units: np.ndarray, budgets: list[str], seed: int) -> dict[str, np.ndarray]:
@@ -158,7 +165,7 @@ def run_translator(args, device) -> dict:
     held_pairs = [(s, h) for s in seen]
 
     MODELS.mkdir(parents=True, exist_ok=True)
-    path = MODELS / f"n1_translator_{args.hold_out}_s{args.seed}_p{args.pretrain_steps}.pt"
+    path = MODELS / f"n1_translator_{args.hold_out}_s{args.seed}_p{args.pretrain_steps}_{data_key(args)}.pt"
     pretrained = CrossBodyTranslator(dims, window).to(device)
     if path.exists():
         pretrained.load_state_dict(torch.load(path, map_location=device))
@@ -357,7 +364,8 @@ def run_encoder(args, device) -> dict:
     rng = np.random.default_rng(args.seed)
     MODELS.mkdir(parents=True, exist_ok=True)
     path = (
-        MODELS / f"n1_encoder_{args.encoder}_{args.hold_out}_s{args.seed}_p{args.pretrain_steps}.pt"
+        MODELS
+        / f"n1_encoder_{args.encoder}_{args.hold_out}_s{args.seed}_p{args.pretrain_steps}_{data_key(args)}.pt"
     )
     torch.manual_seed(args.seed)
     pretrained = SharedAnchored(dims).to(device)

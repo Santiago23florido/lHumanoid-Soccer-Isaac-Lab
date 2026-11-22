@@ -286,11 +286,12 @@ class BodyTrackEnvCfg(LocomotionVelocityRoughEnvCfg):
         if tracker.get("action_joints"):
             # The joint encoders read the actuated joints, in the actions' order (articulation
             # order for both), as the NAO's tracker and Isaac Lab's own tasks for such bodies
-            # do; the mirror (``symmetry.py``) maps the two with one joint permutation.
-            joints = SceneEntityCfg("robot", joint_names=actuated)
+            # do; the mirror (``symmetry.py``) maps the two with one joint permutation. One
+            # entity per term: a manager resolves its term's entity in place (names to ids),
+            # and a second term sharing it would carry both, which the manager rejects.
             for group in (self.observations.policy, self.observations.critic):
-                group.joint_pos.params = {"asset_cfg": joints}
-                group.joint_vel.params = {"asset_cfg": joints}
+                for term in (group.joint_pos, group.joint_vel):
+                    term.params = {"asset_cfg": SceneEntityCfg("robot", joint_names=actuated)}
 
         # Rewards: nothing that prescribes a motion.
         rewards = self.rewards

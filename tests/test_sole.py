@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from humanoid_transfer.common.sole import (
     contact_patch,
     cube_points,
@@ -26,14 +25,34 @@ def _plate(length=0.22, width=0.08, thick=0.02, offset=(0.03, 0.0, -0.05)) -> np
     return cube_points(1.0) * np.array([length, width, thick]) + np.array(offset)
 
 
-def test_flat_sole_is_the_bottom_face_centre():
-    """Upright link (z up), sole pitched 0.01 rad: the old rule's point, within 0.1 mm."""
+def test_flat_sole_is_the_bottom_face_centre_at_any_small_tilt():
+    """Upright link (z up), sole pitched 0.01 and 0.05 rad, rolled 0.03: the bottom face's
+    centre, on the face (the old rule's point where that rule was right), and the turn that
+    laid it flat."""
     plate = _plate()
-    out = contact_patch(plate, _rot("y", -0.01))
-    old = [0.03, 0.0, -0.05 - 0.01]
-    assert np.allclose(out["sole_point_link"], old, atol=2e-3)
-    assert abs(out["sole_point_link"][0] - 0.03) < 1e-3 and abs(out["sole_point_link"][1]) < 1e-9
-    assert out["patch_length"] > 0.2
+    for pitch in (-0.01, 0.05):
+        out = contact_patch(plate, _rot("x", 0.03) @ _rot("y", pitch))
+        assert np.allclose(out["sole_point_link"], [0.03, 0.0, -0.06], atol=1e-6)
+        assert abs(out["support_tilt"] - np.hypot(pitch, 0.03)) < 1e-3
+        # Extents along the world's x: the levelling turns leave the plate yawed by ~1e-4 rad.
+        assert abs(out["patch_length"] - 0.22) < 1e-4 and abs(out["length"] - 0.22) < 1e-4
+
+
+def test_a_tilted_rod_rests_on_the_middle_of_its_bottom_line():
+    """Cassie's toe: a rod along the link's x, its link turned so the rod's axis is the world's
+    x tilted 0.05 rad. Lying flat it rests on its whole bottom line, whose middle is the sole;
+    taken as it stands, the patch would be the lower half of the line."""
+    radius, length, centre = 0.02, 0.125, np.array([0.04, 0.01, 0.0])
+    rod = cylinder_points(radius, length, "X") + centre
+    turn = _rot("y", 0.05) @ _rot("x", 0.4)
+    out = contact_patch(rod, turn)
+    sole = np.array(out["sole_point_link"])
+    below = _rot("x", 0.4).T @ np.array([0.0, 0.0, -radius])  # lying flat, the link's down
+    # The sampled rod is a 180-sided prism: it settles on a side within half a side (1 degree)
+    # of the round rod's bottom, 0.35 mm along its rim.
+    assert np.allclose(sole, centre + below, atol=4e-4)
+    assert abs(np.linalg.norm(sole[1:] - centre[1:]) - radius) < 1e-4
+    assert abs(out["support_tilt"] - 0.05) < 1e-3 and out["patch_length"] > 0.12
 
 
 def test_upright_disc_with_a_lateral_axis_touches_at_the_rim_bottom():

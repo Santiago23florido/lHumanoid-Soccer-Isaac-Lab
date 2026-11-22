@@ -163,7 +163,8 @@ def _foot_contact(robot_prim_path: str, link_name: str, rotation: np.ndarray) ->
         elif prim.IsA(UsdGeom.Mesh):
             local = np.array(UsdGeom.Mesh(prim).GetPointsAttr().Get(time), dtype=float)
         else:
-            raise RuntimeError(f"{link_name}: collision prim {prim.GetPath()} ({prim.GetTypeName()})")
+            kind = prim.GetTypeName()
+            raise RuntimeError(f"{link_name}: collision prim {prim.GetPath()} ({kind})")
         matrix, _ = cache.ComputeRelativeTransform(prim, link)
         clouds.append((np.c_[local, np.ones(len(local))] @ np.array(matrix, dtype=float))[:, :3])
     points = np.concatenate(clouds)
@@ -175,6 +176,7 @@ def _foot_contact(robot_prim_path: str, link_name: str, rotation: np.ndarray) ->
         "bbox_min_link": points.min(axis=0).round(6).tolist(),
         "bbox_max_link": points.max(axis=0).round(6).tolist(),
         "sole_point_link": np.round(patch["sole_point_link"], 6).tolist(),
+        "support_tilt": round(patch["support_tilt"], 6),
         "length": round(patch["length"], 6),
         "width": round(patch["width"], 6),
         "patch_length": round(patch["patch_length"], 6),
@@ -358,7 +360,9 @@ def main() -> int:
 
     robot_prim = cfg.scene.robot.prim_path.replace("env_.*", "env_0")
     foot_geometry = {
-        name: _foot_contact(robot_prim, name, _quat_to_matrix(default["link_quat_wxyz"][index[name]]))
+        name: _foot_contact(
+            robot_prim, name, _quat_to_matrix(default["link_quat_wxyz"][index[name]])
+        )
         for name in feet
     }
 

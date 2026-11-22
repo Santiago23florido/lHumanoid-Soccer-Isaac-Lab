@@ -26,7 +26,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from rsl_rl.modules.distribution import GaussianDistribution
 from torch import nn
 
 from humanoid_transfer.transfer.latent.pact.descriptors import (
@@ -193,6 +192,9 @@ class PactActor(nn.Module):
         buffer("times", (np.arange(1, view + 1) * control_dt / time_unit)[None])
         self.register_buffer("action_joints", torch.as_tensor(action_joints, dtype=torch.long))
         buffer("action_scale", action_scale)
+        # rsl_rl only where PPO runs: the offline trainer imports this module without it.
+        from rsl_rl.modules.distribution import GaussianDistribution
+
         self.distribution = GaussianDistribution(output_dim, init_std=init_std, std_type="scalar")
         self.arm = arm
         self.tuned = self.select(arm)

@@ -113,6 +113,14 @@ class _BodyTerm(ManagerTermBase):
             raise ValueError(f"{cfg.params['body']}: the card's joints are not the simulation's")
         self.time_unit = float(np.sqrt(descriptor.leg_length / GRAVITY))
         self.q0 = self.robot.data.default_joint_pos[0].clone()
+        body = cfg.params["body"]
+        self.anchors = KinematicAnchors(self.card, self.unit, sole_override(body))
+        self.drive = DriveLoads(self.card, self.anchors)
+        drives = drive_parameters(self.robot)
+        if drives is None:
+            raise ValueError("PACT's inputs need the drives' gains")
+        self.drive.set_drives(*(drives[k] for k in DRIVE_KEYS))
+        self.anchors, self.drive = self.anchors.to(env.device), self.drive.to(env.device)
 
     def reset(self, env_ids=None) -> None:
         pass
@@ -121,7 +129,9 @@ class _BodyTerm(ManagerTermBase):
 class PactJoints(_BodyTerm):
     def __call__(self, env, body: str) -> torch.Tensor:
         d = self.robot.data
-        return joint_features(d.joint_pos, d.joint_vel, d.joint_pos_target, self.q0, self.time_unit)
+        return joint_features(
+            d.joint_pos, d.joint_vel, d.joint_pos_target, self.q0, self.time_unit, self.drive
+        )
 
 
 class PactImu(_BodyTerm):
@@ -131,17 +141,6 @@ class PactImu(_BodyTerm):
 
 
 class PactAnchor(_BodyTerm):
-    def __init__(self, cfg, env) -> None:
-        super().__init__(cfg, env)
-        body = cfg.params["body"]
-        self.anchors = KinematicAnchors(self.card, self.unit, sole_override(body))
-        self.drive = DriveLoads(self.card, self.anchors)
-        drives = drive_parameters(self.robot)
-        if drives is None:
-            raise ValueError("PACT's drive loads need the drives' gains")
-        self.drive.set_drives(*(drives[k] for k in DRIVE_KEYS))
-        self.anchors, self.drive = self.anchors.to(env.device), self.drive.to(env.device)
-
     def __call__(self, env, body: str) -> torch.Tensor:
         d = self.robot.data
         return anchor_inputs(

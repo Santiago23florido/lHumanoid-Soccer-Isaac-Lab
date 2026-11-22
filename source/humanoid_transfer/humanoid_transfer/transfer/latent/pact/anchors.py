@@ -339,6 +339,17 @@ class DriveLoads(torch.nn.Module):
         for name, value in (("stiffness", stiffness), ("damping", damping), ("effort", effort)):
             getattr(self, name).copy_(torch.as_tensor(value, dtype=torch.float32))
 
+    def drive_ratio(
+        self, joint_pos: torch.Tensor, joint_vel: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """The torque each target commands, as a fraction of the joint's limit and softly
+        saturated: ``tanh((kp (T - q) - kd qd) / tau_max)``, 0 for a joint without a drive
+        (``pact_gate_d.drive_ratio``, what the shared models were trained on)."""
+        active = (self.stiffness > 0) & (self.effort > 0)
+        limit = torch.where(active, self.effort, torch.ones_like(self.effort))
+        ratio = (self.stiffness * (target - joint_pos) - self.damping * joint_vel) / limit
+        return torch.where(active, torch.tanh(ratio), torch.zeros_like(ratio))
+
     def torque(
         self,
         joint_pos: torch.Tensor,

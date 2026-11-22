@@ -113,7 +113,7 @@ def test_the_driver_reads_the_windows_the_policy_was_trained_on():
     time_unit = float(np.sqrt(descriptor.leg_length / GRAVITY))
     last = steps[-dims.history :]
     joint_obs = torch.stack(
-        [torch.stack([q - q0, qd * time_unit, t - q0], -1) for _, q, qd, _, _, t in last], dim=2
+        [torch.stack([q - q0, qd * time_unit, drive.drive_ratio(q, qd, t)], -1) for _, q, qd, _, _, t in last], dim=2
     )
     imu = torch.stack([torch.cat([g, w * time_unit], -1) for _, _, _, g, w, _ in last], dim=1)
     _, q, qd, g, w, t = steps[-1]

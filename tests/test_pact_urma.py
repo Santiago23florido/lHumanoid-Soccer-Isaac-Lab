@@ -143,8 +143,9 @@ def test_the_driver_runs_a_urma_checkpoint_as_the_model_does():
     view, n, dt, joints = 4, 3, 0.02, [5, 2, 7, 11]
     mean, std = torch.randn(27, generator=gen), torch.rand(27, generator=gen) + 0.5
     q0 = torch.as_tensor(card["joints"]["default_pos"], dtype=torch.float32)
+    drive = DriveLoads(card, anchors)
     driver = PactDriver(
-        checkpoint, descriptor, contacts, anchors, DriveLoads(card, anchors), q0, joints, 0.25,
+        checkpoint, descriptor, contacts, anchors, drive, q0, joints, 0.25,
         view, mean, std, dt, n, "cpu",
     )  # fmt: skip
     j = len(q0)
@@ -161,7 +162,7 @@ def test_the_driver_runs_a_urma_checkpoint_as_the_model_does():
     time_unit = float(np.sqrt(descriptor.leg_length / GRAVITY))
     last = steps[-dims.history :]
     joint_obs = torch.stack(
-        [torch.stack([q - q0, qd * time_unit, t - q0], -1) for q, qd, t, _, _ in last], dim=2
+        [torch.stack([q - q0, qd * time_unit, drive.drive_ratio(q, qd, t)], -1) for q, qd, t, _, _ in last], dim=2
     )
     imu = torch.stack([torch.cat([gr, w * time_unit], -1) for _, _, _, gr, w in last], dim=1)
     up, est, path = plan_from_view(obs[:, -(view * 30 + 27) :], view, mean, std)

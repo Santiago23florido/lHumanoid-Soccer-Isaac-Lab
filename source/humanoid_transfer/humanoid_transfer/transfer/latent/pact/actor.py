@@ -43,10 +43,16 @@ IMU = 6
 
 
 def joint_features(
-    q: torch.Tensor, qd: torch.Tensor, target: torch.Tensor, q0: torch.Tensor, time_unit: float
+    q: torch.Tensor,
+    qd: torch.Tensor,
+    target: torch.Tensor,
+    q0: torch.Tensor,
+    time_unit: float,
+    drive,
 ) -> torch.Tensor:
-    """``(N, J * 3)``: per joint ``q - q0`` (rad), ``qd * sqrt(L/g)``, ``target - q0`` (rad)."""
-    return torch.stack([q - q0, qd * time_unit, target - q0], dim=-1).flatten(1)
+    """``(N, J * 3)``: per joint ``q - q0`` (rad), ``qd * sqrt(L/g)`` and the torque the target
+    commands (``drive.drive_ratio``, as ``PactDriver`` and the trainer read it)."""
+    return torch.stack([q - q0, qd * time_unit, drive.drive_ratio(q, qd, target)], dim=-1).flatten(1)
 
 
 def imu_features(gravity: torch.Tensor, omega: torch.Tensor, time_unit: float) -> torch.Tensor:

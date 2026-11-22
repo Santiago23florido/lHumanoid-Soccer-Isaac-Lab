@@ -144,8 +144,10 @@ class PactDriver:
     ) -> torch.Tensor:
         """``-> (N, action_dim)`` in the action term's units."""
         n = q.shape[0]
+        # The target history as the model was trained on it: the torque it commands (drive_ratio).
+        commanded = self.drive.drive_ratio(q, qd, target)
         joint_now = torch.stack(
-            [q - self.q0, qd * self.time_unit, target - self.q0], dim=-1
+            [q - self.q0, qd * self.time_unit, commanded], dim=-1
         )  # (N, J, 3)
         imu_now = torch.cat([gravity, omega * self.time_unit], dim=-1)
         self.joint_history = torch.roll(self.joint_history, -1, dims=2)

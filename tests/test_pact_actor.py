@@ -135,7 +135,7 @@ def test_the_actor_acts_as_the_driver_through_a_reset(setup):
         with torch.no_grad():
             flat = torch.cat(
                 [
-                    joints.append(joint_features(q, qd, t, s["q0"], time_unit), fresh),
+                    joints.append(joint_features(q, qd, t, s["q0"], time_unit, s["drive"]), fresh),
                     imu.append(imu_features(g, w, time_unit), fresh),
                     anchor_inputs(s["anchors"], s["drive"], q, qd, g, w, t),
                 ],
@@ -241,7 +241,7 @@ def test_the_driver_runs_an_adapted_checkpoint_as_the_actor_does(setup):
         with torch.no_grad():
             flat = torch.cat(
                 [
-                    joints.append(joint_features(q, qd, t, s["q0"], time_unit), fresh),
+                    joints.append(joint_features(q, qd, t, s["q0"], time_unit, s["drive"]), fresh),
                     imu.append(imu_features(g, w, time_unit), fresh),
                     anchor_inputs(s["anchors"], s["drive"], q, qd, g, w, t),
                 ],

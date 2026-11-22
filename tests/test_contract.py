@@ -320,3 +320,65 @@ def test_the_stick_loss_joins_the_flow_loss_and_a_saved_contract_keeps_its_weigh
     path = tmp_path / "generator.pt"
     save_contract(path, Contract(generator.eval(), None, torch.rand(27), {}), dims, CLOCK, 120)
     assert load_contract(path).generator.stick_weight == 0.5
+
+
+def _guided_setup():
+    torch.manual_seed(0)
+    generator = _fitted(replace(SMALL, warp_loads=True, flow_solver="midpoint")).eval()
+    skill = torch.randn(13, 27)
+    skill[:, LOAD] = torch.rand(13, 2)
+    window = generator.skill_norm(skill)[None].expand(16, -1, -1)
+    return generator, window, torch.zeros(16, 3), torch.randn(16, generator.noise_size)
+
+
+def test_guided_sampling_lands_on_the_constraint_and_an_identity_guide_changes_nothing() -> None:
+    from humanoid_transfer.transfer.latent.plan_contact import stick_loaded_feet
+
+    generator, window, command, noise = _guided_setup()
+    with torch.no_grad():
+        plain = generator.sample(window, command, noise)
+        same = generator.sample(window, command, noise, guide=lambda plan: plan)
+        guided = generator.sample(
+            window, command, noise, guide=lambda plan: stick_loaded_feet(plan, generator.skill_norm)
+        )
+    assert torch.allclose(same, plain, atol=1e-5)
+    # The last step lands on the projection: a guided plan is its own projection.
+    assert torch.allclose(stick_loaded_feet(guided, generator.skill_norm), guided, atol=1e-5)
+    physical = generator.skill_norm.inverse(guided)
+    for side in range(2):
+        loaded = physical[..., LOAD.start + side] > 0.05
+        velocity = physical[..., FOOT_VELOCITY.start + 3 * side : FOOT_VELOCITY.start + 3 * side + 3]
+        assert bool(loaded.any())
+        assert float(velocity[loaded].abs().max()) < 1e-5
+    # The loads are the field's own: the guide never changes them, but the other fields
+    # are re-predicted from the guided sample, so the plan is not the drawn one projected.
+    assert not torch.allclose(guided, stick_loaded_feet(plain, generator.skill_norm), atol=1e-3)
+
+
+def test_a_guide_may_not_change_the_loads_of_a_warped_generator() -> None:
+    generator, window, command, noise = _guided_setup()
+
+    def unload(plan: torch.Tensor) -> torch.Tensor:
+        out = plan.clone()
+        out[..., LOAD] = out[..., LOAD] - 0.1
+        return out
+
+    with pytest.raises(ValueError):
+        generator.sample(window, command, noise, guide=unload)
+
+
+@pytest.mark.parametrize("mode", ["stick", "guided"])
+def test_a_chain_of_consistent_plans_keeps_its_loaded_feet_still(mode: str) -> None:
+    from humanoid_transfer.transfer.latent.train_contract import chain_states
+
+    generator, window, command, _ = _guided_setup()
+    sigma = torch.zeros(27)
+    with torch.no_grad():
+        z = chain_states(generator, window.clone(), command, sigma, 18, CLOCK.commit, 0, plan_contact=mode)
+    for side in range(2):
+        loaded = z[..., LOAD.start + side] > 0.05
+        velocity = z[..., FOOT_VELOCITY.start + 3 * side : FOOT_VELOCITY.start + 3 * side + 3]
+        assert loaded.any()
+        assert abs(velocity[loaded]).max() < 1e-5
+    with pytest.raises(ValueError):
+        chain_states(generator, window.clone(), command, sigma, 6, CLOCK.commit, plan_contact="slide")

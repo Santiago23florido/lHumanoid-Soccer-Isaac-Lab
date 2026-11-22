@@ -46,6 +46,7 @@ that produced the data.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -314,15 +315,27 @@ class ContractGenerator(nn.Module):
         command: torch.Tensor,
         noise: torch.Tensor,
         level: torch.Tensor | None = None,
+        guide: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """One plan per row, ``(B, horizon, skill)`` absolute and normalised.
 
         ``noise`` is a standard normal ``(B, noise_size)``; it alone decides which
         plausible future is drawn.
+
+        ``guide`` (flow only): a projection of plans (normalised ``z*``, ``(B, horizon,
+        skill)``) onto a constraint, e.g. :func:`~.plan_contact.stick_loaded_feet`. At every
+        flow step the endpoint the velocity points to, ``x + (1 - t) v``, is projected and
+        the step is taken toward the projected endpoint, so the field re-predicts every
+        other field from a sample that keeps the constraint; the last step lands on it.
+        This is constraint guidance (``-λ ∇ ½‖C‖²`` on the predicted endpoint) with the
+        step that solves the constraint exactly, so it has no step size. The projection
+        may not change the loads: they are modelled in log units (:meth:`warp`).
         """
         window = self.warp(window)
         condition = self.condition(window, command, level)
         if self.kind == "cvae":
+            if guide is not None:
+                raise ValueError("guided sampling needs a flow generator")
             mean, log_std = self.prior_params(condition)
             residual = self.decode(condition, mean + torch.exp(log_std) * noise)
         else:
@@ -334,9 +347,30 @@ class ContractGenerator(nn.Module):
                 if self.flow_solver == "midpoint":
                     middle = x + 0.5 * step * velocity
                     velocity = self.flow_velocity(middle, t + 0.5 * step, condition)
+                if guide is not None:
+                    remaining = 1.0 - i * step
+                    endpoint = x + remaining * velocity
+                    velocity = (self._guided(endpoint, window, guide) - x) / remaining
                 x = x + step * velocity
             residual = self.residual_norm.inverse(x).reshape(-1, self.horizon, self.skill)
         return self.unwarp(window[:, -1:] + residual)
+
+    def _guided(
+        self,
+        endpoint: torch.Tensor,
+        window: torch.Tensor,
+        guide: Callable[[torch.Tensor], torch.Tensor],
+    ) -> torch.Tensor:
+        """``endpoint`` (the flow's normalised residual, ``(B, horizon * skill)``) with the
+        plan it decodes to projected by ``guide``. ``window`` is in the generator's space."""
+        residual = self.residual_norm.inverse(endpoint).reshape(-1, self.horizon, self.skill)
+        plan = self.unwarp(window[:, -1:] + residual)
+        change = guide(plan) - plan
+        if self.warp_loads and bool((change[..., _LOAD] != 0).any()):
+            raise ValueError("a guide may not change the loads (they are modelled in log units)")
+        # Outside the loads the generator's space is normalised z* itself, so the change
+        # carries over to the residual unchanged.
+        return self.residual_norm((residual + change).reshape(endpoint.shape))
 
 
 _VX, _VY = (

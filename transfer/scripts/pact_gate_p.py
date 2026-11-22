@@ -25,6 +25,17 @@ seed.
     python transfer/scripts/pact_gate_p.py --control mt18_no_sidestep_s0 \\
         --arms mt18_no_sidestep_s1 --reference mt18_no_sidestep \\
         --output transfer/results/icml_gate_p.json
+
+An arm may also be ``name@plan_contact``: the same generator with each plan projected onto
+the contact-consistent plans before it is committed (``stick``, as deployment projects a plan)
+or drawn with that projection guiding the sampler (``guided``). Their slip is zero by
+construction for every foot loaded above the contact threshold, so for them the gate reads
+calibration; ``--contrast A B`` reports A's calibration minus B's.
+
+    python transfer/scripts/pact_gate_p.py --control mt18_no_sidestep_s0 \\
+        --arms mt18_no_sidestep_s0@stick mt18_no_sidestep_s0@guided \\
+        --contrast mt18_no_sidestep_s0@guided mt18_no_sidestep_s0@stick \\
+        --output transfer/results/icml_gate_p_guided.json
 """
 
 from __future__ import annotations
@@ -119,12 +130,19 @@ def command_read(z: np.ndarray, teacher: dict, dt_star: float, draws: int, rng) 
     }
 
 
-def read_generator(name: str, steps: int, draws: int, seed: int, device: str) -> dict:
+def read_generator(arm: str, steps: int, draws: int, seed: int, device: str) -> dict:
+    """``arm`` is a generator's name, or ``name@plan_contact`` (``chain_states``'s modes)."""
+    name, _, plan_contact = arm.partition("@")
+    plan_contact = plan_contact or "as_drawn"
     contract = load_contract(REPO_ROOT / f"logs/contract/{name}/generator.pt", device)
     generator, sigma = contract.generator, contract.sigma.to(device)
     dt_star = float(contract.meta["dt_star"])
     rng = np.random.default_rng(seed)
-    entry: dict = {"path": f"logs/contract/{name}/generator.pt", "groups": {}}
+    entry: dict = {
+        "path": f"logs/contract/{name}/generator.pt",
+        "plan_contact": plan_contact,
+        "groups": {},
+    }
     for group, tasks in TASKS.items():
         commands = {}
         for task, rollout, names in tasks:
@@ -140,7 +158,14 @@ def read_generator(name: str, steps: int, draws: int, seed: int, device: str) ->
                 )
                 with torch.no_grad():
                     states = chain_states(
-                        generator, start, command, sigma, steps, generator.commit, seed
+                        generator,
+                        start,
+                        command,
+                        sigma,
+                        steps,
+                        generator.commit,
+                        seed,
+                        plan_contact=plan_contact,
                     )
                 own = z[100 + generator.history :, :STARTS].astype(float)
                 teacher = signature(own, dt_star)
@@ -186,11 +211,31 @@ def gate(arm: dict, control: dict) -> dict:
     return out
 
 
+def contrast(a: dict, b: dict) -> dict:
+    """``a``'s calibration minus ``b``'s per group, with the SE of the difference."""
+    out = {}
+    for group in TASKS:
+        x, y = a["groups"][group], b["groups"][group]
+        out[group] = {
+            "difference": float(x["calibration"] - y["calibration"]),
+            "se": float(np.hypot(x["calibration_se"], y["calibration_se"])),
+        }
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--control", required=True, help="the recipe without the loss")
     parser.add_argument("--arms", nargs="+", required=True)
     parser.add_argument("--reference", nargs="*", default=[], help="reported, not gated")
+    parser.add_argument(
+        "--contrast",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("A", "B"),
+        help="report A's calibration minus B's with its SE (both among the arms)",
+    )
     parser.add_argument("--steps", type=int, default=600)
     parser.add_argument("--bootstrap", type=int, default=500)
     parser.add_argument("--seed", type=int, default=0)
@@ -213,6 +258,10 @@ def main() -> int:
         )
     for name in args.arms:
         report["gate"][name] = gate(report["generators"][name], report["generators"][args.control])
+    report["contrasts"] = {
+        f"{a} - {b}": contrast(report["generators"][a], report["generators"][b])
+        for a, b in args.contrast
+    }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes((json.dumps(report, indent=2) + "\n").encode("utf-8"))
     for name, entry in report["generators"].items():
@@ -231,6 +280,12 @@ def main() -> int:
             for group in TASKS
         )
         print(f"G-P {name}: {verdict} ({detail})")
+    for name, c in report["contrasts"].items():
+        detail = "; ".join(
+            f"{group}: calibration {c[group]['difference']:+.3f} ± {c[group]['se']:.3f}"
+            for group in TASKS
+        )
+        print(f"contrast {name}: {detail}")
     return 0
 
 

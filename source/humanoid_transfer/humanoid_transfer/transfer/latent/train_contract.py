@@ -36,6 +36,7 @@ from .contract import (
 )
 from .events import ContactEvents
 from .model import Normaliser
+from .plan_contact import PLAN_CONTACTS, apply_plan_contact, stick_loaded_feet
 from .sequences import Streams
 from .train_memory import _optimise
 
@@ -769,22 +770,40 @@ def chain_states(
     commit: int,
     seed: int = 0,
     level: torch.Tensor | None = None,
+    plan_contact: str = "as_drawn",
 ) -> np.ndarray:
     """``(steps, N, skill)`` the generator's own chain from ``start``, unstable chains dropped.
 
     ``level``: a noise-conditional generator's history noise level (``(N, 1)``).
+
+    ``plan_contact``: how each plan's contacts are made consistent before it is committed.
+    One of :data:`~.plan_contact.PLAN_CONTACTS` projects the drawn plan, as deployment
+    projects what it hands a tracker (``stick``: loaded feet grounded and still); ``guided``
+    draws it with :func:`~.plan_contact.stick_loaded_feet` as the sampler's guide
+    (:meth:`~.contract.ContractGenerator.sample`).
 
     From ``start`` -- ``(N, history, skill)`` normalised windows of real ``z*`` -- a
     plan is drawn, its first ``commit`` samples appended to the history (with the
     training noise ``sigma``, which is what the generator reads in a closed loop),
     and so on for ``steps``.
     """
+    if plan_contact not in (*PLAN_CONTACTS, "guided"):
+        raise ValueError(f"unknown plan_contact {plan_contact!r}")
+
+    def stick(plan: torch.Tensor) -> torch.Tensor:
+        return stick_loaded_feet(plan, generator.skill_norm)
+
     torch.manual_seed(seed)
     clean, out = start, []
     while len(out) * commit < steps:
         window = clean + sigma * torch.randn_like(clean)
         noise = torch.randn(len(window), generator.noise_size, device=window.device)
-        chunk = generator.sample(window, command, noise, level)[:, :commit]
+        if plan_contact == "guided":
+            plan = generator.sample(window, command, noise, level, guide=stick)
+        else:
+            plan = generator.sample(window, command, noise, level)
+            plan = apply_plan_contact(plan, generator.skill_norm, plan_contact)
+        chunk = plan[:, :commit]
         out.append(chunk)
         clean = torch.cat([clean[:, commit:], chunk], dim=1)
     z = generator.skill_norm.inverse(torch.cat(out, dim=1)[:, :steps]).transpose(0, 1)

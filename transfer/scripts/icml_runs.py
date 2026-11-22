@@ -49,7 +49,7 @@ BUDGETS = (1, 4, 16, 0)  # 0: every training probe
 BASE_MAP = "logs/pact/teachers/{body}_{variant}_probes.npz"
 BASE_TRAIN = "logs/pact/teachers/{body}_{variant}_train.npz"
 COEXEC = "logs/pact/final/coexec"
-PY = "python"
+PY = '"${PYTHON:-python}"'  # the environment's interpreter (PYTHON on this laptop)
 
 
 @dataclass

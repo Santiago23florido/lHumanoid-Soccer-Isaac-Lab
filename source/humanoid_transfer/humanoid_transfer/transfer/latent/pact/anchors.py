@@ -99,14 +99,16 @@ class KinematicAnchors(torch.nn.Module):
         index = {name: i for i, name in enumerate(links)}
         parent = [index.get(p, -1) for p in card["bodies"]["parents"]]
         joints = list(card["joints"]["names"])
-        joint_of = [-1] * len(links)
+        # A link moved by several degrees of freedom (Digit's spherical rod ends, ``name:0``
+        # to ``name:2``) has them all, applied in card order as a serial chain at one origin.
+        joints_of: list[list[int]] = [[] for _ in links]
         axis = np.zeros((len(joints), 3))
         origin = np.zeros((len(joints), 3))
         for row in card["joint_geometry"]:
             j = joints.index(row["joint"])
             if row["kind"] != "revolute":
                 raise ValueError(f"{row['joint']}: only revolute joints are supported")
-            joint_of[index[row["child_link"]]] = j
+            joints_of[index[row["child_link"]]].append(j)
             axis[j], origin[j] = row["axis_root"], row["position_root"]
         order, placed = [], set()
         while len(order) < len(links):
@@ -114,7 +116,7 @@ class KinematicAnchors(torch.nn.Module):
                 if i not in placed and (p == -1 or p in placed):
                     order.append(i)
                     placed.add(i)
-        self.order, self.parent, self.joint_of = order, parent, joint_of
+        self.order, self.parent, self.joints_of = order, parent, joints_of
 
         zero = card["postures"]["zero"]
         rot0 = np.stack([_quat_matrix(q) for q in zero["link_quat_wxyz"]])
@@ -175,23 +177,17 @@ class KinematicAnchors(torch.nn.Module):
             p = self.parent[i]
             r_p, t_p = (eye, zero3) if p == -1 else (rot[p], trans[p])
             w_p, v_p = (zero3, zero3) if p == -1 else (omega[p], v0[p])
-            j = self.joint_of[i]
-            if j < 0:
-                rot[i], trans[i], omega[i], v0[i] = r_p, t_p, w_p, v_p
-                continue
-            a = (
-                (r_p @ self.axis[j]).expand(n, 3)
-                if p == -1
-                else torch.einsum("nij,j->ni", r_p, self.axis[j])
-            )
-            o = torch.einsum("nij,j->ni", r_p, self.origin[j]) + t_p
-            spin = self._rodrigues(a, joint_pos[:, j])
-            rot[i] = spin @ r_p
-            trans[i] = torch.einsum("nij,nj->ni", spin, t_p - o) + o
-            rate = joint_vel[:, j : j + 1]
-            omega[i] = w_p + a * rate
-            v0[i] = v_p - torch.linalg.cross(a, o, dim=-1) * rate
-            axes[j], origins[j] = a, o
+            for j in self.joints_of[i]:
+                a = torch.einsum("nij,j->ni", r_p, self.axis[j])
+                o = torch.einsum("nij,j->ni", r_p, self.origin[j]) + t_p
+                spin = self._rodrigues(a, joint_pos[:, j])
+                r_p = spin @ r_p
+                t_p = torch.einsum("nij,nj->ni", spin, t_p - o) + o
+                rate = joint_vel[:, j : j + 1]
+                w_p = w_p + a * rate
+                v_p = v_p - torch.linalg.cross(a, o, dim=-1) * rate
+                axes[j], origins[j] = a, o
+            rot[i], trans[i], omega[i], v0[i] = r_p, t_p, w_p, v_p
         zero_j = torch.zeros(n, 3, device=device, dtype=dtype)
         return {
             "rot": torch.stack(rot, 1),  # (N, links, 3, 3)
@@ -273,9 +269,12 @@ class DriveLoads(torch.nn.Module):
 
         a_j . [ sum_l (c_l - o_j) x m_l g + (p - o_j) x F + M ] = -tau_j,
 
-    for every joint ``j`` on the chain from the base to the foot, with ``F`` and ``M`` the
-    ground's force and moment at the sole point ``p``. A ridge least-squares solve per
-    foot gives the wrench; the load in ``z*`` is ``F``'s vertical part over ``m g``. No
+    for every driven joint ``j`` on the chain from the base to the foot, with ``F`` and ``M``
+    the ground's force and moment at the sole point ``p``. A joint without a drive (zero
+    stiffness and damping: a mimic joint, as the NAO's ``RHipYawPitch``, or a closed loop's
+    passive joint, as Digit's tarsus and toes) is held by a constraint whose torque the drives
+    do not give, so its balance is not used. A ridge least-squares solve per foot gives the
+    wrench; the load in ``z*`` is ``F``'s vertical part over ``m g``. No
     parameter is learned: it is as good as the drive model and the statics.
     """
 
@@ -312,14 +311,14 @@ class DriveLoads(torch.nn.Module):
         self.register_buffer(
             "action_index", torch.as_tensor([names.index(j) for j in acted], dtype=torch.long)
         )
-        links, parent, joint_of = len(anchors.parent), anchors.parent, anchors.joint_of
+        links, parent, joints_of = len(anchors.parent), anchors.parent, anchors.joints_of
         # below[j, l]: link l moves with joint j (it is in the subtree of j's child link)
         below = np.zeros((len(names), links), dtype=np.float32)
         for leaf in range(links):
             node = leaf
             while node != -1:
-                if joint_of[node] >= 0:
-                    below[joint_of[node], leaf] = 1.0
+                for j in joints_of[node]:
+                    below[j, leaf] = 1.0
                 node = parent[node]
         self.register_buffer("below", torch.as_tensor(below))
         chains = []
@@ -327,8 +326,8 @@ class DriveLoads(torch.nn.Module):
             on = np.zeros(len(names), dtype=np.float32)
             node = foot
             while node != -1:
-                if joint_of[node] >= 0:
-                    on[joint_of[node]] = 1.0
+                for j in joints_of[node]:
+                    on[j] = 1.0
                 node = parent[node]
             chains.append(on)
         self.register_buffer("on_chain", torch.as_tensor(np.stack(chains)))  # (2, J)
@@ -396,10 +395,12 @@ class DriveLoads(torch.nn.Module):
         """
         statics = self.balance(joint_pos, gravity_b)
         tau = self.torque(joint_pos, joint_vel, action, target)
+        driven = ((self.stiffness > 0) | (self.damping > 0)).to(tau.dtype)
         forces, moments, loads = [], [], []
         for f in range(statics["wrench_map"].shape[1]):
-            a_matrix = statics["wrench_map"][:, f]  # (N, J, 6)
-            b = -(tau + statics["gravity_tau"]) * self.on_chain[f][None, :]
+            rows = self.on_chain[f] * driven  # (J,)
+            a_matrix = statics["wrench_map"][:, f] * rows[None, :, None]  # (N, J, 6)
+            b = -(tau + statics["gravity_tau"]) * rows[None, :]
             gram = a_matrix.transpose(1, 2) @ a_matrix
             diagonal = gram.diagonal(dim1=1, dim2=2)
             force_scale = diagonal[:, :3].mean(-1).clamp_min(1e-9)

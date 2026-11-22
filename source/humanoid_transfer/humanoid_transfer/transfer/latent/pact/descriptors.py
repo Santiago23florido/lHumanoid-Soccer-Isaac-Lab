@@ -223,7 +223,10 @@ def describe(card: dict[str, Any], *, leg_length: float | None = None) -> BodyDe
             chain_b = chains[child_links[b]]
             common = next(link for link in chain_a if link in set(chain_b))
             distance[a, b] = chain_a.index(common) + chain_b.index(common)
-            ancestor[a, b] = a != b and child_links[a] in chain_b
+            # The degrees of freedom of one multi-axis joint (Digit's spherical rod ends,
+            # ``name:0`` to ``name:2``) share their child link: one joint, no ancestry
+            # between them, at distance 0.
+            ancestor[a, b] = child_links[a] != child_links[b] and child_links[a] in chain_b
 
     control = card["control"]
     feet = card["foot_bodies"]

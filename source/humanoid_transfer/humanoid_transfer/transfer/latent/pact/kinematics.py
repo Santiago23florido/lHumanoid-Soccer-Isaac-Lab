@@ -53,13 +53,15 @@ class CardKinematics:
         self.parent = [index.get(p, -1) for p in parents]
         self.joint_names = list(card["joints"]["names"])
         joint_index = {name: i for i, name in enumerate(self.joint_names)}
-        self.joint_of_link = [-1] * len(self.links)
+        # Several degrees of freedom on one link (a spherical joint's ``name:0`` to ``name:2``):
+        # applied in card order, as a serial chain at one origin (``KinematicAnchors``).
+        self.joints_of_link: list[list[int]] = [[] for _ in self.links]
         self.axis = np.zeros((len(self.joint_names), 3))
         self.origin = np.zeros((len(self.joint_names), 3))
         self.kind = ["revolute"] * len(self.joint_names)
         for row in card["joint_geometry"]:
             j = joint_index[row["joint"]]
-            self.joint_of_link[index[row["child_link"]]] = j
+            self.joints_of_link[index[row["child_link"]]].append(j)
             self.axis[j] = row["axis_root"]
             self.origin[j] = row["position_root"]
             self.kind[j] = row["kind"]
@@ -90,8 +92,7 @@ class CardKinematics:
         motion = np.zeros((len(self.links), 4, 4))
         for i in self.order:
             base = np.eye(4) if self.parent[i] == -1 else motion[self.parent[i]]
-            j = self.joint_of_link[i]
-            if j >= 0:
+            for j in self.joints_of_link[i]:
                 base = base @ _screw(self.axis[j], self.origin[j], q[j], self.kind[j])
             motion[i] = base
         return motion

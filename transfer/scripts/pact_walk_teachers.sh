@@ -14,7 +14,8 @@
 # HUMANOID_CURRICULUM=gait by its largest relative duty or cadence error, half of them
 # uniformly (latent/curriculum.py); each run's record goes to logs/pact/curriculum/<tag>_<body>.npz.
 # HUMANOID_ENTROPY sets PPO's entropy coefficient (default 0.008; 0: no bonus, PPO's own gradient
-# sets the action std).
+# sets the action std). HUMANOID_FAILURE_REPLAY=<share> draws that share of task commands and
+# procedural segments again from the training episodes that terminated (latent/failure_replay.py).
 set -uo pipefail
 root="${PACT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root"
@@ -64,7 +65,7 @@ conditions() {  # conditions <body>: the start run, task, contract and mirror of
   esac
 }
 
-note "start bodies=$bodies iterations=$iterations duty=$duty tag=$run_tag from=${from_tag:-trackers} contact=${HUMANOID_CONTACT_REWARD:-0} curriculum=${HUMANOID_CURRICULUM:-0} entropy=${HUMANOID_ENTROPY:-0.008}"
+note "start bodies=$bodies iterations=$iterations duty=$duty tag=$run_tag from=${from_tag:-trackers} contact=${HUMANOID_CONTACT_REWARD:-0} curriculum=${HUMANOID_CURRICULUM:-0} entropy=${HUMANOID_ENTROPY:-0.008} replay=${HUMANOID_FAILURE_REPLAY:-0}"
 for body in $bodies; do
   ( conditions "$body" || exit 1
     name="${run_tag}_${body}"

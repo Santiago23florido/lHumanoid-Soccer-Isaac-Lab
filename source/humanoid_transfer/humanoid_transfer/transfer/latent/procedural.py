@@ -80,6 +80,7 @@ import torch
 
 from ...common.skill_state import SKILL_LAYOUT
 from .curriculum import NO_CELL, SegmentCurriculum, cell_count, segment_cells
+from .failure_replay import FailureStore
 
 SKILL = SKILL_LAYOUT.size
 _HEIGHT = SKILL_LAYOUT.slice_of("height").start
@@ -90,10 +91,11 @@ _FEET = SKILL_LAYOUT.slice_of("foot_position")
 _FOOT_VELOCITY = SKILL_LAYOUT.slice_of("foot_velocity")
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
 _MOMENTUM = SKILL_LAYOUT.slice_of("angular_momentum")
-_EXTRA = 4
-"""After ``z*`` in each buffer row: the CoM's ``x, y`` in the biped's world, its yaw, and the
+_EXTRA = 5
+"""After ``z*`` in each buffer row: the CoM's ``x, y`` in the biped's world, its yaw, the
 curriculum cell of the segment it is in (:mod:`.curriculum`; ``NO_CELL`` standing or
-recovering)."""
+recovering) and that segment's index in the bank (-1 standing, recovering or a probe; what
+:mod:`.failure_replay` stores)."""
 
 STAND, SHIFT, GAIT = 0, 1, 2
 """Modes: holding still, moving the weight over the stance foot, stepping."""
@@ -329,6 +331,7 @@ GAIT_KEYS = (
     "first",
     "duration",
     "cell",
+    "index",
 )
 
 
@@ -487,6 +490,7 @@ class PointMassBiped:
         graph: bool = True,
         shaped: bool | None = None,
         curriculum: bool | str = False,
+        failure_replay: float = 0.0,
     ) -> None:
         self.num_envs = n = num_envs
         self.use_graph = graph
@@ -576,6 +580,10 @@ class PointMassBiped:
         self.curriculum = (
             SegmentCurriculum(self.bank_cell, cell_count(ranges.duty), score=kind) if kind else None
         )
+        self.failure_share = float(failure_replay)
+        self.failures = FailureStore(1, device=self.device) if self.failure_share > 0.0 else None
+        """Bank segments an episode terminated in (:meth:`record_failures`); with
+        ``failure_replay`` > 0 that share of draws comes from them (:mod:`.failure_replay`)."""
         self.goal = self._draw(n)
         self.next = self._draw(n)
         self.spare = self._draw(n)
@@ -597,6 +605,7 @@ class PointMassBiped:
         self.probe["load_shape"][ids] = 1.0
         # A probe's gait is not a segment of the bank.
         self.probe["cell"][ids] = float(NO_CELL)
+        self.probe["index"][ids] = -1.0
         for key, value in params.items():
             self.probe[key][ids] = value.to(self.device, self.probe[key].dtype)
         self.probe["standing"][ids] = False
@@ -727,6 +736,21 @@ class PointMassBiped:
         row = self.buffer[:, int(math.floor(self.now)) % self.slots, SKILL + 3]
         return torch.where(self.fallen, float(NO_CELL), row).round().long()
 
+    def index_now(self) -> torch.Tensor:
+        """``(n,)`` the bank index of the segment each biped is in now (-1: none, or fallen)."""
+        row = self.buffer[:, int(math.floor(self.now)) % self.slots, SKILL + 4]
+        return torch.where(self.fallen, -1.0, row).round().long()
+
+    def record_failures(self, ids: torch.Tensor) -> None:
+        """Store the segments ``ids``' episodes terminated in (not standing, recovering or after
+        the biped fell: those are the reference's), for :attr:`failures`' replay."""
+        if self.failures is None or len(ids) == 0:
+            return
+        index = self.index_now()[ids.to(self.device)]
+        index = index[index >= 0]
+        if len(index) > 0:
+            self.failures.add(index[:, None].float())
+
     def credit(self, miss: torch.Tensor, mask: torch.Tensor) -> bool:
         """Feed the curriculum one control step: each env's contact error ``(n,)`` (as
         :meth:`.SegmentCurriculum.credit`), and whether the step counts ``(n,)``. Returns whether the draw was
@@ -771,8 +795,12 @@ class PointMassBiped:
         index = None if self.curriculum is None else self.curriculum.sample(n, g)
         if index is None:
             index = torch.randint(0, BANK, (n,), generator=g, device=dev)
+        if self.failures is not None:
+            replayed, _ = self.failures.mix(index[:, None].float(), self.failure_share, g)
+            index = replayed[:, 0].round().long()
         params = {key: self.bank[key][index] for key in _GAIT_SHAPE}
         params["cell"] = self.bank_cell[index].float()
+        params["index"] = index.float()
         params["standing"] = torch.rand(n, generator=g, device=dev) < r.standing
         params["first"] = (torch.rand(n, generator=g, device=dev) < 0.5).long()
         params["duration"] = _uniform(r.segment, n, g, dev)
@@ -1409,8 +1437,8 @@ class PointMassBiped:
         self.record = self._record()
 
     def _record(self) -> torch.Tensor:
-        """``(n, 27 + 4)``: ``z*`` of the biped now, then its CoM ``x, y``, its yaw and its
-        segment's curriculum cell."""
+        """``(n, 27 + 5)``: ``z*`` of the biped now, then its CoM ``x, y``, its yaw, its
+        segment's curriculum cell and its bank index."""
         n = self.num_envs
         z = torch.zeros(n, SKILL + _EXTRA, device=self.device)
 
@@ -1438,6 +1466,7 @@ class PointMassBiped:
         z[:, SKILL + 2] = self.yaw
         idle = self.goal["standing"] | self.recovering
         z[:, SKILL + 3] = torch.where(idle, float(NO_CELL), self.goal["cell"])
+        z[:, SKILL + 4] = torch.where(idle, -1.0, self.goal["index"])
         z = torch.nan_to_num(z, nan=0.0, posinf=0.0, neginf=0.0)
         return torch.where(self.fallen[:, None], self.frozen, z)
 

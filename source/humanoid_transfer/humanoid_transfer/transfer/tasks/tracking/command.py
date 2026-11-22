@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from collections.abc import Sequence
 from dataclasses import MISSING
 from pathlib import Path
@@ -49,6 +50,7 @@ from isaaclab.utils.math import quat_apply
 from ....common.similarity import UnitSystem
 from ....common.skill_state import SKILL_LAYOUT
 from ...latent.contract import load_contract, plan_integrals
+from ...latent.failure_replay import FailureStore
 from ...latent.memory import TimeGrid
 from ...latent.plan_contact import PLAN_CONTACTS, apply_plan_contact
 from ...latent.plan_trust import PlanTrust, smooth_noise, sway
@@ -233,6 +235,13 @@ class ReferenceCommand(UniformVelocityCommand):
         self.windows = self._load_windows(cfg.start_windows) if cfg.start_windows else None
         self.procedural = torch.zeros(n, dtype=torch.bool, device=self.device)
         """Envs whose episode follows the point-mass biped instead of the task's generator."""
+        tasks = 1 if self.tasks is None else len(self.tasks)
+        self.command_failures = (
+            {t: FailureStore(6, device=self.device) for t in range(tasks)}
+            if cfg.failure_replay > 0.0 and not cfg.procedural_probes
+            else None
+        )
+        """Per task, the commands its terminated episodes were drawn with (failure replay)."""
         self.biped = None
         self._curriculum_previous: tuple[torch.Tensor, torch.Tensor] | None = None
         """The planned and reached contacts of the step before, for the gait curriculum's
@@ -258,6 +267,7 @@ class ReferenceCommand(UniformVelocityCommand):
                     if cfg.procedural_curriculum and not cfg.procedural_probes
                     else False
                 ),
+                failure_replay=0.0 if cfg.procedural_probes else cfg.failure_replay,
             )
             offsets = torch.arange(1, length + 1, dtype=torch.float64) * self.dt_star
             self.biped.set_offsets(offsets)
@@ -929,6 +939,7 @@ class ReferenceCommand(UniformVelocityCommand):
     # -- command term hooks ------------------------------------------------
 
     def reset(self, env_ids: Sequence[int] | None = None) -> dict[str, float]:
+        self._store_failures(env_ids)
         extras = super().reset(env_ids)
         ids = slice(None) if env_ids is None else env_ids
         self.just_reset[ids] = True
@@ -992,10 +1003,73 @@ class ReferenceCommand(UniformVelocityCommand):
 
     def _resample_command(self, env_ids: Sequence[int]) -> None:
         super()._resample_command(env_ids)
+        ids = torch.arange(self.num_envs, device=self.device)[env_ids]
         if self.tasks is not None:
-            ids = torch.arange(self.num_envs, device=self.device)[env_ids]
             self._task_commands(ids[~self.procedural[ids]])
+        if getattr(self, "command_failures", None) is not None:
+            self._replay_commands(ids[~self.procedural[ids]])
         self.replan[env_ids] = True
+
+    # -- failure replay ---------------------------------------------------------
+
+    def _command_rows(self, ids: torch.Tensor) -> torch.Tensor:
+        """``(k, 6)``: what a task episode's command was drawn as -- velocity, heading target,
+        whether it follows its heading, whether it stands."""
+        return torch.cat(
+            [
+                self.vel_command_b[ids],
+                self.heading_target[ids, None],
+                self.is_heading_env[ids, None].float(),
+                self.is_standing_env[ids, None].float(),
+            ],
+            dim=1,
+        )
+
+    def _command_width(self, t: int) -> torch.Tensor:
+        """``(3,)`` the widths of task ``t``'s command ranges (velocity x, y, yaw rate)."""
+        if t == 0 or self.tasks is None:
+            r = self.cfg.ranges
+            spans = [r.lin_vel_x, r.lin_vel_y, r.ang_vel_z]
+            return torch.tensor([hi - lo for lo, hi in spans], device=self.device)
+        low, high = self.tasks[t]["ranges"]
+        return torch.as_tensor(high - low, device=self.device, dtype=torch.float32)
+
+    def _store_failures(self, env_ids: Sequence[int] | None) -> None:
+        """Store what the episodes ending now by a termination (not a time-out) were drawn with:
+        a task episode's command, a procedural episode's segment (``latent/failure_replay.py``)."""
+        if getattr(self, "command_failures", None) is None:
+            return
+        manager = getattr(self._env, "termination_manager", None)
+        if manager is None:
+            return
+        ids = torch.arange(self.num_envs, device=self.device)[slice(None) if env_ids is None else env_ids]
+        failed = ids[manager.terminated[ids]]
+        if len(failed) == 0:
+            return
+        if self.biped is not None:
+            self.biped.record_failures(failed[self.procedural[failed]])
+        failed = failed[~self.procedural[failed]]
+        rows = self._command_rows(failed)
+        for t in torch.unique(self.task[failed]).tolist():
+            self.command_failures[int(t)].add(rows[self.task[failed] == t])
+
+    def _replay_commands(self, ids: torch.Tensor) -> None:
+        """Replace a share of ``ids``' fresh commands by stored failing ones of the same task, the
+        velocity jittered by 5 % of the task's range widths."""
+        for t, store in self.command_failures.items():
+            chosen = ids[self.task[ids] == t]
+            if len(chosen) == 0 or len(store) == 0:
+                continue
+            rows, replayed = store.mix(self._command_rows(chosen), self.cfg.failure_replay)
+            if not bool(replayed.any()):
+                continue
+            picked = chosen[replayed]
+            rows = rows[replayed]
+            jitter = 0.05 * self._command_width(t) * torch.randn(len(picked), 3, device=self.device)
+            self.vel_command_b[picked] = rows[:, :3] + jitter
+            self.heading_target[picked] = rows[:, 3]
+            self.is_heading_env[picked] = rows[:, 4] > 0.5
+            self.is_standing_env[picked] = rows[:, 5] > 0.5
 
     def _update_metrics(self) -> None:
         super()._update_metrics()
@@ -1334,6 +1408,11 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
     procedural_curriculum_log: str | None = None
     """Where the curriculum's record (per-cell score, counts and draw share at every refresh)
     is saved, an ``.npz``; None: not saved."""
+
+    failure_replay: float = float(os.environ.get("HUMANOID_FAILURE_REPLAY", "0"))
+    """Share of task commands and procedural segments drawn again from the training episodes that
+    terminated (not by time-out; not after the procedural biped fell): ``latent/failure_replay.py``.
+    0 (default): off, the draw is the usual one, bit for bit."""
 
     plan_max_load: float | None = None
     """Largest load, in body weights, a generator's plan may ask of one foot; None keeps

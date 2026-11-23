@@ -40,6 +40,7 @@ from pact_check_anchors import sole_override  # noqa: E402
 
 LOAD = SKILL_LAYOUT.slice_of("foot_load")
 STEPS = slice(50, 900, 7)
+CHUNK = 2048
 
 
 def read(body: str, entry: dict, capture: Path) -> dict:
@@ -56,11 +57,14 @@ def read(body: str, entry: dict, capture: Path) -> dict:
         x = d[key][STEPS]
         return torch.as_tensor(x.reshape(-1, width or x.shape[-1]), dtype=torch.float64)
 
-    with torch.no_grad():
-        estimate = drive(
-            rows("joint_pos"), rows("joint_vel"), rows("projected_gravity"),
-            target=rows("joint_pos_target"),
-        )["loads"].numpy()
+    q, qd, g, target = (rows(k) for k in ("joint_pos", "joint_vel", "projected_gravity", "joint_pos_target"))
+    with torch.no_grad():  # in chunks: the statics hold (rows, joints, links, 3) per chunk
+        estimate = torch.cat(
+            [
+                drive(q[i : i + CHUNK], qd[i : i + CHUNK], g[i : i + CHUNK], target=target[i : i + CHUNK])["loads"]
+                for i in range(0, len(q), CHUNK)
+            ]
+        ).numpy()
     true = d["skill_state"][STEPS].reshape(-1, SKILL_LAYOUT.size)[:, LOAD]
     kept = ~d["done"][STEPS].reshape(-1)
     feet = {}
@@ -71,7 +75,8 @@ def read(body: str, entry: dict, capture: Path) -> dict:
             "bias": float(np.mean(e - t)),
             "mae": float(np.abs(e - t).mean()),
         }
-    return {"capture": str(capture.relative_to(REPO)), "rows": int(kept.sum()), "feet": feet}
+    shown = capture.relative_to(REPO) if capture.is_relative_to(REPO) else capture
+    return {"capture": shown.as_posix(), "rows": int(kept.sum()), "feet": feet}
 
 
 def main() -> int:

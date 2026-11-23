@@ -128,7 +128,21 @@ class KinematicAnchors(torch.nn.Module):
                 for f, s in zip(feet, soles, strict=True)
             ]
         )
+        # Loop closures (``card_loops.py``): the point each joins on its two links, in the zero
+        # pose; empty for a body whose legs are trees.
+        loops = card.get("loops", [])
+        ends = np.zeros((len(loops), 2, 3))
+        loop_links = np.zeros((len(loops), 2), dtype=np.int64)
+        for k, loop in enumerate(loops):
+            for side in (0, 1):
+                link = index[loop[f"body{side}"]]
+                loop_links[k, side] = link
+                ends[k, side] = rot0[link] @ np.asarray(loop[f"pos{side}"]) + np.asarray(
+                    zero["link_pos"][link]
+                )
+        self.loop_links = loop_links
         f32 = torch.float32
+        self.register_buffer("loop_ends0", torch.as_tensor(ends, dtype=f32))
         self.register_buffer("axis", torch.as_tensor(axis, dtype=f32))
         self.register_buffer("origin", torch.as_tensor(origin, dtype=f32))
         self.register_buffer("rot0", torch.as_tensor(rot0, dtype=f32))
@@ -271,11 +285,15 @@ class DriveLoads(torch.nn.Module):
 
     for every driven joint ``j`` on the chain from the base to the foot, with ``F`` and ``M``
     the ground's force and moment at the sole point ``p``. A joint without a drive (zero
-    stiffness and damping: a mimic joint, as the NAO's ``RHipYawPitch``, or a closed loop's
-    passive joint, as Digit's tarsus and toes) is held by a constraint whose torque the drives
-    do not give, so its balance is not used. A ridge least-squares solve per foot gives the
-    wrench; the load in ``z*`` is ``F``'s vertical part over ``m g``. No
-    parameter is learned: it is as good as the drive model and the statics.
+    stiffness and damping: a mimic joint, as the NAO's ``RHipYawPitch``) is held by a
+    constraint whose torque the drives do not give, so its balance is not used. A ridge
+    least-squares solve per foot gives the wrench; the load in ``z*`` is ``F``'s vertical part
+    over ``m g``. No parameter is learned: it is as good as the drive model and the statics.
+
+    A card with loop closures (``card_loops.py``: Digit's achilles and toe rods) adds one
+    unknown force per loop at its closing point, acting on its two links with opposite signs;
+    the undriven joints on a loop's path (the rods' joints, the tarsus and toes) then balance
+    zero, and both feet and every loop are solved together.
     """
 
     def __init__(
@@ -331,6 +349,14 @@ class DriveLoads(torch.nn.Module):
                 node = parent[node]
             chains.append(on)
         self.register_buffer("on_chain", torch.as_tensor(np.stack(chains)))  # (2, J)
+        # A loop's force acts on its two links: +f on the first, -f on the second. A joint
+        # carries it when exactly one of them moves with it (sign +1 or -1): those joints are
+        # the loop's path, whose undriven ones are held by that force alone (torque 0).
+        signs = np.zeros((len(names), len(anchors.loop_links)), dtype=np.float32)
+        for k, (first, second) in enumerate(anchors.loop_links):
+            signs[:, k] = below[:, first] - below[:, second]
+        self.register_buffer("loop_sign", torch.as_tensor(signs))  # (J, K)
+        self.register_buffer("on_loop", torch.as_tensor((signs != 0).any(1).astype(np.float32)))
 
     def set_drives(
         self, stiffness: torch.Tensor, damping: torch.Tensor, effort: torch.Tensor
@@ -388,7 +414,22 @@ class DriveLoads(torch.nn.Module):
         for f in range(len(anchors.feet)):
             lever = torch.linalg.cross(axis, soles[:, f, None, :] - origin, dim=-1)
             maps.append(torch.cat([lever, axis], dim=-1) * self.on_chain[f][None, :, None])
-        return {"gravity_tau": gravity_tau, "wrench_map": torch.stack(maps, 1), "down": g / 9.81}
+        out = {"gravity_tau": gravity_tau, "wrench_map": torch.stack(maps, 1), "down": g / 9.81}
+        if self.loop_sign.shape[1]:
+            links = anchors.loop_links
+            ends = [
+                torch.einsum("nkij,kj->nki", rot[:, links[:, side]], anchors.loop_ends0[:, side])
+                + trans[:, links[:, side]]
+                for side in (0, 1)
+            ]
+            point = 0.5 * (ends[0] + ends[1])  # (N, K, 3): where each loop closes
+            lever = torch.linalg.cross(
+                axis[:, :, None, :].expand(-1, -1, point.shape[1], -1),
+                point[:, None, :, :] - origin[:, :, None, :],
+                dim=-1,
+            )  # (N, J, K, 3)
+            out["loop_map"] = lever * self.loop_sign[None, :, :, None]
+        return out
 
     def forward(
         self,
@@ -407,6 +448,8 @@ class DriveLoads(torch.nn.Module):
         statics = self.balance(joint_pos, gravity_b)
         tau = self.torque(joint_pos, joint_vel, action, target)
         driven = ((self.stiffness > 0) | (self.damping > 0)).to(tau.dtype)
+        if "loop_map" in statics:
+            return self._closed(statics, tau, driven)
         forces, moments, loads = [], [], []
         for f in range(statics["wrench_map"].shape[1]):
             rows = self.on_chain[f] * driven  # (J,)
@@ -435,3 +478,39 @@ class DriveLoads(torch.nn.Module):
             "force": torch.stack(forces, 1),
             "moment": torch.stack(moments, 1),
         }
+
+    def _closed(
+        self, statics: dict[str, torch.Tensor], tau: torch.Tensor, driven: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """The legs with loop closures, solved together: both feet's wrenches and every loop's
+        force (unknown 3-vectors at the closing points). Rows: each driven joint balances its
+        drive's torque; each undriven joint on a loop's path balances zero (the loop holds it);
+        other undriven joints (mimics) are left out, as in the tree's solve."""
+        free = (1.0 - driven) * self.on_loop
+        rows = (driven + free).clamp(max=1.0)  # (J,)
+        wrench_map, loop_map = statics["wrench_map"], statics["loop_map"]
+        n, joints = loop_map.shape[:2]
+        feet = wrench_map.shape[1]
+        a_matrix = torch.cat(
+            [wrench_map[:, f] for f in range(feet)] + [loop_map.reshape(n, joints, -1)], dim=-1
+        ) * rows[None, :, None]  # (N, J, 6 * feet + 3K)
+        b = -(tau * driven + statics["gravity_tau"]) * rows[None, :]
+        gram = a_matrix.transpose(1, 2) @ a_matrix
+        diagonal = gram.diagonal(dim1=1, dim2=2)
+        weights = []
+        for f in range(feet):
+            force_scale = diagonal[:, 6 * f : 6 * f + 3].mean(-1).clamp_min(1e-9)
+            moment_scale = diagonal[:, 6 * f + 3 : 6 * f + 6].mean(-1).clamp_min(1e-9)
+            weights += [
+                (self.ridge * force_scale)[:, None].expand(-1, 3),
+                (self.moment_prior * moment_scale)[:, None].expand(-1, 3),
+            ]
+        loop_scale = diagonal[:, 6 * feet :].mean(-1).clamp_min(1e-9)
+        weights.append((self.ridge * loop_scale)[:, None].expand(-1, diagonal.shape[1] - 6 * feet))
+        reg = torch.diag_embed(torch.cat(weights, dim=-1))
+        solution = torch.linalg.solve(gram + reg, a_matrix.transpose(1, 2) @ b[..., None])[..., 0]
+        weight = 9.81 * self.anchors.mass.sum()
+        forces = torch.stack([solution[:, 6 * f : 6 * f + 3] for f in range(feet)], 1)
+        moments = torch.stack([solution[:, 6 * f + 3 : 6 * f + 6] for f in range(feet)], 1)
+        loads = -(forces * statics["down"][:, None, :]).sum(-1) / weight
+        return {"loads": loads, "force": forces, "moment": moments}

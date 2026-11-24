@@ -317,12 +317,12 @@ class BodyData:
         out["joint_obs"] = (
             np.stack([q_w - q0, qd_w, command_w], axis=-1)
             .transpose(0, 2, 1, 3)
-            .astype(np.float32)
+            .astype(np.float16)
         )  # (N, J, h, 3)
         imu = np.concatenate(
             [data["projected_gravity"], data["base_ang_vel"] * self.time_unit], axis=-1
         )
-        out["imu"] = imu[rows, cols].astype(np.float32)
+        out["imu"] = imu[rows, cols].astype(np.float16)
         z_true = data["skill_state"][t, env].astype(np.float32)
 
         # Compute kinematic anchors, drive loads, and operational-space impedance anchors on device.
@@ -413,7 +413,7 @@ class BodyData:
         # Each sample's drive: the loss compares the torques targets command (drive_loss).
         out["drive_offset"] = drive_offset(q_cur, vel_cur, q0, gains, effort_cap)
         out["drive_gain"] = drive_gain(gains, effort_cap)
-        out["anchor_in"] = with_physics(analytic, physics)
+        out["anchor_in"] = with_physics(analytic, physics).astype(np.float16)
         out["learned"] = residual_targets(z_true, analytic, physics)
         out["z"] = z_true
         out["start"] = start
@@ -428,9 +428,9 @@ class BodyData:
         if error > 1e-3:
             raise ValueError(f"{path}: decoded estimate differs from the capture's by {error}")
         out["clamped"] = ~inside
-        out["plan"] = upcoming.astype(np.float32)
-        out["relative"] = (upcoming - est[:, None]).astype(np.float32)
-        out["path"] = path_ahead.astype(np.float32)
+        out["plan"] = upcoming.astype(np.float16)
+        out["relative"] = (upcoming - est[:, None]).astype(np.float16)
+        out["path"] = path_ahead.astype(np.float16)
         out["view"] = view
         dt_star = float(data["control_dt"]) / self.time_unit
         out["times"] = (np.arange(1, view + 1) * dt_star).astype(np.float32)
@@ -619,7 +619,7 @@ def main() -> int:
     train_rows = {i: np.nonzero(~b.test)[0] for i, b in enumerate(bodies)}
 
     def pooled(key):
-        return np.concatenate([getattr(bodies[i], key)[train_rows[i]] for i in train_index])
+        return np.concatenate([getattr(bodies[i], key)[train_rows[i]].astype(np.float32) for i in train_index])
 
     added, probes_used = None, None
     if args.adapt:
@@ -685,12 +685,12 @@ def main() -> int:
         b = bodies[i]
         n, j, v = len(rows), b.joint_obs.shape[1], b.view
         raw = {
-            "joint_obs": b.joint_obs[rows],
-            "imu": b.imu[rows],
-            "anchor_in": b.anchor_in[rows],
-            "plan": b.plan[rows],
-            "relative": b.relative[rows],
-            "path": b.path[rows],
+            "joint_obs": b.joint_obs[rows].astype(np.float32),
+            "imu": b.imu[rows].astype(np.float32),
+            "anchor_in": b.anchor_in[rows].astype(np.float32),
+            "plan": b.plan[rows].astype(np.float32),
+            "relative": b.relative[rows].astype(np.float32),
+            "path": b.path[rows].astype(np.float32),
             "label": b.label[rows],
             "drive_offset": b.drive_offset[rows],
             "learned": b.learned[rows],

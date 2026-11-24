@@ -276,7 +276,8 @@ def test_impedance_anchor_actor_matches_driver_and_flows_etune_gradients(tmp_pat
     path = tmp_path / "pact_v2.pt"
     torch.save(ckpt, path)
     skill_mean, skill_std = torch.randn(27, generator=gen), torch.rand(27, generator=gen) + 0.5
-    q0 = torch.as_tensor(card["joints"]["default_pos"], dtype=torch.float32)
+    # Non-card default pose (as in H1Track-v0) to verify both Driver and Actor subtract env q0.
+    q0 = torch.as_tensor(card["joints"]["default_pos"], dtype=torch.float32) + 0.35
     n = 3
     driver = PactDriver(
         ckpt, descriptor, contacts, anchors, drive, q0, ACTION_JOINTS, SCALE, VIEW,
@@ -289,6 +290,7 @@ def test_impedance_anchor_actor_matches_driver_and_flows_etune_gradients(tmp_pat
         checkpoint=str(path), repo=str(REPO), body="nao", view=VIEW,
         skill_mean=skill_mean.tolist(), skill_std=skill_std.tolist(), control_dt=DT,
         action_joints=ACTION_JOINTS, action_scale=SCALE, arm="etune",
+        default_joint_pos=q0.tolist(),
     ).eval()
     time_unit = float(np.sqrt(descriptor.leg_length / GRAVITY))
     j_hist, i_hist = History(dims.history), History(dims.history)

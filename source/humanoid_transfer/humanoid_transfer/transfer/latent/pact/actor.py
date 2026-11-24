@@ -273,7 +273,7 @@ class PactActor(nn.Module):
             **extra,
         )
         if self.impedance_anchor:
-            out = self.drive.targets_from_torque(q, qd, out)
+            out = self.drive.targets_from_torque(q, qd, out, default_pos=self.q0)
         return out[:, self.action_joints] / self.action_scale
 
     def forward(self, obs, masks=None, hidden_state=None, stochastic_output: bool = False):

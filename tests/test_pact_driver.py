@@ -167,7 +167,7 @@ def test_a_reset_refills_the_history_with_the_current_reading():
     assert not torch.equal(history[0, :, 0], history[0, :, -1])
 
 
-@pytest.mark.parametrize("body", ["nao", "digit"])
+@pytest.mark.parametrize("body", ["nao", "h1", "digit"])
 def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body):
     import math
 
@@ -195,7 +195,9 @@ def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body):
     view, n, control_dt = 4, 3, 0.02
     skill_mean, skill_std = torch.randn(27, generator=gen), torch.rand(27, generator=gen) + 0.5
     action_joints = [0, 2, 4, 6]
-    q0 = torch.as_tensor(card["joints"]["default_pos"], dtype=torch.float32)
+    # Shift env default pose away from the card's default_pos (as H1Track-Play-v0 does):
+    # targets_from_torque must subtract the env default pose q0, never the card's default.
+    q0 = torch.as_tensor(card["joints"]["default_pos"], dtype=torch.float32) + 0.35
     driver = PactDriver(
         checkpoint, descriptor, contacts, anchors, drive, q0,
         action_joints, 0.25, view, skill_mean, skill_std, control_dt, n, "cpu",
@@ -226,5 +228,5 @@ def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body):
             (torch.arange(1, view + 1) * control_dt / time_unit).expand(n, -1),
             path, torch.ones(n, view, dtype=torch.bool), phys=phys,
         )
-        out_rad = drive.targets_from_torque(q, qd, out_tau)
+        out_rad = drive.targets_from_torque(q, qd, out_tau, default_pos=q0)
     torch.testing.assert_close(actions[-1], out_rad[:, action_joints] / 0.25, atol=1e-5, rtol=1e-4)

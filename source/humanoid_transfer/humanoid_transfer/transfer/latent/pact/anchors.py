@@ -638,13 +638,16 @@ class DriveLoads(torch.nn.Module):
         joint_vel: torch.Tensor,
         tau_dimless: torch.Tensor,
         clip_ratio: float = 3.0,
+        default_pos: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Exact analytic PD inversion: dimensionless torque ``tau / (m g L)`` -> joint position
-        targets relative to ``default`` (rad), soft-bounded to ``±clip_ratio * tau_eff``."""
+        targets relative to ``default_pos`` (or the card's ``default`` if omitted, rad),
+        soft-bounded to ``±clip_ratio * tau_eff``."""
         effort = self.effective_effort()
         active = (self.stiffness > 0) & (effort > 0)
         mg_l = float(GRAVITY * self.anchors.mass.sum() * self.anchors.units.length)
         tau_nm = torch.clamp(tau_dimless * mg_l, -clip_ratio * effort, clip_ratio * effort)
         kp_safe = torch.where(active, self.stiffness, torch.ones_like(self.stiffness))
-        rel_target = (joint_pos - self.default) + (self.damping * joint_vel + tau_nm) / kp_safe
+        base = self.default if default_pos is None else default_pos
+        rel_target = (joint_pos - base) + (self.damping * joint_vel + tau_nm) / kp_safe
         return torch.where(active, rel_target, torch.zeros_like(rel_target))

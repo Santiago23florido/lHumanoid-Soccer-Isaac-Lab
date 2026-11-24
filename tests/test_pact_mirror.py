@@ -21,7 +21,7 @@ from humanoid_transfer.transfer.latent.pact.mirror import SampleMirror  # noqa: 
 
 REPO = Path(__file__).resolve().parents[1]
 REGISTRY = json.loads((REPO / "transfer" / "bodies" / "bodies.json").read_text("utf-8"))
-BODIES = ("g1", "nao", "h1", "cassie")
+BODIES = ("g1", "nao", "h1", "cassie", "digit")
 
 
 def _body(name: str):
@@ -70,3 +70,61 @@ def test_reflected_joint_states_give_the_reflected_anchors(body):
     error = np.abs(b - m.skill(a))
     scale = np.abs(a).mean(0) + 1e-3
     assert np.median(error / scale) < 0.02, (body, np.round(np.max(error / scale, 0), 3))
+
+
+@pytest.mark.parametrize("body", BODIES)
+def test_reflected_drive_ratio_and_offset_match_mirrored_state(body):
+    import sys
+
+    sys.path.insert(0, str(REPO / "transfer" / "scripts"))
+    from humanoid_transfer.transfer.latent.pact.descriptors import EFFORT_LIMIT_CLIP, GRAVITY
+    from pact_gate_d import drive_gain, drive_offset, drive_ratio
+
+    card, unit, q0, m = _body(body)
+    desc = describe(card, leg_length=unit)
+    anchors = KinematicAnchors(card, unit)
+    drive = DriveLoads(card, anchors)
+    cap = float(EFFORT_LIMIT_CLIP * desc.mass * GRAVITY * desc.leg_length)
+    gains = (drive.stiffness.numpy(), drive.damping.numpy(), drive.effort.numpy())
+    rng = np.random.default_rng(4)
+    n, j = 32, len(q0)
+    q = q0 + 0.1 * rng.normal(size=(n, j)).astype(np.float32)
+    qd = rng.normal(size=(n, j)).astype(np.float32)
+    target = q + 0.05 * rng.normal(size=(n, j)).astype(np.float32)
+    q_m = q0 + m.positions(q - q0)
+    qd_m = m.speeds(qd)
+    t_m = q0 + m.positions(target - q0)
+    r = drive_ratio(target, q, qd, gains, cap)
+    r_m = drive_ratio(t_m, q_m, qd_m, gains, cap)
+    gain = drive_gain(gains, cap)
+    # Exclude asymmetric mimic pairs (e.g. NAO's LHipYawPitch is driven while RHipYawPitch is a mimic).
+    sym = np.isclose(gain, np.abs(m.joints) @ gain, atol=1e-5)
+    assert sym.sum() >= 12
+    np.testing.assert_allclose(r_m[:, sym], m.speeds(r)[:, sym], atol=1e-4)
+    off = drive_offset(q, qd, q0, gains, cap)
+    off_m = drive_offset(q_m, qd_m, q0, gains, cap)
+    np.testing.assert_allclose(off_m[:, sym], (m.speeds(off) - gain * m.offset)[:, sym], atol=1e-4)
+
+
+@pytest.mark.parametrize("body", ["g1", "h1", "digit"])
+def test_reflected_operational_anchor_matches_mirrored_state(body):
+    card, unit, q0, m = _body(body)
+    anchors = KinematicAnchors(card, unit)
+    drive = DriveLoads(card, anchors)
+    rng = np.random.default_rng(13)
+    n, j = 8, len(q0)
+    q = q0 + 0.1 * rng.normal(size=(n, j)).astype(np.float32)
+    qd = rng.normal(size=(n, j)).astype(np.float32)
+    target = q + 0.05 * rng.normal(size=(n, j)).astype(np.float32)
+    g = np.tile(np.array([0.08, -0.06, -0.995], np.float32), (n, 1))
+    g_m = g * np.array([1.0, -1.0, 1.0], np.float32)
+    q_m = q0 + m.positions(q - q0)
+    qd_m = m.speeds(qd)
+    t_m = q0 + m.positions(target - q0)
+    with torch.no_grad():
+        op = drive.operational_anchor(torch.as_tensor(q), torch.as_tensor(qd), torch.as_tensor(g), torch.as_tensor(target))
+        op_m = drive.operational_anchor(torch.as_tensor(q_m), torch.as_tensor(qd_m), torch.as_tensor(g_m), torch.as_tensor(t_m))
+    np.testing.assert_allclose(op_m["tau_g"].numpy(), m.speeds(op["tau_g"].numpy()), atol=1e-3)
+    np.testing.assert_allclose(op_m["j_eff"].numpy(), m.jacobian(op["j_eff"].numpy()), atol=1e-3)
+    np.testing.assert_allclose(op_m["j_pinv"].numpy(), m.jacobian(op["j_pinv"].numpy()), atol=1e-3)
+    np.testing.assert_allclose(op_m["w_t"].numpy(), m.wrench(op["w_t"].numpy()), atol=1e-3)

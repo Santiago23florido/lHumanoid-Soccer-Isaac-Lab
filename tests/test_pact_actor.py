@@ -249,3 +249,69 @@ def test_the_driver_runs_an_adapted_checkpoint_as_the_actor_does(setup):
             )
             got = actor({"policy": policy_obs, "pact": flat})
         torch.testing.assert_close(got, expected, atol=1e-5, rtol=1e-4)
+
+
+def test_impedance_anchor_actor_matches_driver_and_flows_etune_gradients(tmp_path):
+    card = _card("nao")
+    unit = REGISTRY["nao"].get("leg_length_unit")
+    descriptor = describe(card, leg_length=unit)
+    contacts = contact_joints(card)
+    anchors = KinematicAnchors(card, unit)
+    drive = DriveLoads(card, anchors)
+    dims = PactDims(
+        width=32, heads=4, history=3, free_tokens=2, body_tokens=2, observation=3,
+        anchor_inputs=True, timed_plan=True, impedance_anchor=True, op_width=48,
+    )  # fmt: skip
+    torch.manual_seed(5)
+    policy = PactPolicy(dims).eval()
+    gen = torch.Generator().manual_seed(6)
+    ckpt = {
+        "state": policy.state_dict(),
+        "dims": vars(dims),
+        "z_mean": torch.randn(27, generator=gen).numpy(),
+        "z_std": (torch.rand(27, generator=gen) + 0.5).numpy(),
+        "a_mean": torch.randn(27, generator=gen).numpy(),
+        "a_std": (torch.rand(27, generator=gen) + 0.5).numpy(),
+    }
+    path = tmp_path / "pact_v2.pt"
+    torch.save(ckpt, path)
+    skill_mean, skill_std = torch.randn(27, generator=gen), torch.rand(27, generator=gen) + 0.5
+    q0 = torch.as_tensor(card["joints"]["default_pos"], dtype=torch.float32)
+    n = 3
+    driver = PactDriver(
+        ckpt, descriptor, contacts, anchors, drive, q0, ACTION_JOINTS, SCALE, VIEW,
+        skill_mean, skill_std, DT, n, "cpu",
+    )  # fmt: skip
+    joints = len(descriptor.joint_names)
+    obs0 = {"policy": torch.zeros(n, 70 + VIEW * 30 + 27), "pact": torch.zeros(n, inputs_width(joints, dims.history))}
+    actor = PactActor(
+        obs0, {"actor": ["policy", "pact"]}, "actor", len(ACTION_JOINTS),
+        checkpoint=str(path), repo=str(REPO), body="nao", view=VIEW,
+        skill_mean=skill_mean.tolist(), skill_std=skill_std.tolist(), control_dt=DT,
+        action_joints=ACTION_JOINTS, action_scale=SCALE, arm="etune",
+    ).eval()
+    time_unit = float(np.sqrt(descriptor.leg_length / GRAVITY))
+    j_hist, i_hist = History(dims.history), History(dims.history)
+    fresh = torch.zeros(n, dtype=torch.bool)
+    for k in range(4):
+        q, qd, g, w, t = _state(card, n, seed=40 + k)
+        p_obs = torch.randn(n, 70 + VIEW * 30 + 27, generator=gen)
+        expected = driver(p_obs, q, qd, t, g, w)
+        flat = torch.cat(
+            [
+                j_hist.append(joint_features(q, qd, t, q0, time_unit, drive), fresh),
+                i_hist.append(imu_features(g, w, time_unit), fresh),
+                anchor_inputs(anchors, drive, q, qd, g, w, t),
+            ],
+            dim=1,
+        )
+        with torch.no_grad():
+            got = actor({"policy": p_obs, "pact": flat})
+        torch.testing.assert_close(got, expected, atol=1e-5, rtol=1e-4)
+    # Gradients reach delta_e, delta_d, and std_param on step 0
+    actor.train()
+    act = actor({"policy": p_obs, "pact": flat}, stochastic_output=True).detach()
+    actor({"policy": p_obs, "pact": flat}, stochastic_output=True)
+    actor.get_output_log_prob(act).sum().backward()
+    for p in actor.tuned:
+        assert p.grad is not None and p.grad.abs().sum() > 0

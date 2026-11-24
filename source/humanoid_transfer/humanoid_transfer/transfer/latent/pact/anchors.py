@@ -32,6 +32,7 @@ import torch
 
 from humanoid_transfer.common.similarity import UnitSystem
 from humanoid_transfer.common.skill_state import SKILL_LAYOUT
+from humanoid_transfer.transfer.latent.pact.descriptors import EFFORT_LIMIT_CLIP, GRAVITY
 
 EXACT_FIELDS: tuple[str, ...] = (
     "gravity",
@@ -319,6 +320,8 @@ class DriveLoads(torch.nn.Module):
         self.register_buffer("stiffness", column("stiffness"))
         self.register_buffer("damping", column("damping"))
         self.register_buffer("effort", column("effort_limit"))
+        weight_length = float(anchors.units.mass * GRAVITY * anchors.units.length)
+        self.register_buffer("effort_cap", torch.tensor(EFFORT_LIMIT_CLIP * weight_length, dtype=f32))
         self.register_buffer("default", torch.as_tensor(card["joints"]["default_pos"], dtype=f32))
         control = card["control"]
         self.scale = float(control["action_scale"])
@@ -365,14 +368,21 @@ class DriveLoads(torch.nn.Module):
         for name, value in (("stiffness", stiffness), ("damping", damping), ("effort", effort)):
             getattr(self, name).copy_(torch.as_tensor(value, dtype=torch.float32))
 
+    def effective_effort(self) -> torch.Tensor:
+        """Per-joint effort scale for ``drive_ratio``: capped at ``EFFORT_LIMIT_CLIP * m g L``
+        so unlimited drives (e.g. Digit's ``FLT_MAX``) stay on a physical torque scale."""
+        cap = getattr(self, "effort_cap", None)
+        return self.effort if cap is None else torch.minimum(self.effort, cap)
+
     def drive_ratio(
         self, joint_pos: torch.Tensor, joint_vel: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
-        """The torque each target commands, as a fraction of the joint's limit and softly
-        saturated: ``tanh((kp (T - q) - kd qd) / tau_max)``, 0 for a joint without a drive
-        (``pact_gate_d.drive_ratio``, what the shared models were trained on)."""
-        active = (self.stiffness > 0) & (self.effort > 0)
-        limit = torch.where(active, self.effort, torch.ones_like(self.effort))
+        """The torque each target commands, as a fraction of the joint's effective limit and
+        softly saturated: ``tanh((kp (T - q) - kd qd) / tau_eff)``, 0 for a joint without a
+        drive (``pact_gate_d.drive_ratio``, what the shared models were trained on)."""
+        effort = self.effective_effort()
+        active = (self.stiffness > 0) & (effort > 0)
+        limit = torch.where(active, effort, torch.ones_like(effort))
         ratio = (self.stiffness * (target - joint_pos) - self.damping * joint_vel) / limit
         return torch.where(active, torch.tanh(ratio), torch.zeros_like(ratio))
 
@@ -514,3 +524,127 @@ class DriveLoads(torch.nn.Module):
         moments = torch.stack([solution[:, 6 * f + 3 : 6 * f + 6] for f in range(feet)], 1)
         loads = -(forces * statics["down"][:, None, :]).sum(-1) / weight
         return {"loads": loads, "force": forces, "moment": moments}
+
+    def wrench_anchor(
+        self, joint_pos: torch.Tensor, gravity_b: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Dimensionless static inverse-dynamics anchor in the heading frame (in ``m g L`` units).
+
+        Returns ``(tau_g, j_eff)`` with shapes ``(N, J)`` and ``(N, J, 12)`` such that for a
+        heading-frame ground wrench ``w = [F_L/(mg), M_L/(mgL), F_R/(mg), M_R/(mgL)]``,
+        static equilibrium satisfies:
+
+            tau / (m g L) = -tau_g - j_eff @ w
+
+        On closed-chain legs (e.g. Digit's achilles and toe rods), internal loop forces are
+        eliminated analytically through the undriven loop joints' zero-torque equations, so
+        ``j_eff`` maps foot wrenches directly onto driven joint torques.
+        """
+        statics = self.balance(joint_pos, gravity_b)
+        length = float(self.anchors.units.length)
+        mg_l = float(GRAVITY * self.anchors.mass.sum() * length)
+        tilt = tilt_from_gravity(gravity_b)  # (N, 3, 3): base -> heading
+        wmap = statics["wrench_map"]  # (N, 2, J, 6)
+        lever_h = torch.einsum("nab,nfjb->nfja", tilt, wmap[..., :3]) / length
+        axis_h = torch.einsum("nab,nfjb->nfja", tilt, wmap[..., 3:])
+        j_h = torch.cat([lever_h, axis_h], dim=-1)  # (N, 2, J, 6)
+        n, joints = joint_pos.shape
+        j_mat = j_h.permute(0, 2, 1, 3).reshape(n, joints, 12)
+        tau_g = statics["gravity_tau"] / mg_l
+        if "loop_map" not in statics:
+            return tau_g, j_mat
+        driven = ((self.stiffness > 0) | (self.damping > 0)).to(joint_pos.dtype)
+        free = (1.0 - driven) * self.on_loop  # (J,)
+        lmap = statics["loop_map"].reshape(n, joints, -1) / length  # (N, J, 3K)
+        l_free = lmap * free[None, :, None]
+        gram = l_free.transpose(1, 2) @ l_free
+        diag = gram.diagonal(dim1=1, dim2=2).mean(-1).clamp_min(1e-9)
+        reg = torch.diag_embed((1e-5 * diag)[:, None].expand(-1, lmap.shape[2]))
+        rhs = torch.cat([tau_g[:, :, None], j_mat], dim=-1) * free[None, :, None]
+        sol = torch.linalg.solve(gram + reg, l_free.transpose(1, 2) @ rhs)
+        corr = lmap @ sol
+        return tau_g - corr[..., 0], j_mat - corr[..., 1:]
+
+    def leg_mask(self) -> torch.Tensor:
+        """``(J,)`` bool: active driven joints on either foot's kinematic chain or closed loop."""
+        active = (self.stiffness > 0) & (self.effective_effort() > 0)
+        return ((self.on_chain.sum(0) > 0) | (self.on_loop > 0)) & active
+
+    def operational_params(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Static dimensionless drive parameters ``(tau_eff_dimless, k_eff, leg_mask)`` each ``(J,)``.
+
+        ``k_eff`` is the actuator-bounded effective stiffness ``(kp * 1.5 * tau_eff) / (kp + 1.5 * tau_eff)``
+        in ``m g L`` units: prevents high-stiffness/weak-effort drives (e.g. NAO) from saturating
+        under operational-space velocity commands while staying linear for compliant drives.
+        """
+        mg_l = float(GRAVITY * self.anchors.mass.sum() * self.anchors.units.length)
+        effort = self.effective_effort()
+        active = (self.stiffness > 0) & (effort > 0)
+        tau_eff = torch.where(active, effort / mg_l, torch.ones_like(effort))
+        kp_dimless = torch.where(active, self.stiffness / mg_l, torch.zeros_like(self.stiffness))
+        k_eff = (kp_dimless * 1.5 * tau_eff) / (kp_dimless + 1.5 * tau_eff).clamp_min(1e-6)
+        return tau_eff, k_eff, self.leg_mask()
+
+    def operational_anchor_from_ratio(
+        self, joint_pos: torch.Tensor, gravity_b: torch.Tensor, cmd_ratio: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """Operational-space force+motion anchor terms from current pose and commanded torque ratio.
+
+        Returns ``tau_g (N, J)``, ``j_eff (N, J, 12)``, ``j_pinv (N, J, 12)``, ``w_t (N, 12)``,
+        ``k_eff (J,)``, ``tau_eff_dimless (J,)`` -- all dimensionless in ``m g L`` / heading frame.
+        """
+        tau_g, j_eff = self.wrench_anchor(joint_pos, gravity_b)
+        tau_eff, k_eff, leg = self.operational_params()
+        leg_f = leg.to(j_eff.dtype)
+        jl = j_eff * leg_f[None, :, None]
+        gram = jl.transpose(1, 2) @ jl
+        diag = gram.diagonal(dim1=1, dim2=2)
+        # Damped operational-space pseudoinverse J_pinv = J_eff (J_eff^T J_eff + reg)^{-1}
+        p_prior = j_eff.new_tensor([2e-2, 2e-2, 2e-2, 1e-1, 1e-1, 1e-1] * 2)
+        p_reg = torch.diag_embed(p_prior[None, :] * diag.clamp_min(1e-3) + 1e-2)
+        j_pinv = torch.linalg.solve(gram + p_reg, jl.transpose(1, 2)).transpose(1, 2)
+        # Current heading-frame foot wrench w_t from current commanded torque ratio
+        tau_t = torch.atanh(cmd_ratio.clamp(-0.92, 0.92)) * tau_eff[None, :]
+        rhs = -(tau_t + tau_g) * leg_f[None, :]
+        w_prior = j_eff.new_tensor([1e-3, 1e-3, 1e-3, 5e-2, 5e-2, 5e-2] * 2)
+        w_reg = torch.diag_embed(w_prior[None, :] * diag.clamp_min(1e-4) + 1e-3)
+        w_t = torch.linalg.solve(gram + w_reg, jl.transpose(1, 2) @ rhs[..., None])[..., 0].clamp(
+            -2.5, 2.5
+        )
+        return {
+            "tau_g": tau_g,
+            "j_eff": j_eff,
+            "j_pinv": j_pinv,
+            "w_t": w_t,
+            "k_eff": k_eff,
+            "tau_eff_dimless": tau_eff,
+        }
+
+    def operational_anchor(
+        self,
+        joint_pos: torch.Tensor,
+        joint_vel: torch.Tensor,
+        gravity_b: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Same as :meth:`operational_anchor_from_ratio`, reading ``cmd_ratio`` from ``target``."""
+        return self.operational_anchor_from_ratio(
+            joint_pos, gravity_b, self.drive_ratio(joint_pos, joint_vel, target)
+        )
+
+    def targets_from_torque(
+        self,
+        joint_pos: torch.Tensor,
+        joint_vel: torch.Tensor,
+        tau_dimless: torch.Tensor,
+        clip_ratio: float = 3.0,
+    ) -> torch.Tensor:
+        """Exact analytic PD inversion: dimensionless torque ``tau / (m g L)`` -> joint position
+        targets relative to ``default`` (rad), soft-bounded to ``±clip_ratio * tau_eff``."""
+        effort = self.effective_effort()
+        active = (self.stiffness > 0) & (effort > 0)
+        mg_l = float(GRAVITY * self.anchors.mass.sum() * self.anchors.units.length)
+        tau_nm = torch.clamp(tau_dimless * mg_l, -clip_ratio * effort, clip_ratio * effort)
+        kp_safe = torch.where(active, self.stiffness, torch.ones_like(self.stiffness))
+        rel_target = (joint_pos - self.default) + (self.damping * joint_vel + tau_nm) / kp_safe
+        return torch.where(active, rel_target, torch.zeros_like(rel_target))

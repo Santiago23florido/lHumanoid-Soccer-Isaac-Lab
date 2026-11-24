@@ -15,6 +15,8 @@ versions).
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import torch
 
@@ -115,6 +117,8 @@ class PactDriver:
                 shifted.delta_e.copy_(torch.as_tensor(residual["delta_e"]))
                 shifted.delta_d.copy_(torch.as_tensor(residual["delta_d"]))
             self.model.embodiment = shifted.to(device).eval()
+        self.kind = kind
+        self.impedance_anchor = bool(kind == "pact" and getattr(dims, "impedance_anchor", False))
         self.anchors, self.drive = anchors.to(device), drive.to(device)
         self.q0 = default_joint_pos.to(device)
         self.action_joints = action_joints
@@ -122,7 +126,13 @@ class PactDriver:
         self.view = view
         self.skill_mean, self.skill_std = skill_mean.to(device), skill_std.to(device)
         self.time_unit = float(np.sqrt(descriptor.leg_length / GRAVITY))
+        self.alpha_dt = float(1.0 - math.exp(-(control_dt / self.time_unit) / 0.08))
         self.times = (torch.arange(1, view + 1, device=device) * control_dt / self.time_unit)[None]
+        if kind == "pact":
+            with torch.no_grad():
+                self._emb_one = self.model.embodiment(self.table)
+        else:
+            self._emb_one = None
         joints, history = len(descriptor.joint_names), dims.history
         self.joint_history = torch.zeros(num_envs, joints, history, 3, device=device)
         self.imu_history = torch.zeros(num_envs, history, 6, device=device)
@@ -164,6 +174,16 @@ class PactDriver:
         tail = policy_obs[:, policy_obs.shape[-1] - (self.view * (SKILL + 3) + SKILL) :]
         upcoming, estimate, path = plan_from_view(tail, self.view, self.skill_mean, self.skill_std)
         mask = torch.ones(n, self.view, dtype=torch.bool, device=self.device)
+        extra = dict(self.routing)
+        if self._emb_one is not None:
+            extra["emb_cached"] = (
+                self._emb_one[0].expand(n, -1, -1),
+                self._emb_one[1].expand(n, -1, -1),
+            )
+        if self.impedance_anchor:
+            phys = self.drive.operational_anchor_from_ratio(q, gravity, commanded)
+            phys["alpha_dt"] = q.new_full((n,), self.alpha_dt)
+            extra["phys"] = phys
         _, out = self.model(
             self.table.take(torch.zeros(n, dtype=torch.long, device=self.device)),
             self.joint_history,
@@ -174,6 +194,8 @@ class PactDriver:
             self.times.expand(n, -1),
             path,
             mask,
-            **self.routing,
+            **extra,
         )
+        if self.impedance_anchor:
+            out = self.drive.targets_from_torque(q, qd, out)
         return out[:, self.action_joints] / self.action_scale

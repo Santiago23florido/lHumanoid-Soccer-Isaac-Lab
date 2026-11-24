@@ -165,3 +165,66 @@ def test_a_reset_refills_the_history_with_the_current_reading():
     history = driver.joint_history
     assert torch.equal(history[1, :, 0], history[1, :, -1])
     assert not torch.equal(history[0, :, 0], history[0, :, -1])
+
+
+@pytest.mark.parametrize("body", ["nao", "digit"])
+def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body):
+    import math
+
+    card = _card(body)
+    unit = REGISTRY[body].get("leg_length_unit")
+    descriptor = describe(card, leg_length=unit)
+    contacts = contact_joints(card)
+    anchors = KinematicAnchors(card, unit)
+    drive = DriveLoads(card, anchors)
+    dims = PactDims(
+        width=32, heads=4, history=3, free_tokens=2, body_tokens=2, observation=3,
+        anchor_inputs=True, timed_plan=True, impedance_anchor=True, op_width=48,
+    )  # fmt: skip
+    torch.manual_seed(3)
+    policy = PactPolicy(dims).eval()
+    gen = torch.Generator().manual_seed(4)
+    checkpoint = {
+        "state": policy.state_dict(),
+        "dims": vars(dims),
+        "z_mean": torch.randn(27, generator=gen).numpy(),
+        "z_std": (torch.rand(27, generator=gen) + 0.5).numpy(),
+        "a_mean": torch.randn(27, generator=gen).numpy(),
+        "a_std": (torch.rand(27, generator=gen) + 0.5).numpy(),
+    }
+    view, n, control_dt = 4, 3, 0.02
+    skill_mean, skill_std = torch.randn(27, generator=gen), torch.rand(27, generator=gen) + 0.5
+    action_joints = [0, 2, 4, 6]
+    q0 = torch.as_tensor(card["joints"]["default_pos"], dtype=torch.float32)
+    driver = PactDriver(
+        checkpoint, descriptor, contacts, anchors, drive, q0,
+        action_joints, 0.25, view, skill_mean, skill_std, control_dt, n, "cpu",
+    )  # fmt: skip
+    steps = [_state(card, n, seed=20 + k) for k in range(4)]
+    obs = [torch.randn(n, 70 + view * 30 + 27, generator=gen) for _ in steps]
+    actions = [driver(o, q, qd, t, g, w) for o, (_, q, qd, g, w, t) in zip(obs, steps, strict=True)]
+    assert bool(torch.isfinite(actions[-1]).all())
+
+    time_unit = float(np.sqrt(descriptor.leg_length / GRAVITY))
+    last = steps[-dims.history :]
+    joint_obs = torch.stack(
+        [torch.stack([q - q0, qd * time_unit, drive.drive_ratio(q, qd, t)], -1) for _, q, qd, _, _, t in last], dim=2
+    )
+    imu = torch.stack([torch.cat([g, w * time_unit], -1) for _, _, _, g, w, _ in last], dim=1)
+    _, q, qd, g, w, t = steps[-1]
+    with torch.no_grad():
+        anchor = anchor_inputs(anchors, drive, q, qd, g, w, t)
+        phys = drive.operational_anchor(q, qd, g, t)
+        phys["alpha_dt"] = q.new_full((n,), 1.0 - math.exp(-(control_dt / time_unit) / 0.08))
+        up, est, path = plan_from_view(obs[-1][:, -(view * 30 + 27) :], view, skill_mean, skill_std)
+        z_mean, z_std = (torch.as_tensor(checkpoint[k]) for k in ("z_mean", "z_std"))
+        a_mean, a_std = (torch.as_tensor(checkpoint[k]) for k in ("a_mean", "a_std"))
+        _, out_tau = policy(
+            stack_bodies([descriptor], [contacts]).take(torch.zeros(n, dtype=torch.long)),
+            joint_obs, imu, (anchor - a_mean) / a_std, (up - z_mean) / z_std,
+            (up - est[:, None]) / z_std,
+            (torch.arange(1, view + 1) * control_dt / time_unit).expand(n, -1),
+            path, torch.ones(n, view, dtype=torch.bool), phys=phys,
+        )
+        out_rad = drive.targets_from_torque(q, qd, out_tau)
+    torch.testing.assert_close(actions[-1], out_rad[:, action_joints] / 0.25, atol=1e-5, rtol=1e-4)

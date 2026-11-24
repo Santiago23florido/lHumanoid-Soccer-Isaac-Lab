@@ -18,6 +18,7 @@ import numpy as np
 import torch
 from torch import nn
 
+from humanoid_transfer.common.skill_state import SKILL_LAYOUT
 from humanoid_transfer.transfer.latent.pact.model import (
     BodyBatch,
     EmbodimentEncoder,
@@ -28,6 +29,21 @@ from humanoid_transfer.transfer.latent.pact.model import (
 from humanoid_transfer.transfer.latent.pact.tokens import split
 
 SKILL = 27
+_S = {f.name: SKILL_LAYOUT.slice_of(f.name) for f in SKILL_LAYOUT.fields}
+DYNAMIC_Z_INDEX: tuple[int, ...] = tuple(
+    i
+    for name in (
+        "gravity",
+        "base_angular_velocity",
+        "com_velocity",
+        "foot_velocity",
+        "foot_load",
+        "angular_momentum",
+    )
+    for i in range(_S[name].start, _S[name].stop)
+)
+"""20 morphology-invariant dynamic fields of ``z*`` (omits static body-fingerprinting height and
+foot_position) fed to the operational-space impedance head."""
 
 PLAN_LIMIT = 50.0
 """The clamp on a tracker's plan view, normalised units (``tracking/command._PLAN_LIMIT``)."""
@@ -75,6 +91,38 @@ class PactPolicy(nn.Module):
         self.embodiment = EmbodimentEncoder(dims)
         self.state = StateEncoder(dims)
         self.decoder = JointDecoder(dims)
+        if dims.impedance_anchor:
+            w, op_w = dims.width, dims.op_width
+            self.op_step_enc = nn.Sequential(
+                nn.Linear(SKILL + 3 + 1, op_w),
+                nn.LayerNorm(op_w),
+                nn.GELU(),
+                nn.Dropout(0.10),
+                nn.Linear(op_w, op_w),
+            )
+            self.op_step_attn = nn.Linear(op_w, 4)
+            self.op_head = nn.Sequential(
+                nn.Linear(len(DYNAMIC_Z_INDEX) + 12 + 4 * op_w, op_w),
+                nn.LayerNorm(op_w),
+                nn.GELU(),
+                nn.Dropout(0.10),
+                nn.Linear(op_w, op_w),
+                nn.LayerNorm(op_w),
+                nn.GELU(),
+                nn.Dropout(0.10),
+                nn.Linear(op_w, 24),
+            )
+            self.joint_phys = nn.Sequential(
+                nn.Linear(25, w), nn.LayerNorm(w), nn.GELU(), nn.Linear(w, w)
+            )
+            # Tiny near-zero init: starts at exact physical hold while keeping step-0 grad live.
+            nn.init.normal_(self.op_head[-1].weight, std=1e-3)
+            nn.init.zeros_(self.op_head[-1].bias)
+            nn.init.normal_(self.decoder.head[-1].weight, std=1e-3)
+            nn.init.zeros_(self.decoder.head[-1].bias)
+            self.register_buffer(
+                "dyn_idx", torch.as_tensor(DYNAMIC_Z_INDEX, dtype=torch.long), persistent=False
+            )
 
     def forward(
         self,
@@ -87,30 +135,113 @@ class PactPolicy(nn.Module):
         plan_time: torch.Tensor,
         plan_path: torch.Tensor,
         plan_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """``-> (learned (B, 6), targets (B, J))``.
+        *,
+        phys: dict[str, torch.Tensor] | None = None,
+        emb_cached: tuple[torch.Tensor, torch.Tensor] | None = None,
+        return_aux: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+        """``-> (learned (B, 6), targets_or_tau (B, J))``.
 
         ``learned``: CoM velocity, height correction, the two loads (as G-A3's encoder,
-        in whatever normalisation its targets were given); ``targets``: joint position
-        targets, padded joints zero. ``plan`` and ``plan_relative`` are ``(B, H, 27)``.
+        in whatever normalisation its targets were given). When ``dims.impedance_anchor`` is
+        False, the second output is joint position targets in radians from default; when True,
+        it is dimensionless commanded torque in ``m g L`` units (converted analytically to PD
+        targets by :meth:`DriveLoads.targets_from_torque`).
         """
-        embodiment, descriptor = self.embodiment(bodies)
+        if emb_cached is None:
+            embodiment, descriptor = self.embodiment(bodies)
+        else:
+            embodiment, descriptor = emb_cached
+        if self.dims.impedance_anchor and self.training:
+            if self.dims.emb_drop > 0 and embodiment.shape[1] > 0:
+                keep = (
+                    torch.rand(embodiment.shape[0], 1, 1, device=embodiment.device)
+                    > self.dims.emb_drop
+                ).to(embodiment.dtype)
+                embodiment = embodiment * keep
+            if self.dims.desc_noise > 0:
+                descriptor = (
+                    descriptor
+                    + self.dims.desc_noise
+                    * torch.randn_like(descriptor)
+                    * bodies.mask[..., None]
+                )
         anchors = split(anchor_in) if self.dims.anchor_inputs else None
         out = self.state(bodies, descriptor, embodiment, joint_obs, imu, anchors)
-        value_c, value_k = split(plan)
-        delta_c, delta_k = split(plan_relative)
-        targets = self.decoder(
-            bodies,
-            out["joints"],
-            out["latent"],
-            embodiment,
-            torch.cat([value_c, delta_c], dim=-1),
-            torch.cat([value_k, delta_k], dim=-1),
-            plan_time=plan_time,
-            plan_path=plan_path,
-            plan_mask=plan_mask,
-        )
         learned = torch.cat(
             [out["centroid"][:, 1:4], out["centroid"][:, 0:1], out["contacts"][:, :, 6]], dim=1
         )
-        return learned, targets
+        value_c, value_k = split(plan)
+        delta_c, delta_k = split(plan_relative)
+        plan_c = torch.cat([value_c, delta_c], dim=-1)
+        plan_k = torch.cat([value_k, delta_k], dim=-1)
+
+        if not self.dims.impedance_anchor:
+            targets = self.decoder(
+                bodies,
+                out["joints"],
+                out["latent"],
+                embodiment,
+                plan_c,
+                plan_k,
+                plan_time=plan_time,
+                plan_path=plan_path,
+                plan_mask=plan_mask,
+            )
+            return (learned, targets, {}) if return_aux else (learned, targets)
+
+        if phys is None:
+            raise ValueError("impedance_anchor=True requires phys dict (tau_g, j_eff, j_pinv, ...)")
+        tau_g = phys["tau_g"]
+        j_eff = phys["j_eff"]
+        j_pinv = phys["j_pinv"]
+        k_eff = phys["k_eff"]
+        tau_eff = phys["tau_eff_dimless"]
+        alpha_dt = phys["alpha_dt"]
+        w_t = phys["w_t"]
+
+        # 1. Morphology-blind Operational-Space Impedance Anchor (12D force + 12D motion)
+        st_dyn = anchor_in.index_select(1, self.dyn_idx)
+        sf = torch.cat([plan_relative, plan_path, plan_time[..., None]], dim=-1)
+        h_op = self.op_step_enc(sf)
+        logits = self.op_step_attn(h_op).masked_fill(~plan_mask[..., None], -1e4)
+        pooled = torch.einsum("bhk,bhw->bkw", torch.softmax(logits, dim=1), h_op).reshape(
+            h_op.shape[0], -1
+        )
+        op_out = self.op_head(torch.cat([st_dyn, w_t, pooled], dim=-1))
+        w_cmd, x_cmd = op_out[:, :12], op_out[:, 12:]
+
+        cmd_r = joint_obs[:, :, -1, 2]
+        tau_t_eff = torch.atanh(cmd_r.clamp(-0.98, 0.98)) * tau_eff
+        tau_anchor = (
+            tau_t_eff
+            - alpha_dt[:, None] * torch.einsum("njk,nk->nj", j_eff, w_cmd)
+            + alpha_dt[:, None] * k_eff * torch.einsum("njk,nk->nj", j_pinv, x_cmd)
+        ) * bodies.mask
+
+        # 2. Actuator-relative bounded residual decoder (BoT-Mix graph-local + global)
+        phys_feat = torch.cat([tau_g[..., None], j_eff, j_pinv], dim=-1)
+        joints_tok = out["joints"] + self.joint_phys(phys_feat) * bodies.mask[..., None]
+        delta_raw = self.decoder(
+            bodies,
+            joints_tok,
+            out["latent"],
+            embodiment,
+            plan_c,
+            plan_k,
+            plan_time=plan_time,
+            plan_path=plan_path,
+            plan_mask=plan_mask,
+            bot_mix=True,
+        )
+        is_leg = (j_eff.abs().sum(-1) > 1e-4).to(delta_raw.dtype)
+        cap = is_leg * self.dims.leg_cap + (1.0 - is_leg) * self.dims.arm_cap
+        delta_rel = cap * torch.tanh(delta_raw / cap)
+        total_tau = (tau_anchor + delta_rel * tau_eff) * bodies.mask
+        if return_aux:
+            return learned, total_tau, {
+                "tau_anchor": tau_anchor,
+                "delta_rel": delta_rel,
+                "op_out": op_out,
+            }
+        return learned, total_tau

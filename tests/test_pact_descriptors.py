@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from humanoid_transfer.transfer.latent.pact.descriptors import (
     BODY_FEATURES,
+    EFFORT_LIMIT_CLIP,
     JOINT_FEATURES,
     describe,
 )
@@ -76,6 +77,8 @@ def test_every_registered_body_has_a_finite_descriptor(body):
     assert descriptor.body.shape == (len(BODY_FEATURES),)
     assert np.isfinite(descriptor.joints).all()
     assert np.isfinite(descriptor.body).all()
+    effort = descriptor.joints[:, JOINT_FEATURES.index("effort_limit")]
+    assert (effort <= EFFORT_LIMIT_CLIP + 1e-9).all()
     axes = descriptor.joints[:, [JOINT_FEATURES.index(f"axis.{a}") for a in "xyz"]]
     np.testing.assert_allclose(np.linalg.norm(axes, axis=1), 1.0, atol=1e-5)
 

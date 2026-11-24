@@ -93,6 +93,20 @@ class PactDims:
     value and as its difference to the current estimate, and each step's path (where the
     reference will be: CoM ahead and sideways in leg lengths, heading in radians). Steps a
     body does not have are masked."""
+    impedance_anchor: bool = False
+    """Dual Operational-Space Impedance Anchor (PACT v2): morphology-blind force+motion head
+    projected analytically through ``J_eff`` and ``J_pinv`` + actuator-relative bounded residual
+    decoder (BoT-Mix local/global graph attention) in dimensionless ``m g L`` torque units."""
+    op_width: int = 256
+    """Hidden width of the morphology-blind operational-space impedance head."""
+    leg_cap: float = 0.8
+    """Soft tanh cap (in ``tau_eff`` units) on the joint residual for leg joints."""
+    arm_cap: float = 1.5
+    """Soft tanh cap (in ``tau_eff`` units) on the joint residual for non-leg joints."""
+    emb_drop: float = 0.25
+    """Whole-sample embodiment drop probability during training (prevents body-ID overfitting)."""
+    desc_noise: float = 0.05
+    """Gaussian jitter std on joint descriptor tokens during training."""
 
 
 @dataclass
@@ -429,10 +443,13 @@ class JointDecoder(nn.Module):
         plan_time: torch.Tensor | None = None,
         plan_path: torch.Tensor | None = None,
         plan_mask: torch.Tensor | None = None,
+        bot_mix: bool = False,
     ) -> torch.Tensor:
         """``-> (B, J)`` joint position targets (padded joints are zero).
 
         ``plan_mask (B, H)``: True on the plan steps a body has (all when None).
+        ``bot_mix``: restrict layer-0 joint self-attention to 2-hop kinematic neighbours
+        (``distance <= 2``) while keeping deeper layers global.
         """
         plan = self.plan_tokens(joints, bodies, plan_centroid, plan_contacts, plan_time, plan_path)
         memory = torch.cat([latent, plan, embodiment], dim=1)
@@ -449,9 +466,13 @@ class JointDecoder(nn.Module):
             )
         bias = self.bias(bodies.distance, bodies.ancestor)
         x = joints
-        for cross, own in zip(self.cross, self.self_attention, strict=True):
+        for li, (cross, own) in enumerate(zip(self.cross, self.self_attention, strict=True)):
             x = cross(x, memory=memory, key_mask=memory_mask)
-            x = own(x, bias=bias, key_mask=bodies.mask)
+            if bot_mix and li == 0:
+                local_bias = bias.masked_fill(~(bodies.distance <= 2)[:, None, :, :], -1e4)
+                x = own(x, bias=local_bias, key_mask=bodies.mask)
+            else:
+                x = own(x, bias=bias, key_mask=bodies.mask)
         return self.head(x)[..., 0] * bodies.mask
 
 

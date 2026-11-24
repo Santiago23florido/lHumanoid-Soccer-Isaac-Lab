@@ -186,6 +186,11 @@ class PactActorCfg:
     action_scale: float = 1.0
     arm: str = "etune"
     init_std: float = 0.2
+    drive_stiffness: list | None = None
+    drive_damping: list | None = None
+    drive_effort_limit: list | None = None
+    default_joint_pos: list | None = None
+    sole_points: list | None = None
 
 
 def main() -> int:
@@ -233,6 +238,7 @@ def main() -> int:
         from humanoid_transfer.transfer.latent.contract import load_contract
 
         norm = load_contract(term.cfg.observe_units, inner.device).generator.skill_norm
+    drives = drive_parameters(inner.scene["robot"])
     agent_cfg.actor = PactActorCfg(
         checkpoint=str(args.pact_model.resolve()),
         repo=str(REPO),
@@ -245,6 +251,11 @@ def main() -> int:
         action_scale=scale,
         arm=args.arm,
         init_std=args.init_std,
+        drive_stiffness=drives["drive_stiffness"].tolist() if drives is not None else None,
+        drive_damping=drives["drive_damping"].tolist() if drives is not None else None,
+        drive_effort_limit=drives["drive_effort_limit"].tolist() if drives is not None else None,
+        default_joint_pos=default.cpu().tolist(),
+        sole_points=sole_override(args.body),
     )
     agent_cfg.algorithm.symmetry_cfg = None
     agent_cfg.algorithm.learning_rate = args.learning_rate

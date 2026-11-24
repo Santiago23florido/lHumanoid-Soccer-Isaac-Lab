@@ -71,7 +71,9 @@ cross the start of an episode begun inside the capture therefore repeat that rea
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -84,6 +86,7 @@ sys.path.insert(0, str(REPO / "source" / "humanoid_transfer"))
 sys.path.insert(0, str(REPO / "transfer" / "scripts"))
 
 import torch  # noqa: E402
+from humanoid_transfer.common.skill_state import SKILL_LAYOUT  # noqa: E402
 from humanoid_transfer.transfer.latent.pact.actor import (  # noqa: E402
     BodyResidual,
     bias_and_norm,
@@ -93,6 +96,7 @@ from humanoid_transfer.transfer.latent.pact.anchors import (  # noqa: E402
     KinematicAnchors,
 )
 from humanoid_transfer.transfer.latent.pact.descriptors import (  # noqa: E402
+    EFFORT_LIMIT_CLIP,
     GRAVITY,
     contact_joints,
     describe,
@@ -143,29 +147,42 @@ ADAPT_ARMS = {
 }
 
 
-def drive_gain(drives: tuple) -> np.ndarray:
-    """``(J,)`` kp / tau_max: the commanded torque, in units of the joint's limit, per radian of
-    target (0 for a joint whose drive has no stiffness or no torque: not controlled)."""
+def _effective_effort(tau: np.ndarray, effort_cap: float | None) -> np.ndarray:
+    """Cap unlimited drive effort limits (e.g. Digit's FLT_MAX) at ``EFFORT_LIMIT_CLIP * m g L``."""
+    return tau if effort_cap is None else np.minimum(tau, effort_cap)
+
+
+def drive_gain(drives: tuple, effort_cap: float | None = None) -> np.ndarray:
+    """``(J,)`` kp / tau_eff: the commanded torque, in units of the joint's effective limit, per
+    radian of target (0 for a joint whose drive has no stiffness or no torque: not controlled)."""
     kp, _, tau = (np.asarray(x, dtype=np.float64) for x in drives)
+    tau = _effective_effort(tau, effort_cap)
     active = (kp > 0) & (tau > 0)
     return np.where(active, kp / np.where(active, tau, 1.0), 0.0).astype(np.float32)
 
 
-def drive_offset(q: np.ndarray, qd: np.ndarray, q0: np.ndarray, drives: tuple) -> np.ndarray:
+def drive_offset(
+    q: np.ndarray, qd: np.ndarray, q0: np.ndarray, drives: tuple, effort_cap: float | None = None
+) -> np.ndarray:
     """``(..., J)`` the commanded torque ratio of the target ``q0`` at state ``(q, qd)``, so that
-    ``drive_gain * (T - q0) + drive_offset`` is ``(kp (T - q) - kd qd) / tau_max``."""
+    ``drive_gain * (T - q0) + drive_offset`` is ``(kp (T - q) - kd qd) / tau_eff``."""
     kp, kd, tau = (np.asarray(x, dtype=np.float64) for x in drives)
+    tau = _effective_effort(tau, effort_cap)
     active = (kp > 0) & (tau > 0)
     safe = np.where(active, tau, 1.0)
     return np.where(active, (kp * (q0 - q) - kd * qd) / safe, 0.0).astype(np.float32)
 
 
-def drive_ratio(target: np.ndarray, q: np.ndarray, qd: np.ndarray, drives: tuple) -> np.ndarray:
-    """The torque a target commands, as a fraction of the joint's limit and softly saturated:
-    ``tanh((kp (T - q) - kd qd) / tau_max)`` (prereg, "Labels", 2026-11-22). Every target past the
-    drive's saturation reads about +-1, whatever its size; a joint without a drive reads 0. The
-    shared models see their target history this way, and are trained on it (``drive_loss``)."""
-    return np.tanh(drive_gain(drives) * (target - q) + drive_offset(q, qd, q, drives)).astype(np.float32)
+def drive_ratio(
+    target: np.ndarray, q: np.ndarray, qd: np.ndarray, drives: tuple, effort_cap: float | None = None
+) -> np.ndarray:
+    """The torque a target commands, as a fraction of the joint's effective limit and softly
+    saturated: ``tanh((kp (T - q) - kd qd) / tau_eff)`` (prereg, "Labels", 2026-11-22). Every
+    target past the drive's saturation reads about +-1, whatever its size; a joint without a
+    drive reads 0. Unlimited drives are capped at ``effort_cap = EFFORT_LIMIT_CLIP * m g L``."""
+    return np.tanh(
+        drive_gain(drives, effort_cap) * (target - q) + drive_offset(q, qd, q, drives, effort_cap)
+    ).astype(np.float32)
 
 
 def drive_loss(
@@ -225,13 +242,14 @@ class BodyData:
     joints. The offline metric reads the map capture's test probes only (``evaluate``).
     """
 
-    def __init__(self, body, args, registry):
+    def __init__(self, body, args, registry, device: torch.device | str = "cpu"):
         entry = registry[body]
         card = json.loads((REPO / entry["card"]).read_text("utf-8"))
         unit = entry.get("leg_length_unit")
         self.descriptor = describe(card, leg_length=unit)
         self.contacts = contact_joints(card)
-        self.anchors = KinematicAnchors(card, unit, sole_override(body))
+        self.device = torch.device(device)
+        self.anchors = KinematicAnchors(card, unit, sole_override(body)).to(self.device)
         self.time_unit = float(np.sqrt(self.descriptor.leg_length / GRAVITY))
         self.card, self.name = card, body
         contract = dict(c.split("=") for c in args.contracts.split(","))[body]
@@ -250,12 +268,21 @@ class BodyData:
         for i, part in enumerate(parts):
             part["group"] = i * 1000 + part["group"]
             part["evaluate"] = part["test"] & (i == 0) & ~part["start"]
+        static_keys = (
+            "view",
+            "times",
+            "controlled",
+            "drive_gain",
+            "leg_mask",
+            "tau_eff_dimless",
+            "k_eff",
+            "alpha_dt",
+        )
         for key in parts[0]:
-            if key not in ("view", "times", "controlled", "drive_gain"):
+            if key not in static_keys:
                 setattr(self, key, np.concatenate([part[key] for part in parts]))
-        self.view, self.times = parts[0]["view"], parts[0]["times"]
-        self.controlled = parts[0]["controlled"]
-        self.drive_gain = parts[0]["drive_gain"]
+        for key in static_keys:
+            setattr(self, key, parts[0][key])
         self.captures = [str(path.relative_to(REPO)) for path in paths]
         self.capture_samples = [int(len(part["label"])) for part in parts]
         q0 = np.asarray(np.load(paths[0])["default_joint_pos"], dtype=np.float32)
@@ -281,10 +308,11 @@ class BodyData:
         vel = data["joint_vel"]
         qd = vel * self.time_unit
         gains = tuple(np.asarray(data[k]) for k in DRIVES)
+        effort_cap = float(EFFORT_LIMIT_CLIP * self.descriptor.mass * GRAVITY * self.descriptor.leg_length)
         cols = env[:, None]
         q_w, qd_w = q[rows, cols], qd[rows, cols]  # (N, h, J)
         # The target history as the torque it commands (drive_ratio), bounded and saturation-free.
-        command_w = drive_ratio(target[rows, cols], q_w, vel[rows, cols], gains)
+        command_w = drive_ratio(target[rows, cols], q_w, vel[rows, cols], gains, effort_cap)
         out: dict = {}
         out["joint_obs"] = (
             np.stack([q_w - q0, qd_w, command_w], axis=-1)
@@ -295,16 +323,64 @@ class BodyData:
             [data["projected_gravity"], data["base_ang_vel"] * self.time_unit], axis=-1
         )
         out["imu"] = imu[rows, cols].astype(np.float32)
-        w = SimpleNamespace(
-            joint_obs=np.stack([q_w, qd_w], axis=-1).transpose(0, 2, 1, 3).astype(np.float32),
-            imu=out["imu"],
-            z=data["skill_state"][t, env].astype(np.float32),
-            extra={"joint_pos_target": target[t, env].astype(np.float32)},
-        )
-        drive = DriveLoads(self.card, self.anchors)
+        z_true = data["skill_state"][t, env].astype(np.float32)
+
+        # Compute kinematic anchors, drive loads, and operational-space impedance anchors on device.
+        drive = DriveLoads(self.card, self.anchors).to(self.device)
         drive.set_drives(*(np.asarray(data[k]) for k in DRIVES))
-        analytic = analytic_z(self.anchors, w, self.time_unit)
-        physics = physics_bases(drive, w, analytic, self.time_unit)
+        s_map = {f.name: SKILL_LAYOUT.slice_of(f.name) for f in SKILL_LAYOUT.fields}
+        q_cur = q[t, env].astype(np.float32)
+        vel_cur = vel[t, env].astype(np.float32)
+        g_cur = data["projected_gravity"][t, env].astype(np.float32)
+        w_cur = data["base_ang_vel"][t, env].astype(np.float32)
+        tgt_cur = target[t, env].astype(np.float32)
+        cmd_cur = command_w[:, -1, :].astype(np.float32)
+        n_rows, n_joints = len(t), len(q0)
+        analytic = np.empty((n_rows, SKILL), np.float32)
+        loads = np.empty((n_rows, 2), np.float32)
+        need_op = not getattr(args, "no_impedance_anchor", False)
+        tau_g_arr = np.empty((n_rows, n_joints), np.float16) if need_op else None
+        j_eff_arr = np.empty((n_rows, n_joints, 12), np.float16) if need_op else None
+        j_pinv_arr = np.empty((n_rows, n_joints, 12), np.float16) if need_op else None
+        w_t_arr = np.empty((n_rows, 12), np.float16) if need_op else None
+        chunk = 8192 if self.device.type == "cuda" else 4096
+        with torch.no_grad():
+            for s0 in range(0, n_rows, chunk):
+                s1 = min(n_rows, s0 + chunk)
+                qt = torch.as_tensor(q_cur[s0:s1], device=self.device)
+                qdt = torch.as_tensor(vel_cur[s0:s1], device=self.device)
+                gt = torch.as_tensor(g_cur[s0:s1], device=self.device)
+                wt = torch.as_tensor(w_cur[s0:s1], device=self.device)
+                tt = torch.as_tensor(tgt_cur[s0:s1], device=self.device)
+                a = self.anchors(qt, qdt, gt, wt)
+                z_a = qt.new_zeros(s1 - s0, SKILL)
+                z_a[:, s_map["height"]] = a["height"]
+                z_a[:, s_map["gravity"]] = a["gravity"]
+                z_a[:, s_map["base_angular_velocity"]] = a["base_angular_velocity"]
+                z_a[:, s_map["foot_position"]] = a["foot_position"].reshape(-1, 6)
+                z_a[:, s_map["foot_velocity"]] = a["foot_velocity_relative"].reshape(-1, 6)
+                z_a[:, s_map["angular_momentum"]] = a["angular_momentum"]
+                analytic[s0:s1] = z_a.cpu().numpy()
+                loads[s0:s1] = drive(qt, qdt, gt, target=tt)["loads"].cpu().numpy()
+                if need_op:
+                    cr = torch.as_tensor(cmd_cur[s0:s1], device=self.device)
+                    op = drive.operational_anchor_from_ratio(qt, gt, cr)
+                    tau_g_arr[s0:s1] = op["tau_g"].cpu().numpy().astype(np.float16)
+                    j_eff_arr[s0:s1] = op["j_eff"].cpu().numpy().astype(np.float16)
+                    j_pinv_arr[s0:s1] = op["j_pinv"].cpu().numpy().astype(np.float16)
+                    w_t_arr[s0:s1] = op["w_t"].cpu().numpy().astype(np.float16)
+        weights = np.clip(loads, 0.0, None)
+        tot = weights.sum(-1, keepdims=True)
+        weights = np.where(tot > 0.05, weights / np.maximum(tot, 1e-9), 0.5)
+        rel_v = analytic[:, s_map["foot_velocity"]].reshape(-1, 2, 3)
+        odometry = -(weights[..., None] * rel_v).sum(1)
+        physics = np.concatenate([odometry, loads], axis=1).astype(np.float32)
+        tau_eff_t, k_eff_t, leg_t = drive.operational_params()
+        if need_op:
+            out["tau_g"] = tau_g_arr
+            out["j_eff"] = j_eff_arr
+            out["j_pinv"] = j_pinv_arr
+            out["w_t"] = w_t_arr
 
         relabelled = None
         if args.labels:  # another teacher's actions on the same states (pact_relabel.py)
@@ -327,16 +403,19 @@ class BodyData:
         else:
             label = target[t + 1, env] - q0
             controlled = target.reshape(-1, target.shape[-1]).std(0) > 1e-6
-        controlled = controlled & (drive_gain(gains) > 0)
+        controlled = controlled & (drive_gain(gains, effort_cap) > 0)
         out["label"] = label.astype(np.float32)
         out["hold"] = (target[t, env] - q0).astype(np.float32)
         out["controlled"] = controlled
+        out["leg_mask"] = leg_t.cpu().numpy() & controlled
+        out["tau_eff_dimless"] = tau_eff_t.cpu().numpy().astype(np.float32)
+        out["k_eff"] = k_eff_t.cpu().numpy().astype(np.float32)
         # Each sample's drive: the loss compares the torques targets command (drive_loss).
-        out["drive_offset"] = drive_offset(q[t, env], vel[t, env], q0, gains)
-        out["drive_gain"] = drive_gain(gains)
+        out["drive_offset"] = drive_offset(q_cur, vel_cur, q0, gains, effort_cap)
+        out["drive_gain"] = drive_gain(gains, effort_cap)
         out["anchor_in"] = with_physics(analytic, physics)
-        out["learned"] = residual_targets(w.z, analytic, physics)
-        out["z"] = w.z
+        out["learned"] = residual_targets(z_true, analytic, physics)
+        out["z"] = z_true
         out["start"] = start
         mean, std = self.skill
         obs = data["policy_obs"]
@@ -355,6 +434,7 @@ class BodyData:
         out["view"] = view
         dt_star = float(data["control_dt"]) / self.time_unit
         out["times"] = (np.arange(1, view + 1) * dt_star).astype(np.float32)
+        out["alpha_dt"] = float(1.0 - math.exp(-dt_star / 0.08))
         out["group"] = env.astype(np.int64)
         if "probe_index" in data.files:
             probe = data["probe_index"][env]
@@ -484,7 +564,12 @@ def main() -> int:
     parser.add_argument(
         "--probes", type=int, default=0, help="with --adapt: the body's training probes (0: all)"
     )
-    parser.add_argument("--anchor-weight", type=float, default=1.0)
+    parser.add_argument("--anchor-weight", type=float, default=None)
+    parser.add_argument(
+        "--no-impedance-anchor",
+        action="store_true",
+        help="legacy v1 radian decoder without the operational-space impedance anchor",
+    )
     parser.add_argument(
         "--labels",
         default="",
@@ -509,13 +594,21 @@ def main() -> int:
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
     device = torch.device(args.device)
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+    init = torch.load(args.init, map_location="cpu", weights_only=False) if args.init else None
+    if init is not None and init.get("kind", "pact") == "pact":
+        # Follow the --init checkpoint's architecture (v1 vs v2) automatically.
+        if not init.get("dims", {}).get("impedance_anchor", False):
+            args.no_impedance_anchor = True
     arms = args.arms.split(",")
     registry = json.loads((REPO / "transfer/bodies/bodies.json").read_text("utf-8"))
     names = [b for b in args.bodies.split(",") if b]
     bodies = []
     for body in names:
         start = time.time()
-        bodies.append(BodyData(body, args, registry))
+        bodies.append(BodyData(body, args, registry, device=device))
         b = bodies[-1]
         print(
             f"{body}: {len(b.label)} samples, view {b.view}, controlled "
@@ -528,7 +621,6 @@ def main() -> int:
     def pooled(key):
         return np.concatenate([getattr(bodies[i], key)[train_rows[i]] for i in train_index])
 
-    init = torch.load(args.init, map_location="cpu", weights_only=False) if args.init else None
     added, probes_used = None, None
     if args.adapt:
         if init is None or not args.hold_out or init.get("hold_out") != args.hold_out:
@@ -563,12 +655,33 @@ def main() -> int:
     count = table.mask.shape[1]
     steps_max = max(b.view for b in bodies)
     controlled = torch.zeros(len(bodies), count, dtype=torch.bool, device=device)
+    leg_table = torch.zeros(len(bodies), count, dtype=torch.bool, device=device)
     gain_table = torch.zeros(len(bodies), count, device=device)
+    teff_table = torch.ones(len(bodies), count, device=device)
+    inv_teff_table = torch.zeros(len(bodies), count, device=device)
+    keff_table = torch.zeros(len(bodies), count, device=device)
+    alpha_table = torch.tensor([b.alpha_dt for b in bodies], dtype=torch.float32, device=device)
+    body_var_vals = []
     for i, b in enumerate(bodies):
-        controlled[i, : len(b.controlled)] = torch.as_tensor(b.controlled, device=device)
-        gain_table[i, : len(b.drive_gain)] = torch.as_tensor(b.drive_gain, device=device)
+        j = len(b.controlled)
+        controlled[i, :j] = torch.as_tensor(b.controlled, device=device)
+        leg_table[i, :j] = torch.as_tensor(b.leg_mask, device=device)
+        gain_table[i, :j] = torch.as_tensor(b.drive_gain, device=device)
+        teff_table[i, :j] = torch.as_tensor(b.tau_eff_dimless, device=device)
+        inv_teff_table[i, :j] = torch.as_tensor(
+            np.where(b.controlled, 1.0 / np.maximum(b.tau_eff_dimless, 1e-6), 0.0), device=device
+        )
+        keff_table[i, :j] = torch.as_tensor(b.k_eff, device=device)
+        tr_i = train_rows[i]
+        ctrl = b.controlled
+        taught_tr = np.tanh(b.drive_gain[ctrl] * b.label[tr_i][:, ctrl] + b.drive_offset[tr_i][:, ctrl])
+        body_var_vals.append(max(float(taught_tr.var(0).mean()), 1e-3))
+    body_var_table = torch.tensor(body_var_vals, dtype=torch.float32, device=device)
+    arm_table = controlled & (~leg_table)
 
-    def batch(i: int, rows: np.ndarray, augment: bool = False) -> dict[str, torch.Tensor]:
+    def batch(
+        i: int, rows: np.ndarray, augment: bool = False, include_phys: bool = False
+    ) -> dict[str, torch.Tensor]:
         b = bodies[i]
         n, j, v = len(rows), b.joint_obs.shape[1], b.view
         raw = {
@@ -582,10 +695,15 @@ def main() -> int:
             "drive_offset": b.drive_offset[rows],
             "learned": b.learned[rows],
         }
+        if include_phys:
+            raw["tau_g"] = b.tau_g[rows].astype(np.float32)
+            raw["j_eff"] = b.j_eff[rows].astype(np.float32)
+            raw["j_pinv"] = b.j_pinv[rows].astype(np.float32)
+            raw["w_t"] = b.w_t[rows].astype(np.float32)
         if augment and args.mirror:  # each sample or its mirror image, at random
             flip = rng.random(n) < 0.5
             m = b.mirror
-            for key, reflect in (
+            ops = [
                 ("joint_obs", m.joint_obs),
                 ("imu", m.imu),
                 ("anchor_in", m.skill),
@@ -593,9 +711,17 @@ def main() -> int:
                 ("relative", m.skill),
                 ("path", m.path),
                 ("label", m.positions),
-                ("drive_offset", m.positions),
+                ("drive_offset", lambda x, m=m, g=b.drive_gain: m.speeds(x) - g * m.offset),
                 ("learned", m.learned),
-            ):
+            ]
+            if include_phys:
+                ops += [
+                    ("tau_g", m.speeds),
+                    ("j_eff", m.jacobian),
+                    ("j_pinv", m.jacobian),
+                    ("w_t", m.wrench),
+                ]
+            for key, reflect in ops:
                 raw[key] = raw[key].copy()
                 raw[key][flip] = reflect(raw[key][flip])
         obs = np.zeros((n, count, args.history, 3), np.float32)
@@ -614,7 +740,7 @@ def main() -> int:
         label[:, :j] = raw["label"]
         offset = np.zeros((n, count), np.float32)
         offset[:, :j] = raw["drive_offset"]
-        return {
+        out_d = {
             "joint_obs": as_t(obs),
             "imu": as_t(raw["imu"]),
             "anchor_in": as_t((raw["anchor_in"] - a_mean) / a_std),
@@ -627,6 +753,18 @@ def main() -> int:
             "drive_offset": as_t(offset),
             "learned": as_t((raw["learned"] - t_mean) / t_std),
         }
+        if include_phys:
+            tg = np.zeros((n, count), np.float32)
+            tg[:, :j] = raw["tau_g"]
+            je = np.zeros((n, count, 12), np.float32)
+            je[:, :j] = raw["j_eff"]
+            jp = np.zeros((n, count, 12), np.float32)
+            jp[:, :j] = raw["j_pinv"]
+            out_d["tau_g"] = as_t(tg)
+            out_d["j_eff"] = as_t(je)
+            out_d["j_pinv"] = as_t(jp)
+            out_d["w_t"] = as_t(raw["w_t"])
+        return out_d
 
     def fit(model: nn.Module, step_fn, label: str, tuned: list | None = None) -> float:
         tuned = list(model.parameters()) if tuned is None else tuned
@@ -663,20 +801,29 @@ def main() -> int:
         raise ValueError(
             "--init continues one model: give one of pact_d, pact_na, pact_nb, urma_d, hpt_d"
         )
+    amp_ctx = (
+        (lambda: torch.amp.autocast("cuda", dtype=torch.bfloat16))
+        if device.type == "cuda"
+        else contextlib.nullcontext
+    )
     for arm in shared:
+        use_imp = False
         if arm in ("pact_d", "pact_na", "pact_nb"):
             kind = "pact"
             anchored = arm != "pact_na"
+            use_imp = anchored and not args.no_impedance_anchor
             dims = PactDims(
                 observation=3,
                 history=args.history,
                 width=args.width,
                 anchor_inputs=anchored,
                 timed_plan=True,
+                impedance_anchor=use_imp,
                 **({"body_tokens": 0} if arm == "pact_nb" else {}),
             )
             model = PactPolicy(dims).to(device)
-            anchor_weight = args.anchor_weight if anchored else 0.0
+            default_aw = 0.1 if use_imp else 1.0
+            anchor_weight = (args.anchor_weight if args.anchor_weight is not None else default_aw) if anchored else 0.0
         elif arm == "urma_d":
             kind = "urma"
             dims = UrmaDims(history=args.history, plan_steps=steps_max)
@@ -709,19 +856,74 @@ def main() -> int:
             """HPT routes each row to its body's stem and head."""
             return {"body_ids": which} if kind == "hpt" else {}
 
-        def step_shared(model=model, anchor_weight=anchor_weight, routed=routed, per=per):
-            parts = [batch(i, rng.choice(train_rows[i], per), augment=True) for i in train_index]
+        def step_shared(
+            model=model,
+            anchor_weight=anchor_weight,
+            routed=routed,
+            per=per,
+            kind=kind,
+            use_imp=use_imp,
+        ):
+            parts = [
+                batch(i, rng.choice(train_rows[i], per), augment=True, include_phys=use_imp)
+                for i in train_index
+            ]
             x = {k: torch.cat([p[k] for p in parts]) for k in parts[0]}
             which = torch.cat(
                 [torch.full((per,), i, device=device, dtype=torch.long) for i in train_index]
             )
             label, learned, offset = x.pop("label"), x.pop("learned"), x.pop("drive_offset")
-            out_learned, out = model(table.take(which), **x, **routed(which))
-            bc = drive_loss(out, label, gain_table[which], offset, controlled[which])
-            if anchor_weight == 0.0:
-                return bc
-            anchor = (out_learned - learned).square().mean()
-            return bc + anchor_weight * anchor
+            b_batch = table.take(which)
+            moved = controlled[which]
+            bvar = body_var_table[which]
+            extra = routed(which)
+            if use_imp:
+                phys = {
+                    "tau_g": x.pop("tau_g"),
+                    "j_eff": x.pop("j_eff"),
+                    "j_pinv": x.pop("j_pinv"),
+                    "w_t": x.pop("w_t"),
+                    "k_eff": keff_table[which],
+                    "tau_eff_dimless": teff_table[which],
+                    "alpha_dt": alpha_table[which],
+                }
+                if not args.adapt:
+                    noise = 0.05 * torch.randn_like(x["joint_obs"][:, :, -1, 2]) * b_batch.mask
+                    x["joint_obs"] = x["joint_obs"].clone()
+                    x["joint_obs"][:, :, -1, 2] = (x["joint_obs"][:, :, -1, 2] + noise).clamp(-0.98, 0.98)
+                extra["phys"] = phys
+                extra["return_aux"] = True
+            with amp_ctx():
+                if kind == "pact" and not isinstance(model.embodiment, BodyResidual):
+                    e_all, d_all = model.embodiment(table)
+                    extra["emb_cached"] = (e_all[which], d_all[which])
+                res = model(b_batch, **x, **extra)
+                if use_imp:
+                    out_learned, out_tau, aux = res
+                    taught_r = torch.tanh(gain_table[which] * label + offset)
+                    pred_r = torch.tanh(out_tau * inv_teff_table[which])
+                    anc_r = torch.tanh(aux["tau_anchor"] * inv_teff_table[which])
+                    per_all = ((pred_r - taught_r).square() * moved).sum(1) / moved.sum(1).clamp_min(1)
+                    bc = (per_all / bvar).mean() * 0.05
+                    leg_m = leg_table[which]
+                    arm_m = arm_table[which]
+                    per_anc = ((anc_r - taught_r).square() * leg_m).sum(1) / leg_m.sum(1).clamp_min(1)
+                    bc_anc = (per_anc / bvar).mean() * 0.05
+                    reg_leg = aux["delta_rel"].square()[leg_m].mean() if leg_m.any() else 0.0
+                    reg_arm = aux["delta_rel"].square()[arm_m].mean() if arm_m.any() else 0.0
+                    reg_op = aux["op_out"].square().mean()
+                    loss = bc + 0.5 * bc_anc + 0.05 * reg_leg + 0.02 * reg_arm + 2e-4 * reg_op
+                    if anchor_weight > 0.0:
+                        loss = loss + anchor_weight * (out_learned - learned).square().mean()
+                    return loss
+                out_learned, out = res
+                taught_r = torch.tanh(gain_table[which] * label + offset)
+                pred_r = torch.tanh(gain_table[which] * out + offset)
+                per_all = ((pred_r - taught_r).square() * moved).sum(1) / moved.sum(1).clamp_min(1)
+                bc = (per_all / bvar).mean() * 0.05
+                if anchor_weight == 0.0:
+                    return bc
+                return bc + anchor_weight * (out_learned - learned).square().mean()
 
         seconds[arm] = fit(model, step_shared, arm, tuned)
         model.eval()
@@ -733,11 +935,38 @@ def main() -> int:
                 continue  # a body HPT was not trained on has an untrained stem and head
             out = []
             with torch.no_grad():
+                e_all, d_all = (
+                    model.embodiment(table)
+                    if kind == "pact" and not isinstance(model.embodiment, BodyResidual)
+                    else (None, None)
+                )
                 for rows in chunks(np.nonzero(b.evaluate)[0]):
-                    x = batch(i, rows)
-                    x.pop("label"), x.pop("learned"), x.pop("drive_offset")
+                    x = batch(i, rows, include_phys=use_imp)
+                    x.pop("label"), x.pop("learned")
+                    off = x.pop("drive_offset")
                     which = torch.full((len(rows),), i, device=device, dtype=torch.long)
-                    targets = model(table.take(which), **x, **routed(which))[1]
+                    extra = routed(which)
+                    if e_all is not None:
+                        extra["emb_cached"] = (e_all[which], d_all[which])
+                    if use_imp:
+                        extra["phys"] = {
+                            "tau_g": x.pop("tau_g"),
+                            "j_eff": x.pop("j_eff"),
+                            "j_pinv": x.pop("j_pinv"),
+                            "w_t": x.pop("w_t"),
+                            "k_eff": keff_table[which],
+                            "tau_eff_dimless": teff_table[which],
+                            "alpha_dt": alpha_table[which],
+                        }
+                    with amp_ctx():
+                        pred = model(table.take(which), **x, **extra)[1]
+                    if use_imp:
+                        # Exact analytic PD target inversion (same as DriveLoads.targets_from_torque)
+                        u_cmd = (pred.float() * inv_teff_table[which]).clamp(-3.0, 3.0)
+                        g_safe = gain_table[which].clamp_min(1e-6)
+                        targets = torch.where(controlled[which], (u_cmd - off) / g_safe, 0.0)
+                    else:
+                        targets = pred.float()
                     out.append(targets[:, : len(b.controlled)].cpu().numpy())
             predictions[arm][i] = np.concatenate(out)
         prefix = PREFIX[arm]
@@ -845,6 +1074,10 @@ def main() -> int:
         gain, offset = b.drive_gain[moved], b.drive_offset[b.evaluate][:, moved]
         taught = np.tanh(gain * truth + offset)
         variance_torque = float(taught.var(0).mean())
+        if variance_torque <= 1e-12:
+            raise ValueError(
+                f"{b.name}: zero label torque variance ({variance_torque}); check effort cap and controlled joints"
+            )
         entry: dict = {
             "held_out": b.name == args.hold_out,
             "view": b.view,

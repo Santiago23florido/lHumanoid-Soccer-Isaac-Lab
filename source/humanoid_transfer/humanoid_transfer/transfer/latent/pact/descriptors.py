@@ -32,6 +32,12 @@ VELOCITY_LIMIT_CLIP = 100.0
 (the G1's tightest is 5.2, the NAO's knee 1.0); unlimited joints (H1's implicit
 drives report ``inf``) are clipped here."""
 
+EFFORT_LIMIT_CLIP = 2.0
+"""A joint torque limit above this many ``m g L`` never binds a walking gait (measured peak
+across all five bipeds' walking probes is 1.05 ``m g L``, and every bounded body sits at or
+below 1.45 ``m g L``); unlimited drives (Digit's implicit drives report ``FLT_MAX ~ 3.4e38``)
+are clipped here in both the descriptor and the commanded-torque ratio."""
+
 JOINT_FEATURES: tuple[str, ...] = (
     "position.x",
     "position.y",
@@ -59,7 +65,7 @@ JOINT_FEATURES: tuple[str, ...] = (
 - ``position``: the joint's origin relative to the base body, over ``L``;
 - ``axis``: its unit axis in the base frame of the zero pose;
 - ``limit``, ``default_position``: radians (already dimensionless);
-- ``effort_limit``: over ``m g L``;
+- ``effort_limit``: over ``m g L``, clipped at :data:`EFFORT_LIMIT_CLIP`;
 - ``velocity_limit``: the tighter of the drive's and PhysX's, times ``sqrt(L/g)``,
   clipped at :data:`VELOCITY_LIMIT_CLIP`;
 - ``stiffness``: over ``m g L`` per radian;
@@ -201,7 +207,7 @@ def describe(card: dict[str, Any], *, leg_length: float | None = None) -> BodyDe
                 lower,
                 upper,
                 default[j],
-                drive["effort_limit"] / weight_length,
+                min(drive["effort_limit"] / weight_length, EFFORT_LIMIT_CLIP),
                 min(min(drive["velocity_limit"], speed_limits[j]) * time, VELOCITY_LIMIT_CLIP),
                 drive["stiffness"] / weight_length,
                 drive["damping"] / (weight_length * time),

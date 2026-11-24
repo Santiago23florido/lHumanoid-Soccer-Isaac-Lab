@@ -66,3 +66,43 @@ def test_the_deployed_driver_sees_what_training_saw():
     as_t = lambda x: torch.as_tensor(x, dtype=torch.float32)  # noqa: E731
     deployed = drive.drive_ratio(as_t(q), as_t(qd), as_t(target)).numpy()
     assert np.allclose(deployed, drive_ratio(target, q, qd, GAINS), atol=1e-5)
+
+
+def test_unlimited_effort_is_capped_consistently_on_digit():
+    """Digit's implicit drives report FLT_MAX (~3.4e38) effort_limit; capping at
+    EFFORT_LIMIT_CLIP * m g L keeps both drive_ratio and DriveLoads.drive_ratio informative
+    and matching, avoiding zero BC loss and ZeroDivisionError."""
+    import json
+
+    from humanoid_transfer.transfer.latent.pact.anchors import DriveLoads, KinematicAnchors
+    from humanoid_transfer.transfer.latent.pact.descriptors import (
+        EFFORT_LIMIT_CLIP,
+        GRAVITY,
+        describe,
+    )
+
+    registry = json.loads((REPO / "transfer/bodies/bodies.json").read_text("utf-8"))
+    card = json.loads((REPO / registry["digit"]["card"]).read_text("utf-8"))
+    desc = describe(card)
+    anchors = KinematicAnchors(card)
+    drive = DriveLoads(card, anchors)
+    cap = float(EFFORT_LIMIT_CLIP * desc.mass * GRAVITY * desc.leg_length)
+    gains = (drive.stiffness.numpy(), drive.damping.numpy(), drive.effort.numpy())
+    rng = np.random.default_rng(7)
+    j = len(desc.joint_names)
+    q0 = np.asarray(card["joints"]["default_pos"], dtype=np.float32)
+    q = q0 + 0.1 * rng.normal(size=(64, j)).astype(np.float32)
+    qd = rng.normal(size=(64, j)).astype(np.float32)
+    target = q + 0.2 * rng.normal(size=(64, j)).astype(np.float32)
+    offline = drive_ratio(target, q, qd, gains, effort_cap=cap)
+    as_t = lambda x: torch.as_tensor(x, dtype=torch.float32)  # noqa: E731
+    deployed = drive.drive_ratio(as_t(q), as_t(qd), as_t(target)).numpy()
+    assert np.allclose(deployed, offline, atol=1e-5)
+    active = drive_gain(gains, effort_cap=cap) > 0
+    assert active.sum() == 26
+    assert float(offline[:, active].var(0).mean()) > 5e-3
+    gain_t = torch.as_tensor(drive_gain(gains, effort_cap=cap))[None]
+    off_t = torch.as_tensor(drive_offset(q, qd, q0, gains, effort_cap=cap))
+    moved_t = torch.as_tensor(np.broadcast_to(active, (64, j)).copy())
+    loss = drive_loss(as_t(target - q0 + 0.05), as_t(target - q0), gain_t, off_t, moved_t)
+    assert loss.item() > 1e-4

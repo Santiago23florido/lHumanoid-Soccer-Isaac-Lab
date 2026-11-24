@@ -172,3 +172,40 @@ def test_the_no_body_token_ablation_keeps_the_descriptors_and_drops_e_b():
         _, after = model(changed, **x, plan_mask=mask)
     assert (before[0] - after[0]).abs().max() > 1e-6
     torch.testing.assert_close(before[1], after[1])
+
+
+def test_impedance_anchor_policy_gradients_masking_and_aux():
+    (g1, g1_contacts), (nao, nao_contacts) = _body("g1"), _body("nao")
+    bodies = stack_bodies([g1, nao], [g1_contacts, nao_contacts])
+    count = bodies.mask.shape[1]
+    dims = PactDims(**{**vars(DIMS), "impedance_anchor": True, "op_width": 64})
+    model = PactPolicy(dims)
+    x = _inputs(count, steps=6, seed=13)
+    x["joint_obs"][..., 2] = x["joint_obs"][..., 2].clamp(-0.9, 0.9)
+    gen = torch.Generator().manual_seed(14)
+    phys = {
+        "tau_g": torch.randn(2, count, generator=gen) * bodies.mask,
+        "j_eff": torch.randn(2, count, 12, generator=gen) * bodies.mask[..., None],
+        "j_pinv": torch.randn(2, count, 12, generator=gen) * bodies.mask[..., None],
+        "k_eff": torch.rand(2, count, generator=gen) * bodies.mask + 0.1,
+        "tau_eff_dimless": torch.rand(2, count, generator=gen) + 0.2,
+        "alpha_dt": torch.tensor([0.6, 0.7]),
+        "w_t": torch.randn(2, 12, generator=gen),
+    }
+    mask = torch.ones(2, 6, dtype=torch.bool)
+    mask[1, 4:] = False
+    learned, total_tau, aux = model(bodies, **x, plan_mask=mask, phys=phys, return_aux=True)
+    assert learned.shape == (2, 6) and total_tau.shape == (2, count)
+    assert (total_tau[~bodies.mask] == 0).all()
+    assert set(aux) == {"tau_anchor", "delta_rel", "op_out"}
+    (learned.square().mean() + total_tau.square().mean()).backward()
+    missing = [n for n, p in model.named_parameters() if p.grad is None]
+    assert not missing, missing
+    # Masked plan steps must not leak into total_tau in eval mode
+    model.eval()
+    with torch.no_grad():
+        _, a = model(bodies, **x, plan_mask=mask, phys=phys)
+        for key in ("plan", "plan_relative", "plan_path"):
+            x[key][1, 4:] = 1e3
+        _, b = model(bodies, **x, plan_mask=mask, phys=phys)
+    torch.testing.assert_close(a, b)

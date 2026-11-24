@@ -61,6 +61,11 @@ class SampleMirror:
         self.imu_matrix = np.zeros((6, 6), np.float32)
         self.imu_matrix[:3, :3] = VECTOR
         self.imu_matrix[3:, 3:] = AXIAL
+        # Heading-frame 12D wrench [F_L(3), M_L(3), F_R(3), M_R(3)]: swap L<->R, polar F, axial M.
+        w6 = np.diag([1.0, -1.0, 1.0, -1.0, 1.0, -1.0]).astype(np.float32)
+        self.wrench_matrix = np.zeros((12, 12), np.float32)
+        self.wrench_matrix[:6, 6:] = w6
+        self.wrench_matrix[6:, :6] = w6
 
     @classmethod
     def for_body(cls, repo: Path, body: str, joint_names, q0) -> SampleMirror:
@@ -76,12 +81,12 @@ class SampleMirror:
         return x @ self.joints.T
 
     def joint_obs(self, obs: np.ndarray) -> np.ndarray:
-        """``(N, J, H, 3)``: ``q − q0``, ``q̇ sqrt(L/g)``, ``target − q0``."""
+        """``(N, J, H, 3)``: ``q − q0``, ``q̇ sqrt(L/g)``, ``drive_ratio`` (commanded torque ratio)."""
         moved = np.moveaxis(obs, 1, -1)  # (N, H, 3, J)
         out = np.empty_like(moved)
         out[..., 0, :] = self.positions(moved[..., 0, :])
         out[..., 1, :] = self.speeds(moved[..., 1, :])
-        out[..., 2, :] = self.positions(moved[..., 2, :])
+        out[..., 2, :] = self.speeds(moved[..., 2, :])
         return np.moveaxis(out, -1, 1)
 
     def imu(self, x: np.ndarray) -> np.ndarray:
@@ -99,3 +104,11 @@ class SampleMirror:
     def learned(self, x: np.ndarray) -> np.ndarray:
         """``(..., 6)``: CoM velocity, height correction, loads."""
         return x @ self.learned_matrix.T
+
+    def wrench(self, w: np.ndarray) -> np.ndarray:
+        """``(..., 12)``: heading-frame left/right foot wrenches ``[F_L, M_L, F_R, M_R]``."""
+        return w @ self.wrench_matrix.T
+
+    def jacobian(self, j_mat: np.ndarray) -> np.ndarray:
+        """``(..., J, 12)``: operational Jacobian ``j_eff`` or ``j_pinv`` under sagittal mirror."""
+        return np.einsum("ij,...jk->...ik", self.joints, j_mat) @ self.wrench_matrix.T

@@ -64,8 +64,9 @@ captures="${PACT_DAGGER_CAPTURES:-$base_captures}"
 min_duty="${PACT_DAGGER_MIN_DUTY:-0}"
 seed="${PACT_DAGGER_SEED:-0}"
 duty="${HUMANOID_PROCEDURAL_DUTY:-0.55,0.95}"
-status="logs/pact/dagger_${tag}.status"
-mkdir -p logs/pact "$results" "$models"
+log_dir="${PACT_DAGGER_LOG_DIR:-logs/pact}"
+status="${PACT_DAGGER_STATUS:-$log_dir/dagger_${tag}.status}"
+mkdir -p "$log_dir" "$results" "$models"
 note() { echo "$1 $(date +%Y-%m-%d_%H:%M)" >> "$status"; }
 
 for wait_for in "$@"; do
@@ -97,7 +98,7 @@ for round in $(seq "$first" "$last"); do
   for body in $bodies; do
     setup "$body" || continue
     file="$out/$body.npz"
-    log="logs/pact/dagger_${tag}_r${round}_${body}.log"
+    log="$log_dir/dagger_${tag}_r${round}_${body}.log"
     result="$results/icml_gate_d1_${tag}_r${round}_${body}.json"
     if [ ! -f "$file" ]; then
       for attempt in 1 2 3; do
@@ -130,19 +131,19 @@ for round in $(seq "$first" "$last"); do
       continue
     fi
     "$python" transfer/scripts/evaluate_competence.py --capture "$file" --output "$result" \
-      > "logs/pact/dagger_${tag}_r${round}_${body}_score.log" 2>&1 \
+      > "$log_dir/dagger_${tag}_r${round}_${body}_score.log" 2>&1 \
       && note "$body r$round: $(tail -1 "$log" | cut -c1-200)" \
       || note "$body r$round: scoring FAILED"
   done
   if [ "$round" -lt "$last" ] || [ "$train_last" = 1 ]; then
     next="$models/d1_${tag}_r${round}.pt"
     "$python" -u transfer/scripts/pact_gate_d.py --bodies "$(echo $bodies | tr ' ' ',')" \
-      --captures "$captures" --min-duty "$min_duty" --seed "$seed" \
+      --captures "$captures" --min-duty "$min_duty" --mirror --seed "$seed" \
       --dagger "$aggregate" --init "$model" --steps "$train_steps" \
       --arms "hold,$arm" --save "$next" \
       --output "$results/icml_gate_d1_${tag}_train_r${round}.json" \
-      > "logs/pact/dagger_${tag}_train_r${round}.log" 2>&1 \
-      && { model="$next"; note "trained $next ($arm): $(grep -a -e 'pact_d R' -e '^saved' "logs/pact/dagger_${tag}_train_r${round}.log" | tail -1 | cut -c1-200)"; } \
+      > "$log_dir/dagger_${tag}_train_r${round}.log" 2>&1 \
+      && { model="$next"; note "trained $next ($arm): $(grep -a -e 'pact_d R' -e '^saved' "$log_dir/dagger_${tag}_train_r${round}.log" | tail -1 | cut -c1-200)"; } \
       || { note "training r$round FAILED"; break; }
   fi
 done

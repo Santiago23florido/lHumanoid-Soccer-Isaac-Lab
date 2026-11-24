@@ -22,12 +22,14 @@ oldest step first, as the observation manager's history buffers return them.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
 import torch
 from torch import nn
 
+from humanoid_transfer.transfer.latent.pact.anchors import DriveLoads, KinematicAnchors
 from humanoid_transfer.transfer.latent.pact.descriptors import (
     GRAVITY,
     contact_joints,
@@ -154,6 +156,11 @@ class PactActor(nn.Module):
         init_std: float = 0.2,
         plan_group: str = "policy",
         inputs_group: str = "pact",
+        drive_stiffness: list[float] | None = None,
+        drive_damping: list[float] | None = None,
+        drive_effort_limit: list[float] | None = None,
+        default_joint_pos: list[float] | None = None,
+        sole_points: list[list[float]] | None = None,
         **_unused,
     ) -> None:
         super().__init__()
@@ -161,13 +168,14 @@ class PactActor(nn.Module):
             raise ValueError(f"arm {arm!r} not in {ARMS}")
         state = torch.load(checkpoint, map_location="cpu", weights_only=False)
         dims = PactDims(**state["dims"])
-        descriptor, contacts, _, _ = load_body(Path(repo), body)
+        descriptor, contacts, card, unit = load_body(Path(repo), body)
         table = stack_bodies([descriptor], [contacts])
         self.policy = PactPolicy(dims)
         self.policy.load_state_dict(state["state"])
         self.policy.embodiment = BodyResidual(
             self.policy.embodiment, table, dims.body_tokens, dims.width
         )
+        self.impedance_anchor = bool(dims.impedance_anchor)
         self.joints = table.mask.shape[1]
         self.history = dims.history
         self.view = view
@@ -189,9 +197,21 @@ class PactActor(nn.Module):
         buffer("skill_mean", skill_mean)
         buffer("skill_std", skill_std)
         time_unit = float(np.sqrt(descriptor.leg_length / GRAVITY))
+        self.time_unit = time_unit
+        self.alpha_dt = float(1.0 - math.exp(-(control_dt / time_unit) / 0.08))
         buffer("times", (np.arange(1, view + 1) * control_dt / time_unit)[None])
         self.register_buffer("action_joints", torch.as_tensor(action_joints, dtype=torch.long))
         buffer("action_scale", action_scale)
+        if self.impedance_anchor:
+            self.anchors = KinematicAnchors(card, unit, sole_points)
+            self.drive = DriveLoads(card, self.anchors)
+            if drive_stiffness is not None and drive_damping is not None and drive_effort_limit is not None:
+                self.drive.set_drives(drive_stiffness, drive_damping, drive_effort_limit)
+            q0 = card["joints"]["default_pos"] if default_joint_pos is None else default_joint_pos
+            buffer("q0", q0)
+        else:
+            self.anchors = None
+            self.drive = None
         # rsl_rl only where PPO runs: the offline trainer imports this module without it.
         from rsl_rl.modules.distribution import GaussianDistribution
 
@@ -230,6 +250,16 @@ class PactActor(nn.Module):
         upcoming, estimate, path = plan_from_view(tail, self.view, self.skill_mean, self.skill_std)
         bodies = self.policy.embodiment.table
         bodies = bodies.to(flat.device).take(torch.zeros(n, dtype=torch.long, device=flat.device))
+        extra = {}
+        if self.impedance_anchor:
+            q = joint_obs[:, :, -1, 0] + self.q0
+            qd = joint_obs[:, :, -1, 1] / self.time_unit
+            gravity = imu[:, -1, :3]
+            cmd_r = joint_obs[:, :, -1, 2]
+            with torch.no_grad():
+                phys = self.drive.operational_anchor_from_ratio(q, gravity, cmd_r)
+                phys["alpha_dt"] = flat.new_full((n,), self.alpha_dt)
+            extra["phys"] = phys
         _, out = self.policy(
             bodies,
             joint_obs,
@@ -240,7 +270,10 @@ class PactActor(nn.Module):
             self.times.expand(n, -1),
             path,
             torch.ones(n, self.view, dtype=torch.bool, device=flat.device),
+            **extra,
         )
+        if self.impedance_anchor:
+            out = self.drive.targets_from_torque(q, qd, out)
         return out[:, self.action_joints] / self.action_scale
 
     def forward(self, obs, masks=None, hidden_state=None, stochastic_output: bool = False):

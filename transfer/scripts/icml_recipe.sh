@@ -66,6 +66,7 @@ dagger() {  # <start model> <rounds> <tag: probes|train> [first round]
     PACT_DAGGER_CAPTURES="$base_map" PACT_DAGGER_MIN_DUTY=0.55 \
     PACT_DAGGER_GLOB="$base_train;$dir/dagger/*/r*/{body}.npz" \
     PACT_DAGGER_DIR="$dir/dagger" PACT_DAGGER_RESULTS="$dir/results" PACT_DAGGER_MODELS="$models" \
+    PACT_DAGGER_LOG_DIR="$dir/logs" \
     PACT_DAGGER_ENV="$([ "$3" = train ] && echo train || echo probes)" \
     PACT_DAGGER_TRAIN_LAST="$([ "$3" = train ] && echo 1 || echo 0)" \
     PACT_DAGGER_FIRST="${4:-1}" \
@@ -80,7 +81,7 @@ done
 
 if want offline && [ ! -f "$models/r0.pt" ]; then
   "$python" -u transfer/scripts/pact_gate_d.py --bodies "$csv" --captures "$base_map" \
-    --dagger "$base_train" --min-duty 0.55 --steps "$offline_steps" --arms "hold,$arm" \
+    --dagger "$base_train" --min-duty 0.55 --mirror --steps "$offline_steps" --arms "hold,$arm" \
     --seed "$seed" --save "$models/r0.pt" --output "$results_final/icml_final_${name}_offline.json" \
     > "$dir/offline.log" 2>&1 || { note "offline FAILED, see $dir/offline.log"; exit 1; }
   note "offline: R2 (torque) $("$python" -c "

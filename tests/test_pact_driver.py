@@ -168,7 +168,8 @@ def test_a_reset_refills_the_history_with_the_current_reading():
 
 
 @pytest.mark.parametrize("body", ["nao", "h1", "digit"])
-def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body):
+@pytest.mark.parametrize("state_anchor", [False, True])
+def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body, state_anchor):
     import math
 
     card = _card(body)
@@ -180,6 +181,7 @@ def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body):
     dims = PactDims(
         width=32, heads=4, history=3, free_tokens=2, body_tokens=2, observation=3,
         anchor_inputs=True, timed_plan=True, impedance_anchor=True, op_width=48,
+        state_anchor=state_anchor, leg_cap=2.0, arm_cap=3.0,
     )  # fmt: skip
     torch.manual_seed(3)
     policy = PactPolicy(dims).eval()
@@ -230,3 +232,92 @@ def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body):
         )
         out_rad = drive.targets_from_torque(q, qd, out_tau, default_pos=q0)
     torch.testing.assert_close(actions[-1], out_rad[:, action_joints] / 0.25, atol=1e-5, rtol=1e-4)
+
+
+@pytest.mark.parametrize("body", ["g1", "nao", "h1", "cassie", "digit"])
+@pytest.mark.parametrize("mode", ["radian", "imp_v20", "imp_v21_state"])
+def test_symmetrized_driver_is_exact_equivariant(body, mode):
+    from humanoid_transfer.transfer.latent.pact.mirror import SampleMirror
+
+    card = _card(body)
+    unit = REGISTRY[body].get("leg_length_unit")
+    descriptor = describe(card, leg_length=unit)
+    contacts = contact_joints(card)
+    anchors = KinematicAnchors(card, unit)
+    drive = DriveLoads(card, anchors)
+    dims = PactDims(
+        width=32, heads=4, history=3, free_tokens=2, body_tokens=2, observation=3,
+        anchor_inputs=True, timed_plan=True,
+        impedance_anchor=(mode != "radian"),
+        state_anchor=(mode == "imp_v21_state"),
+        leg_cap=2.0 if mode == "imp_v21_state" else 0.8,
+        arm_cap=3.0 if mode == "imp_v21_state" else 1.5,
+        op_width=48,
+    )  # fmt: skip
+    torch.manual_seed(7)
+    policy = PactPolicy(dims).eval()
+    gen = torch.Generator().manual_seed(8)
+    checkpoint = {
+        "state": policy.state_dict(),
+        "dims": vars(dims),
+        "z_mean": torch.randn(27, generator=gen).numpy(),
+        "z_std": (torch.rand(27, generator=gen) + 0.5).numpy(),
+        "a_mean": torch.randn(27, generator=gen).numpy(),
+        "a_std": (torch.rand(27, generator=gen) + 0.5).numpy(),
+    }
+    view, n, control_dt = 4, 2, 0.02
+    skill_mean, skill_std = torch.randn(27, generator=gen), torch.rand(27, generator=gen) + 0.5
+    q0_np = np.asarray(card["joints"]["default_pos"], dtype=np.float32)
+    q0 = torch.as_tensor(q0_np, dtype=torch.float32)
+    mirror = SampleMirror.for_body(REPO, body, descriptor.joint_names, q0_np)
+    spec_path = (
+        REPO / "transfer/bodies" / body / "mirror.json"
+        if (REPO / "transfer/bodies" / body / "mirror.json").exists()
+        else REPO / body / "body/mirror.json"
+    )
+    spec = json.loads(spec_path.read_text("utf-8"))
+    jnames = list(descriptor.joint_names)
+    d1 = PactDriver(
+        checkpoint, descriptor, contacts, anchors, drive, q0, slice(None), 1.0,
+        view, skill_mean, skill_std, control_dt, n, "cpu", mirror=mirror,
+    )
+    d2 = PactDriver(
+        checkpoint, descriptor, contacts, anchors, drive, q0, slice(None), 1.0,
+        view, skill_mean, skill_std, control_dt, n, "cpu", mirror=mirror,
+    )
+    smean_np, sstd_np = skill_mean.numpy(), skill_std.numpy()
+    w_tail = view * 30 + 27
+    for step_idx in range(4):
+        _, q, qd, g, w, t = _state(card, n, seed=50 + step_idx)
+        for follower, (leader, mult) in spec.get("mimic", {}).items():
+            i_f, i_l = jnames.index(follower), jnames.index(leader)
+            q[:, i_f] = float(mult) * q[:, i_l]
+            qd[:, i_f] = float(mult) * qd[:, i_l]
+            t[:, i_f] = float(mult) * t[:, i_l]
+        obs = torch.randn(n, 40 + w_tail, generator=gen)
+        # Mirror policy_obs plan tail exactly
+        obs_m = obs.clone().numpy()
+        tail = obs_m[:, -w_tail:]
+        rel_n = tail[:, : view * 27].reshape(n, view, 27)
+        est_n = tail[:, view * 27 : (view + 1) * 27]
+        path = tail[:, (view + 1) * 27 :].reshape(n, view, 3)
+        est_m_n = (mirror.skill(est_n * sstd_np + smean_np) - smean_np) / sstd_np
+        up_m_n = (mirror.skill((rel_n + est_n[:, None, :]) * sstd_np + smean_np) - smean_np) / sstd_np
+        obs_m[:, -w_tail:] = np.concatenate(
+            [(up_m_n - est_m_n[:, None, :]).reshape(n, -1), est_m_n, mirror.path(path).reshape(n, -1)],
+            axis=-1,
+        )
+        out1 = d1(obs, q, qd, t, g, w)
+        qm = torch.as_tensor(q0_np + mirror.positions(q.numpy() - q0_np))
+        qdm = torch.as_tensor(mirror.speeds(qd.numpy()))
+        tm = torch.as_tensor(q0_np + mirror.positions(t.numpy() - q0_np))
+        imu_m = mirror.imu(torch.cat([g, w], dim=-1).numpy())
+        out2 = d2(
+            torch.as_tensor(obs_m), qm, qdm, tm,
+            torch.as_tensor(imu_m[:, :3]), torch.as_tensor(imu_m[:, 3:]),
+        )
+    # Check equivariance on driven joints: out2 == M_drive(out1)
+    driven = (drive.stiffness > 0) & (drive.effective_effort() > 0)
+    out1_m = torch.as_tensor(mirror.drive_positions(out1.numpy()))
+    gap = float((out2[:, driven] - out1_m[:, driven]).abs().max())
+    assert gap < (1e-2 if body == "digit" else 1e-3), (body, impedance_anchor, gap)

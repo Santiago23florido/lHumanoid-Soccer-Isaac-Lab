@@ -157,6 +157,11 @@ parser.add_argument(
 )
 parser.add_argument("--pact-body", default=None, help="The body's name in transfer/bodies.")
 parser.add_argument(
+    "--pact-symmetrize",
+    action="store_true",
+    help="Deploy --pact-model averaged with its sagittal mirror (Reynolds projection, matching symmetrize_actor.py).",
+)
+parser.add_argument(
     "--teacher-share",
     type=float,
     default=0.0,
@@ -216,6 +221,7 @@ def make_pact(inner, term, robot):
     from humanoid_transfer.transfer.latent.pact.anchors import DriveLoads, KinematicAnchors
     from humanoid_transfer.transfer.latent.pact.descriptors import contact_joints, describe
     from humanoid_transfer.transfer.latent.pact.driver import PactDriver
+    from humanoid_transfer.transfer.latent.pact.mirror import SampleMirror
     from pact_check_anchors import sole_override
 
     body = args_cli.pact_body
@@ -255,9 +261,15 @@ def make_pact(inner, term, robot):
         from humanoid_transfer.transfer.latent.contract import load_contract
 
         norm = load_contract(term.cfg.observe_units, inner.device).generator.skill_norm
+    mirror = (
+        SampleMirror.for_body(_REPO_ROOT, body, descriptor.joint_names, default.cpu().numpy())
+        if args_cli.pact_symmetrize
+        else None
+    )
     print(
         f"[capture] PACT {args_cli.pact_model} drives {body}; view {term.view}, units "
         f"{term.cfg.observe_units or 'the contract'}"
+        f"{', symmetrised' if mirror is not None else ''}"
     )
     return PactDriver(
         checkpoint,
@@ -274,6 +286,7 @@ def make_pact(inner, term, robot):
         float(inner.step_dt),
         inner.num_envs,
         inner.device,
+        mirror=mirror,
     )
 
 

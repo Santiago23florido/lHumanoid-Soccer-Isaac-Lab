@@ -64,6 +64,7 @@ captures="${PACT_DAGGER_CAPTURES:-$base_captures}"
 min_duty="${PACT_DAGGER_MIN_DUTY:-0}"
 seed="${PACT_DAGGER_SEED:-0}"
 duty="${HUMANOID_PROCEDURAL_DUTY:-0.55,0.95}"
+push="${PACT_DAGGER_PUSH:-}"
 log_dir="${PACT_DAGGER_LOG_DIR:-logs/pact}"
 status="${PACT_DAGGER_STATUS:-$log_dir/dagger_${tag}.status}"
 mkdir -p "$log_dir" "$results" "$models"
@@ -107,11 +108,16 @@ for round in $(seq "$first" "$last"); do
           (
             export HUMANOID_PROCEDURAL=0.5 HUMANOID_TASKS="$root/transfer/results/base_tasks_xf.json"
             export HUMANOID_PROCEDURAL_DUTY="$duty"
+            push_args=()
+            if [ -n "$push" ]; then
+              read -r push_speed push_interval <<< "$push"
+              push_args=(--push "$push_speed" "$push_interval")
+            fi
             "$python" -u transfer/scripts/capture_contract.py --headless \
               --task-id "${task%-Play-v0}-v0" --driver-policy "$policy" --pact-model "$model" \
               --pact-body "$body" --teacher-share "$share" --steps "$capture_steps" --settle-steps "$settle" \
-              --contract-from-truth --reference autonomous --num-envs "$envs" --joints --policy-obs \
-              --output "$file" > "$log" 2>&1
+              --contract-from-truth --reference autonomous --num-envs "$envs" "${push_args[@]}" \
+              --joints --policy-obs --output "$file" > "$log" 2>&1
           )
         else
           "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task" \

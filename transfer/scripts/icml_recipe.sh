@@ -68,6 +68,7 @@ dagger() {  # <start model> <rounds> <tag: probes|train> [first round]
     PACT_DAGGER_DIR="$dir/dagger" PACT_DAGGER_RESULTS="$dir/results" PACT_DAGGER_MODELS="$models" \
     PACT_DAGGER_LOG_DIR="$dir/logs" \
     PACT_DAGGER_ENV="$([ "$3" = train ] && echo train || echo probes)" \
+    PACT_DAGGER_PUSH="$([ "$3" = train ] && echo "${PACT_DAGGER_PUSH:-0.12 2.5}" || echo "")" \
     PACT_DAGGER_TRAIN_LAST="$([ "$3" = train ] && echo 1 || echo 0)" \
     PACT_DAGGER_FIRST="${4:-1}" \
     bash transfer/scripts/pact_dagger.sh "$1" "$2" "$bodies" "$3" < /dev/null

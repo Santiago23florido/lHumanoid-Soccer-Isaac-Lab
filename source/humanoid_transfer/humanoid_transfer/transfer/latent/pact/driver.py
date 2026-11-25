@@ -79,6 +79,7 @@ class PactDriver:
         control_dt: float,
         num_envs: int,
         device: torch.device | str,
+        mirror=None,
     ) -> None:
         kind = checkpoint.get("kind", "pact")
         self.routing: dict = {}
@@ -137,6 +138,16 @@ class PactDriver:
         self.joint_history = torch.zeros(num_envs, joints, history, 3, device=device)
         self.imu_history = torch.zeros(num_envs, history, 6, device=device)
         self.fresh = torch.ones(num_envs, dtype=torch.bool, device=device)
+        self.symmetrize = mirror is not None
+        if mirror is not None:
+            self._m_joints = as_t(mirror.joints)
+            self._m_offset = as_t(mirror.offset)
+            self._m_drives = as_t(mirror.drives)
+            self._m_drive_offset = as_t(mirror.drive_offset)
+            self._m_imu = as_t(mirror.imu_matrix)
+            self._m_z = as_t(mirror.z)
+            self._m_path = as_t(mirror.path(np.eye(3, dtype=np.float32)))
+            self._m_wrench = as_t(mirror.wrench_matrix)
 
     def reset(self, ids: torch.Tensor) -> None:
         """Environments ``ids`` start an episode: their history refills on the next step."""
@@ -173,29 +184,99 @@ class PactDriver:
         anchor = anchor_inputs(self.anchors, self.drive, q, qd, gravity, omega, target)
         tail = policy_obs[:, policy_obs.shape[-1] - (self.view * (SKILL + 3) + SKILL) :]
         upcoming, estimate, path = plan_from_view(tail, self.view, self.skill_mean, self.skill_std)
-        mask = torch.ones(n, self.view, dtype=torch.bool, device=self.device)
-        extra = dict(self.routing)
+        if not self.symmetrize:
+            mask = torch.ones(n, self.view, dtype=torch.bool, device=self.device)
+            extra = dict(self.routing)
+            if self._emb_one is not None:
+                extra["emb_cached"] = (
+                    self._emb_one[0].expand(n, -1, -1),
+                    self._emb_one[1].expand(n, -1, -1),
+                )
+            if self.impedance_anchor:
+                phys = self.drive.operational_anchor_from_ratio(q, gravity, commanded)
+                phys["alpha_dt"] = q.new_full((n,), self.alpha_dt)
+                extra["phys"] = phys
+            _, out = self.model(
+                self.table.take(torch.zeros(n, dtype=torch.long, device=self.device)),
+                self.joint_history,
+                self.imu_history,
+                (anchor - self.a_mean) / self.a_std,
+                (upcoming - self.z_mean) / self.z_std,
+                (upcoming - estimate[:, None]) / self.z_std,
+                self.times.expand(n, -1),
+                path,
+                mask,
+                **extra,
+            )
+            if self.impedance_anchor:
+                out = self.drive.targets_from_torque(q, qd, out, default_pos=self.q0)
+            return out[:, self.action_joints] / self.action_scale
+
+        # Exact Reynolds projection onto sagittally equivariant policies: 0.5 * (pi(x) + M pi(M x)),
+        # batched in a single 2N forward pass (matches the symmetrised teachers, symmetrize_actor.py).
+        jh = self.joint_history.permute(0, 2, 3, 1)  # (N, H, 3, J)
+        jh_m = torch.stack(
+            [
+                jh[:, :, 0] @ self._m_joints.T + self._m_offset,
+                jh[:, :, 1] @ self._m_joints.T,
+                jh[:, :, 2] @ self._m_drives.T,
+            ],
+            dim=2,
+        ).permute(0, 3, 1, 2)
+        imu_m = self.imu_history @ self._m_imu.T
+        anchor_m = anchor @ self._m_z.T
+        up_m = upcoming @ self._m_z.T
+        est_m = estimate @ self._m_z.T
+        path_m = path @ self._m_path.T
+        n2 = 2 * n
+        mask = torch.ones(n2, self.view, dtype=torch.bool, device=self.device)
+        extra = {k: v.repeat(2) for k, v in self.routing.items()}
         if self._emb_one is not None:
             extra["emb_cached"] = (
-                self._emb_one[0].expand(n, -1, -1),
-                self._emb_one[1].expand(n, -1, -1),
+                self._emb_one[0].expand(n2, -1, -1),
+                self._emb_one[1].expand(n2, -1, -1),
             )
         if self.impedance_anchor:
             phys = self.drive.operational_anchor_from_ratio(q, gravity, commanded)
-            phys["alpha_dt"] = q.new_full((n,), self.alpha_dt)
-            extra["phys"] = phys
-        _, out = self.model(
-            self.table.take(torch.zeros(n, dtype=torch.long, device=self.device)),
-            self.joint_history,
-            self.imu_history,
-            (anchor - self.a_mean) / self.a_std,
-            (upcoming - self.z_mean) / self.z_std,
-            (upcoming - estimate[:, None]) / self.z_std,
-            self.times.expand(n, -1),
-            path,
+            phys_2 = {
+                "tau_g": torch.cat([phys["tau_g"], phys["tau_g"] @ self._m_joints.T], dim=0),
+                "j_eff": torch.cat(
+                    [
+                        phys["j_eff"],
+                        torch.einsum("ij,njk->nik", self._m_joints, phys["j_eff"])
+                        @ self._m_wrench.T,
+                    ],
+                    dim=0,
+                ),
+                "j_pinv": torch.cat(
+                    [
+                        phys["j_pinv"],
+                        torch.einsum("ij,njk->nik", self._m_joints, phys["j_pinv"])
+                        @ self._m_wrench.T,
+                    ],
+                    dim=0,
+                ),
+                "w_t": torch.cat([phys["w_t"], phys["w_t"] @ self._m_wrench.T], dim=0),
+                "k_eff": phys["k_eff"],
+                "tau_eff_dimless": phys["tau_eff_dimless"],
+                "alpha_dt": q.new_full((n2,), self.alpha_dt),
+            }
+            extra["phys"] = phys_2
+        _, out_2 = self.model(
+            self.table.take(torch.zeros(n2, dtype=torch.long, device=self.device)),
+            torch.cat([self.joint_history, jh_m], dim=0),
+            torch.cat([self.imu_history, imu_m], dim=0),
+            (torch.cat([anchor, anchor_m], dim=0) - self.a_mean) / self.a_std,
+            (torch.cat([upcoming, up_m], dim=0) - self.z_mean) / self.z_std,
+            torch.cat([upcoming - estimate[:, None], up_m - est_m[:, None]], dim=0) / self.z_std,
+            self.times.expand(n2, -1),
+            torch.cat([path, path_m], dim=0),
             mask,
             **extra,
         )
         if self.impedance_anchor:
-            out = self.drive.targets_from_torque(q, qd, out, default_pos=self.q0)
+            tau_sym = 0.5 * (out_2[:n] + out_2[n:] @ self._m_drives.T)
+            out = self.drive.targets_from_torque(q, qd, tau_sym, default_pos=self.q0)
+        else:
+            out = 0.5 * (out_2[:n] + (out_2[n:] @ self._m_drives.T + self._m_drive_offset))
         return out[:, self.action_joints] / self.action_scale

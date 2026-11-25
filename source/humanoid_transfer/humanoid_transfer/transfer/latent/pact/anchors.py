@@ -360,6 +360,44 @@ class DriveLoads(torch.nn.Module):
             signs[:, k] = below[:, first] - below[:, second]
         self.register_buffer("loop_sign", torch.as_tensor(signs))  # (J, K)
         self.register_buffer("on_loop", torch.as_tensor((signs != 0).any(1).astype(np.float32)))
+        # Sagittal-mirror joint pairs across opposite leg chains (origin, reflected axis, depth),
+        # so an undriven open-chain mimic joint (e.g. NAO's RHipYawPitch) flags its driven partner
+        # for symmetric operational-space wrench estimation without hardcoding body names.
+        origins = np.zeros((len(names), 3), dtype=np.float32)
+        axes = np.zeros((len(names), 3), dtype=np.float32)
+        child_of = np.full(len(names), -1, dtype=np.int64)
+        for l_idx, j_list in enumerate(joints_of):
+            for j_idx in j_list:
+                child_of[j_idx] = l_idx
+        depths = np.zeros(len(names), dtype=np.int64)
+        for j_idx in range(len(names)):
+            d_cnt, node = 0, int(child_of[j_idx])
+            while node > 0:
+                d_cnt += 1
+                node = parent[node]
+            depths[j_idx] = d_cnt
+        for row in card["joint_geometry"]:
+            j_idx = names.index(row["joint"])
+            origins[j_idx] = row["position_root"]
+            a = np.asarray(row["axis_root"], dtype=np.float32)
+            axes[j_idx] = a / max(float(np.linalg.norm(a)), 1e-9)
+        mirror_pair = np.zeros((len(names), len(names)), dtype=bool)
+        if len(chains) == 2:
+            left_j = np.nonzero(chains[0] > 0)[0]
+            right_j = np.nonzero(chains[1] > 0)[0]
+            tol = 0.05 * float(anchors.units.length)
+            for i in left_j:
+                p_ref = np.array([origins[i, 0], -origins[i, 1], origins[i, 2]], dtype=np.float32)
+                a_ref = np.array([axes[i, 0], -axes[i, 1], axes[i, 2]], dtype=np.float32)
+                for k in right_j:
+                    if (
+                        depths[i] == depths[k]
+                        and float(np.linalg.norm(origins[k] - p_ref)) < tol
+                        and abs(float(np.dot(axes[k], a_ref))) > 0.99
+                    ):
+                        mirror_pair[i, k] = True
+                        mirror_pair[k, i] = True
+        self.register_buffer("leg_mirror_pair", torch.as_tensor(mirror_pair))
 
     def set_drives(
         self, stiffness: torch.Tensor, damping: torch.Tensor, effort: torch.Tensor
@@ -595,20 +633,33 @@ class DriveLoads(torch.nn.Module):
         """
         tau_g, j_eff = self.wrench_anchor(joint_pos, gravity_b)
         tau_eff, k_eff, leg = self.operational_params()
-        leg_f = leg.to(j_eff.dtype)
-        jl = j_eff * leg_f[None, :, None]
-        gram = jl.transpose(1, 2) @ jl
-        diag = gram.diagonal(dim1=1, dim2=2)
+        # Kinematic pseudoinverse j_pinv includes every open-chain leg joint (including undriven
+        # mimic joints like NAO's RHipYawPitch, which move kinematically) so L/R chains stay
+        # symmetric; closed-chain legs keep driven joints since loop elimination already maps
+        # foot wrenches directly to driven actuators.
+        open_chain = (self.on_chain.sum(0) > 0) & (self.on_loop == 0)
+        kin_leg = open_chain | leg
+        jl_kin = j_eff * kin_leg.to(j_eff.dtype)[None, :, None]
+        gram_kin = jl_kin.transpose(1, 2) @ jl_kin
+        diag_kin = gram_kin.diagonal(dim1=1, dim2=2)
         # Damped operational-space pseudoinverse J_pinv = J_eff (J_eff^T J_eff + reg)^{-1}
         p_prior = j_eff.new_tensor([2e-2, 2e-2, 2e-2, 1e-1, 1e-1, 1e-1] * 2)
-        p_reg = torch.diag_embed(p_prior[None, :] * diag.clamp_min(1e-3) + 1e-2)
-        j_pinv = torch.linalg.solve(gram + p_reg, jl.transpose(1, 2)).transpose(1, 2)
-        # Current heading-frame foot wrench w_t from current commanded torque ratio
+        p_reg = torch.diag_embed(p_prior[None, :] * diag_kin.clamp_min(1e-3) + 1e-2)
+        j_pinv = torch.linalg.solve(gram_kin + p_reg, jl_kin.transpose(1, 2)).transpose(1, 2)
+        # Current heading-frame foot wrench w_t from independent driven leg joints (excluding any
+        # joint whose sagittal twin on the opposite leg is an undriven open-chain mimic).
+        undriven_open = open_chain & (~leg)
+        mimic_partner = (self.leg_mirror_pair & undriven_open[None, :]).any(1)
+        w_leg = leg & (~mimic_partner)
+        w_leg_f = w_leg.to(j_eff.dtype)
+        jl_w = j_eff * w_leg_f[None, :, None]
+        gram_w = jl_w.transpose(1, 2) @ jl_w
+        diag_w = gram_w.diagonal(dim1=1, dim2=2)
         tau_t = torch.atanh(cmd_ratio.clamp(-0.92, 0.92)) * tau_eff[None, :]
-        rhs = -(tau_t + tau_g) * leg_f[None, :]
+        rhs = -(tau_t + tau_g) * w_leg_f[None, :]
         w_prior = j_eff.new_tensor([1e-3, 1e-3, 1e-3, 5e-2, 5e-2, 5e-2] * 2)
-        w_reg = torch.diag_embed(w_prior[None, :] * diag.clamp_min(1e-4) + 1e-3)
-        w_t = torch.linalg.solve(gram + w_reg, jl.transpose(1, 2) @ rhs[..., None])[..., 0].clamp(
+        w_reg = torch.diag_embed(w_prior[None, :] * diag_w.clamp_min(1e-4) + 1e-3)
+        w_t = torch.linalg.solve(gram_w + w_reg, jl_w.transpose(1, 2) @ rhs[..., None])[..., 0].clamp(
             -2.5, 2.5
         )
         return {

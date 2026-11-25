@@ -661,7 +661,8 @@ def main() -> int:
     inv_teff_table = torch.zeros(len(bodies), count, device=device)
     keff_table = torch.zeros(len(bodies), count, device=device)
     alpha_table = torch.tensor([b.alpha_dt for b in bodies], dtype=torch.float32, device=device)
-    body_var_vals = []
+    jweight_table = torch.zeros(len(bodies), count, device=device)
+    anc_weight_table = torch.zeros(len(bodies), count, device=device)
     for i, b in enumerate(bodies):
         j = len(b.controlled)
         controlled[i, :j] = torch.as_tensor(b.controlled, device=device)
@@ -674,9 +675,18 @@ def main() -> int:
         keff_table[i, :j] = torch.as_tensor(b.k_eff, device=device)
         tr_i = train_rows[i]
         ctrl = b.controlled
-        taught_tr = np.tanh(b.drive_gain[ctrl] * b.label[tr_i][:, ctrl] + b.drive_offset[tr_i][:, ctrl])
-        body_var_vals.append(max(float(taught_tr.var(0).mean()), 1e-3))
-    body_var_table = torch.tensor(body_var_vals, dtype=torch.float32, device=device)
+        taught_tr = np.tanh(b.drive_gain * b.label[tr_i] + b.drive_offset[tr_i])
+        jvar = taught_tr.var(0)
+        jmean = np.abs(taught_tr.mean(0))
+        mv = max(float(jvar[ctrl].mean()), 1e-4)
+        # Joints permanently saturated against a mechanical joint stop (e.g. Cassie hip_rotation)
+        # carry internal stop preload rather than ground wrench: keep at 1x in full BC and exclude
+        # from the morphology-blind operational-space anchor supervision bc_anc.
+        pinned = jmean >= 0.90
+        jw = np.where(ctrl, np.where(pinned, 1.0 / mv, 1.0 / (jvar + 0.1 * mv)), 0.0)
+        aw = np.where(b.leg_mask & (~pinned), jw, 0.0)
+        jweight_table[i, :j] = torch.as_tensor(jw, dtype=torch.float32, device=device)
+        anc_weight_table[i, :j] = torch.as_tensor(aw, dtype=torch.float32, device=device)
     arm_table = controlled & (~leg_table)
 
     def batch(
@@ -710,8 +720,8 @@ def main() -> int:
                 ("plan", m.skill),
                 ("relative", m.skill),
                 ("path", m.path),
-                ("label", m.positions),
-                ("drive_offset", lambda x, m=m, g=b.drive_gain: m.speeds(x) - g * m.offset),
+                ("label", m.drive_positions),
+                ("drive_offset", lambda x, m=m, g=b.drive_gain: m.drive_speeds(x) - g * m.drive_offset),
                 ("learned", m.learned),
             ]
             if include_phys:
@@ -812,6 +822,17 @@ def main() -> int:
             kind = "pact"
             anchored = arm != "pact_na"
             use_imp = anchored and not args.no_impedance_anchor
+            imp_extra = {}
+            if use_imp:
+                if init is not None and init.get("kind", "pact") == "pact":
+                    idims = init.get("dims", {})
+                    imp_extra = {
+                        "state_anchor": bool(idims.get("state_anchor", False)),
+                        "leg_cap": float(idims.get("leg_cap", 0.8)),
+                        "arm_cap": float(idims.get("arm_cap", 1.5)),
+                    }
+                else:
+                    imp_extra = {"state_anchor": True, "leg_cap": 2.0, "arm_cap": 3.0}
             dims = PactDims(
                 observation=3,
                 history=args.history,
@@ -819,6 +840,7 @@ def main() -> int:
                 anchor_inputs=anchored,
                 timed_plan=True,
                 impedance_anchor=use_imp,
+                **imp_extra,
                 **({"body_tokens": 0} if arm == "pact_nb" else {}),
             )
             model = PactPolicy(dims).to(device)
@@ -875,8 +897,25 @@ def main() -> int:
             label, learned, offset = x.pop("label"), x.pop("learned"), x.pop("drive_offset")
             b_batch = table.take(which)
             moved = controlled[which]
-            bvar = body_var_table[which]
+            jw_batch = jweight_table[which]
+            aw_batch = anc_weight_table[which]
             extra = routed(which)
+            if not args.adapt:
+                # Copycat-breaking action-history regularization applied uniformly across every
+                # shared arm: 50% channel dropout + episode-correlated bias (0.25) + jitter (0.10).
+                jo = x["joint_obs"].clone()
+                drop = torch.rand(jo.shape[0], 1, 1, device=device) < 0.5
+                bias = 0.25 * torch.randn(jo.shape[0], jo.shape[1], 1, device=device)
+                jitter = 0.10 * torch.randn_like(jo[:, :, :, 2])
+                jo[:, :, :, 2] = (
+                    torch.where(
+                        drop,
+                        torch.zeros_like(jo[:, :, :, 2]),
+                        (jo[:, :, :, 2] + bias + jitter).clamp(-0.98, 0.98),
+                    )
+                    * b_batch.mask[..., None]
+                )
+                x["joint_obs"] = jo
             if use_imp:
                 phys = {
                     "tau_g": x.pop("tau_g"),
@@ -887,10 +926,6 @@ def main() -> int:
                     "tau_eff_dimless": teff_table[which],
                     "alpha_dt": alpha_table[which],
                 }
-                if not args.adapt:
-                    noise = 0.05 * torch.randn_like(x["joint_obs"][:, :, -1, 2]) * b_batch.mask
-                    x["joint_obs"] = x["joint_obs"].clone()
-                    x["joint_obs"][:, :, -1, 2] = (x["joint_obs"][:, :, -1, 2] + noise).clamp(-0.98, 0.98)
                 extra["phys"] = phys
                 extra["return_aux"] = True
             with amp_ctx():
@@ -903,24 +938,30 @@ def main() -> int:
                     taught_r = torch.tanh(gain_table[which] * label + offset)
                     pred_r = torch.tanh(out_tau * inv_teff_table[which])
                     anc_r = torch.tanh(aux["tau_anchor"] * inv_teff_table[which])
-                    per_all = ((pred_r - taught_r).square() * moved).sum(1) / moved.sum(1).clamp_min(1)
-                    bc = (per_all / bvar).mean() * 0.05
+                    bc = (
+                        ((pred_r - taught_r).square() * jw_batch).sum(1)
+                        / moved.sum(1).clamp_min(1)
+                    ).mean() * 0.05
                     leg_m = leg_table[which]
                     arm_m = arm_table[which]
-                    per_anc = ((anc_r - taught_r).square() * leg_m).sum(1) / leg_m.sum(1).clamp_min(1)
-                    bc_anc = (per_anc / bvar).mean() * 0.05
+                    bc_anc = (
+                        ((anc_r - taught_r).square() * aw_batch).sum(1)
+                        / (aw_batch > 0).sum(1).clamp_min(1)
+                    ).mean() * 0.05
                     reg_leg = aux["delta_rel"].square()[leg_m].mean() if leg_m.any() else 0.0
                     reg_arm = aux["delta_rel"].square()[arm_m].mean() if arm_m.any() else 0.0
                     reg_op = aux["op_out"].square().mean()
-                    loss = bc + 0.5 * bc_anc + 0.05 * reg_leg + 0.02 * reg_arm + 2e-4 * reg_op
+                    loss = bc + 0.5 * bc_anc + 0.01 * reg_leg + 0.005 * reg_arm + 2e-4 * reg_op
                     if anchor_weight > 0.0:
                         loss = loss + anchor_weight * (out_learned - learned).square().mean()
                     return loss
                 out_learned, out = res
                 taught_r = torch.tanh(gain_table[which] * label + offset)
                 pred_r = torch.tanh(gain_table[which] * out + offset)
-                per_all = ((pred_r - taught_r).square() * moved).sum(1) / moved.sum(1).clamp_min(1)
-                bc = (per_all / bvar).mean() * 0.05
+                bc = (
+                    ((pred_r - taught_r).square() * jw_batch).sum(1)
+                    / moved.sum(1).clamp_min(1)
+                ).mean() * 0.05
                 if anchor_weight == 0.0:
                     return bc
                 return bc + anchor_weight * (out_learned - learned).square().mean()

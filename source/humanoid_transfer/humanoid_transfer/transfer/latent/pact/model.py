@@ -107,6 +107,13 @@ class PactDims:
     """Whole-sample embodiment drop probability during training (prevents body-ID overfitting)."""
     desc_noise: float = 0.05
     """Gaussian jitter std on joint descriptor tokens during training."""
+    state_anchor: bool = False
+    """Anchor ``tau_anchor`` on pure physical gravity statics ``tau_g`` + operational-space
+    wrench/impedance (omits previous-action pass-through ``tau_t_eff`` and ``w_t`` to prevent
+    closed-loop copycat drift on held-out tasks)."""
+    zero_cmd_history: bool = False
+    """Zero out previous-action channel ``joint_obs[..., 2]`` in the state encoder (pure
+    kinematic/state-feedback policy without action-history causal confusion)."""
 
 
 @dataclass

@@ -50,9 +50,30 @@ class SampleMirror:
     """Reflects one body's samples (any leading batch shape)."""
 
     def __init__(self, joint_names, mirror: dict, q0: np.ndarray) -> None:
-        self.joints = joint_mirror(tuple(joint_names), mirror).astype(np.float32)
+        names = tuple(joint_names)
+        self.joints = joint_mirror(names, mirror).astype(np.float32)
         q0 = np.asarray(q0, dtype=np.float32)
         self.offset = (self.joints @ q0 - q0).astype(np.float32)
+        # Driven/commanded quantities (torque ratio, target label, drive_offset): when an undriven
+        # mimic follower (e.g. NAO's RHipYawPitch) is the sagittal partner of its driven leader
+        # (LHipYawPitch), reflecting a drive command maps the leader to itself (sign / mult) and
+        # keeps the undriven follower at zero instead of overwriting the leader with zero.
+        drives = self.joints.copy()
+        for follower, (leader, mult) in mirror.get("mimic", {}).items():
+            if follower in names and leader in names:
+                i_f, i_l = names.index(follower), names.index(leader)
+                sign = float(self.joints[i_f, i_l])
+                if abs(sign) > 0.5:
+                    drives[i_l, :] = 0.0
+                    drives[i_l, i_l] = sign / float(mult)
+                    drives[i_f, :] = 0.0
+                    drives[i_f, i_f] = sign * float(mult)
+        self.drives = drives.astype(np.float32)
+        drive_off = (self.drives @ q0 - q0).astype(np.float32)
+        for follower in mirror.get("mimic", {}):
+            if follower in names:
+                drive_off[names.index(follower)] = 0.0
+        self.drive_offset = drive_off
         self.z = mirror_matrix(SKILL_LAYOUT).astype(np.float32)
         index = np.concatenate(
             [np.arange(SKILL_LAYOUT.size)[SKILL_LAYOUT.slice_of(f)] for f in LEARNED_FIELDS]
@@ -80,13 +101,21 @@ class SampleMirror:
     def speeds(self, x: np.ndarray) -> np.ndarray:
         return x @ self.joints.T
 
+    def drive_positions(self, x: np.ndarray) -> np.ndarray:
+        """Driven target offsets relative to ``q0`` (mimic-safe for leader/follower pairs)."""
+        return x @ self.drives.T + self.drive_offset
+
+    def drive_speeds(self, x: np.ndarray) -> np.ndarray:
+        """Driven torque ratios or offsets without ``q0`` shift (mimic-safe)."""
+        return x @ self.drives.T
+
     def joint_obs(self, obs: np.ndarray) -> np.ndarray:
         """``(N, J, H, 3)``: ``q − q0``, ``q̇ sqrt(L/g)``, ``drive_ratio`` (commanded torque ratio)."""
         moved = np.moveaxis(obs, 1, -1)  # (N, H, 3, J)
         out = np.empty_like(moved)
         out[..., 0, :] = self.positions(moved[..., 0, :])
         out[..., 1, :] = self.speeds(moved[..., 1, :])
-        out[..., 2, :] = self.speeds(moved[..., 2, :])
+        out[..., 2, :] = self.drive_speeds(moved[..., 2, :])
         return np.moveaxis(out, -1, 1)
 
     def imu(self, x: np.ndarray) -> np.ndarray:

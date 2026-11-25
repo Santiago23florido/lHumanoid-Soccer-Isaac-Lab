@@ -123,6 +123,18 @@ class PactPolicy(nn.Module):
             self.register_buffer(
                 "dyn_idx", torch.as_tensor(DYNAMIC_Z_INDEX, dtype=torch.long), persistent=False
             )
+            # Physical friction-cone / ZMP support-polygon wrench bounds (m g force, m g L moment)
+            # and operational-space motion cap for state_anchor=True (even under sagittal mirror).
+            self.register_buffer(
+                "w_cap",
+                torch.tensor([1.5, 1.5, 2.0, 0.25, 0.25, 0.15] * 2, dtype=torch.float32),
+                persistent=False,
+            )
+            self.register_buffer(
+                "x_cap",
+                torch.full((12,), 0.5, dtype=torch.float32),
+                persistent=False,
+            )
 
     def forward(
         self,
@@ -148,6 +160,9 @@ class PactPolicy(nn.Module):
         it is dimensionless commanded torque in ``m g L`` units (converted analytically to PD
         targets by :meth:`DriveLoads.targets_from_torque`).
         """
+        if self.dims.zero_cmd_history:
+            joint_obs = joint_obs.clone()
+            joint_obs[:, :, :, 2] = 0.0
         if emb_cached is None:
             embodiment, descriptor = self.embodiment(bodies)
         else:
@@ -208,16 +223,28 @@ class PactPolicy(nn.Module):
         pooled = torch.einsum("bhk,bhw->bkw", torch.softmax(logits, dim=1), h_op).reshape(
             h_op.shape[0], -1
         )
-        op_out = self.op_head(torch.cat([st_dyn, w_t, pooled], dim=-1))
-        w_cmd, x_cmd = op_out[:, :12], op_out[:, 12:]
-
-        cmd_r = joint_obs[:, :, -1, 2]
-        tau_t_eff = torch.atanh(cmd_r.clamp(-0.98, 0.98)) * tau_eff
-        tau_anchor = (
-            tau_t_eff
-            - alpha_dt[:, None] * torch.einsum("njk,nk->nj", j_eff, w_cmd)
-            + alpha_dt[:, None] * k_eff * torch.einsum("njk,nk->nj", j_pinv, x_cmd)
-        ) * bodies.mask
+        if self.dims.state_anchor:
+            zero_w = st_dyn.new_zeros(st_dyn.shape[0], 12)
+            op_out = self.op_head(torch.cat([st_dyn, zero_w, pooled], dim=-1))
+            w_cap = self.w_cap.to(op_out.dtype)
+            x_cap = self.x_cap.to(op_out.dtype)
+            w_cmd = w_cap * torch.tanh(op_out[:, :12] / w_cap)
+            x_cmd = x_cap * torch.tanh(op_out[:, 12:] / x_cap)
+            tau_anchor = (
+                -tau_g
+                - torch.einsum("njk,nk->nj", j_eff, w_cmd)
+                + k_eff * torch.einsum("njk,nk->nj", j_pinv, x_cmd)
+            ) * bodies.mask
+        else:
+            op_out = self.op_head(torch.cat([st_dyn, w_t, pooled], dim=-1))
+            w_cmd, x_cmd = op_out[:, :12], op_out[:, 12:]
+            cmd_r = joint_obs[:, :, -1, 2]
+            tau_t_eff = torch.atanh(cmd_r.clamp(-0.98, 0.98)) * tau_eff
+            tau_anchor = (
+                tau_t_eff
+                - alpha_dt[:, None] * torch.einsum("njk,nk->nj", j_eff, w_cmd)
+                + alpha_dt[:, None] * k_eff * torch.einsum("njk,nk->nj", j_pinv, x_cmd)
+            ) * bodies.mask
 
         # 2. Actuator-relative bounded residual decoder (BoT-Mix graph-local + global)
         phys_feat = torch.cat([tau_g[..., None], j_eff, j_pinv], dim=-1)

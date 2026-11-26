@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from collections.abc import Sequence
 from dataclasses import MISSING
 from pathlib import Path
@@ -49,10 +50,12 @@ from isaaclab.utils.math import quat_apply
 from ....common.similarity import UnitSystem
 from ....common.skill_state import SKILL_LAYOUT
 from ...latent.contract import load_contract, plan_integrals
+from ...latent.failure_replay import FailureStore
 from ...latent.memory import TimeGrid
 from ...latent.plan_contact import PLAN_CONTACTS, apply_plan_contact
 from ...latent.plan_trust import PlanTrust, smooth_noise, sway
 from ...latent.procedural import GaitRanges, PointMassBiped
+from ...latent.replay import ReplayChains, load_replay, replay_starts
 from ...latent.resampling import RESAMPLE_SPACES, plan_interpolation, resample_rows
 from ...latent.skill_torch import BodyConstants, proprioceptive_skill_state, skill_state
 from ...latent.units import change_of_units, tracker_view
@@ -84,6 +87,8 @@ class ReferenceCommand(UniformVelocityCommand):
             self.generator.flow_solver = cfg.flow_solver
         if cfg.flow_steps is not None:
             self.generator.flow_steps = cfg.flow_steps
+        if cfg.plan_max_load is not None:
+            self.generator.max_log_load = math.log(cfg.plan_max_load + LOAD_EPSILON)
         self.encoder = contract.encoder if cfg.use_encoder else None
         if cfg.use_encoder and self.encoder is None:
             raise ValueError(f"{cfg.contract} carries no encoder")
@@ -230,9 +235,22 @@ class ReferenceCommand(UniformVelocityCommand):
         self.windows = self._load_windows(cfg.start_windows) if cfg.start_windows else None
         self.procedural = torch.zeros(n, dtype=torch.bool, device=self.device)
         """Envs whose episode follows the point-mass biped instead of the task's generator."""
+        tasks = 1 if self.tasks is None else len(self.tasks)
+        self.command_failures = (
+            {t: FailureStore(6, device=self.device) for t in range(tasks)}
+            if cfg.failure_replay > 0.0 and not cfg.procedural_probes
+            else None
+        )
+        """Per task, the commands its terminated episodes were drawn with (failure replay)."""
         self.biped = None
+        self._curriculum_previous: tuple[torch.Tensor, torch.Tensor] | None = None
+        """The planned and reached contacts of the step before, for the gait curriculum's
+        touchdowns."""
         if cfg.procedural_fraction > 0.0 or cfg.procedural_probes:
-            ranges = GaitRanges(load_shape=tuple(float(v) for v in cfg.procedural_load_shape))
+            duty = {"duty": tuple(map(float, cfg.procedural_duty))} if cfg.procedural_duty else {}
+            ranges = GaitRanges(
+                load_shape=tuple(float(v) for v in cfg.procedural_load_shape), **duty
+            )
             # Probes that name a load profile need the shaped biped, whatever the ranges.
             named = any("load_shape" in p for p in (cfg.procedural_probes or []))
             self.biped = PointMassBiped(
@@ -244,6 +262,12 @@ class ReferenceCommand(UniformVelocityCommand):
                 device=self.device,
                 seed=cfg.procedural_seed,
                 shaped=ranges.shaped or named,
+                curriculum=(
+                    cfg.procedural_curriculum_score
+                    if cfg.procedural_curriculum and not cfg.procedural_probes
+                    else False
+                ),
+                failure_replay=0.0 if cfg.procedural_probes else cfg.failure_replay,
             )
             offsets = torch.arange(1, length + 1, dtype=torch.float64) * self.dt_star
             self.biped.set_offsets(offsets)
@@ -263,6 +287,21 @@ class ReferenceCommand(UniformVelocityCommand):
             self.trust = PlanTrust(2, length, size, cfg.trust_rate, self.device)
         self.sway_amplitude = torch.zeros(n, 2, device=self.device)
         """Each procedural episode's trunk sway, pitch and roll, radians."""
+        self.replay: ReplayChains | None = None
+        """With ``replay_plans``: the fixed chains every env follows (``latent/replay.py``)."""
+        if cfg.replay_plans:
+            if cfg.tasks or self.biped is not None or self.trust is not None:
+                raise ValueError("replay_plans excludes tasks, procedural plans and plan trust")
+            self.replay = load_replay(cfg.replay_plans, generator.skill_norm, self.device)
+            if abs(self.replay.grid_step - grid_step) > _TOLERANCE:
+                raise ValueError(f"{cfg.replay_plans}: not on the contract's grid")
+            span = (self.interpolation.shape[1] - 1) * self.dt_star
+            self.replay_chain = torch.arange(n, device=self.device) % self.replay.count
+            self.replay_start = replay_starts(n, self.replay.count, span, cfg.replay_spacing).to(
+                self.device
+            )
+            self.replay_clock = self.replay_start.clone()
+            """Each env's instant along its chain, in body times: what pairs bodies."""
 
     def __str__(self) -> str:
         return (
@@ -296,6 +335,8 @@ class ReferenceCommand(UniformVelocityCommand):
                 generator.flow_solver = cfg.flow_solver
             if cfg.flow_steps is not None:
                 generator.flow_steps = cfg.flow_steps
+            if cfg.plan_max_load is not None:
+                generator.max_log_load = math.log(cfg.plan_max_load + LOAD_EPSILON)
             same = (
                 abs(float(generator.grid_step) - grid_step) < _TOLERANCE
                 and generator.history == primary.history
@@ -535,6 +576,12 @@ class ReferenceCommand(UniformVelocityCommand):
         self.vel_command_b[ids] = windows["command"][t, n] / self.command_scale
         self.is_standing_env[ids] = windows["command"][t, n].norm(dim=-1) == 0
         heading = window[:, -1, _VX : _VX + 2] * self.units.velocity
+        self._write_heading_velocity(ids, heading)
+        self.needs_refill[ids] = False
+        self.replan[ids] = True
+
+    def _write_heading_velocity(self, ids: torch.Tensor, heading: torch.Tensor) -> None:
+        """Give the bases in ``ids`` a horizontal velocity given in their heading frame (m/s)."""
         # The root pose the reset just wrote; body poses are only refreshed by a step.
         w, x, y, z = self.robot.data.root_quat_w[ids].unbind(-1)
         yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
@@ -543,8 +590,40 @@ class ReferenceCommand(UniformVelocityCommand):
         velocity[:, 0] = c * heading[:, 0] - s * heading[:, 1]
         velocity[:, 1] = s * heading[:, 0] + c * heading[:, 1]
         self.robot.write_root_velocity_to_sim(velocity, env_ids=ids)
+
+    def _start_from_replay(self, ids: torch.Tensor) -> None:
+        """Start each env in ``ids`` at its replay's first instant, as
+        :meth:`_start_from_contract` starts one inside the task's motion: the history is the
+        chain's window there, the command the chain's, the base given the chain's CoM velocity
+        in this body's units, the joints left in the default pose."""
+        replay, chain, start = self.replay, self.replay_chain[ids], self.replay_start[ids]
+        window = replay.window(chain, start, self.interpolation.shape[1], self.dt_star)
+        self.history[ids] = window
+        self.physical[ids] = window
+        self.replay_clock[ids] = start
+        command = replay.command[chain]
+        self.vel_command_b[ids] = command / self.command_scale
+        self.is_standing_env[ids] = command.norm(dim=-1) == 0
+        physical = self.generator.skill_norm.inverse(window[:, -1])
+        self._write_heading_velocity(ids, physical[:, _VX : _VX + 2] * self.units.velocity)
         self.needs_refill[ids] = False
         self.replan[ids] = True
+
+    def _replay_plan(self, ids: torch.Tensor, space: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """The replayed chain at each env's next instants, and what it integrates to.
+
+        The rows are read straight from the chain at the body's instants (``latent/replay.py``:
+        not through the plan matrix), so every body is handed the same row at the same
+        instant; the integrals sum those rows over the body's step. ``space`` does not apply:
+        the chain is read linearly in the contract's normalised units.
+        """
+        del space
+        generator = self.generator
+        chain, now = self.replay_chain[ids], self.replay_clock[ids]
+        rows = self.replay.ahead(chain, now, self.plan.shape[1], self.dt_star)
+        rows = apply_plan_contact(rows, generator.skill_norm, self.cfg.plan_contact)
+        integrals = plan_integrals(generator.skill_norm.inverse(rows), self.dt_star)
+        return rows, integrals
 
     def _start_from_demonstrations(self, ids: torch.Tensor, starts: dict | None = None) -> None:
         """Reference state initialisation (Peng et al., 2018) on the contract.
@@ -778,7 +857,9 @@ class ReferenceCommand(UniformVelocityCommand):
         space = self.resample_space
         window = resample_rows(self.generator, self.interpolation, self.history[ids], space)
         command = self.vel_command_b[ids] * self.command_scale
-        if self.tasks is not None:
+        if self.replay is not None:
+            rows, integrals = self._replay_plan(ids, space)
+        elif self.tasks is not None:
             rows, integrals = self._draw_tasks(ids, window, command, space)
         else:
             noise = torch.randn(len(ids), self.generator.noise_size, device=self.device)
@@ -858,6 +939,7 @@ class ReferenceCommand(UniformVelocityCommand):
     # -- command term hooks ------------------------------------------------
 
     def reset(self, env_ids: Sequence[int] | None = None) -> dict[str, float]:
+        self._store_failures(env_ids)
         extras = super().reset(env_ids)
         ids = slice(None) if env_ids is None else env_ids
         self.just_reset[ids] = True
@@ -880,6 +962,9 @@ class ReferenceCommand(UniformVelocityCommand):
                 amplitude = torch.rand(len(every), 2, device=self.device)
                 sign = torch.where(torch.rand(len(every), 2, device=self.device) < 0.5, -1.0, 1.0)
                 self.sway_amplitude[every] = self.cfg.procedural_sway * amplitude * sign
+        if self.replay is not None:
+            self._start_from_replay(every)
+            return extras
         task = every[~self.procedural[every]]
         if self.tasks is not None:
             self._reset_tasks(every, task)
@@ -918,10 +1003,73 @@ class ReferenceCommand(UniformVelocityCommand):
 
     def _resample_command(self, env_ids: Sequence[int]) -> None:
         super()._resample_command(env_ids)
+        ids = torch.arange(self.num_envs, device=self.device)[env_ids]
         if self.tasks is not None:
-            ids = torch.arange(self.num_envs, device=self.device)[env_ids]
             self._task_commands(ids[~self.procedural[ids]])
+        if getattr(self, "command_failures", None) is not None:
+            self._replay_commands(ids[~self.procedural[ids]])
         self.replan[env_ids] = True
+
+    # -- failure replay ---------------------------------------------------------
+
+    def _command_rows(self, ids: torch.Tensor) -> torch.Tensor:
+        """``(k, 6)``: what a task episode's command was drawn as -- velocity, heading target,
+        whether it follows its heading, whether it stands."""
+        return torch.cat(
+            [
+                self.vel_command_b[ids],
+                self.heading_target[ids, None],
+                self.is_heading_env[ids, None].float(),
+                self.is_standing_env[ids, None].float(),
+            ],
+            dim=1,
+        )
+
+    def _command_width(self, t: int) -> torch.Tensor:
+        """``(3,)`` the widths of task ``t``'s command ranges (velocity x, y, yaw rate)."""
+        if t == 0 or self.tasks is None:
+            r = self.cfg.ranges
+            spans = [r.lin_vel_x, r.lin_vel_y, r.ang_vel_z]
+            return torch.tensor([hi - lo for lo, hi in spans], device=self.device)
+        low, high = self.tasks[t]["ranges"]
+        return torch.as_tensor(high - low, device=self.device, dtype=torch.float32)
+
+    def _store_failures(self, env_ids: Sequence[int] | None) -> None:
+        """Store what the episodes ending now by a termination (not a time-out) were drawn with:
+        a task episode's command, a procedural episode's segment (``latent/failure_replay.py``)."""
+        if getattr(self, "command_failures", None) is None:
+            return
+        manager = getattr(self._env, "termination_manager", None)
+        if manager is None:
+            return
+        ids = torch.arange(self.num_envs, device=self.device)[slice(None) if env_ids is None else env_ids]
+        failed = ids[manager.terminated[ids]]
+        if len(failed) == 0:
+            return
+        if self.biped is not None:
+            self.biped.record_failures(failed[self.procedural[failed]])
+        failed = failed[~self.procedural[failed]]
+        rows = self._command_rows(failed)
+        for t in torch.unique(self.task[failed]).tolist():
+            self.command_failures[int(t)].add(rows[self.task[failed] == t])
+
+    def _replay_commands(self, ids: torch.Tensor) -> None:
+        """Replace a share of ``ids``' fresh commands by stored failing ones of the same task, the
+        velocity jittered by 5 % of the task's range widths."""
+        for t, store in self.command_failures.items():
+            chosen = ids[self.task[ids] == t]
+            if len(chosen) == 0 or len(store) == 0:
+                continue
+            rows, replayed = store.mix(self._command_rows(chosen), self.cfg.failure_replay)
+            if not bool(replayed.any()):
+                continue
+            picked = chosen[replayed]
+            rows = rows[replayed]
+            jitter = 0.05 * self._command_width(t) * torch.randn(len(picked), 3, device=self.device)
+            self.vel_command_b[picked] = rows[:, :3] + jitter
+            self.heading_target[picked] = rows[:, 3]
+            self.is_heading_env[picked] = rows[:, 4] > 0.5
+            self.is_standing_env[picked] = rows[:, 5] > 0.5
 
     def _update_metrics(self) -> None:
         super()._update_metrics()
@@ -943,8 +1091,12 @@ class ReferenceCommand(UniformVelocityCommand):
         super()._update_command()
         if self.tasks is not None:
             self._task_headings()
+        if self.replay is not None:
+            self.vel_command_b[:] = self.replay.command[self.replay_chain] / self.command_scale
         self._true_now = self.true_skill()
         self._frame_now = self.frame()
+        if self.biped is not None and self.biped.curriculum is not None:
+            self._credit_curriculum()
         estimate = self._estimate()
         ready = ~self.just_reset
         refill = ready & self.needs_refill
@@ -989,6 +1141,10 @@ class ReferenceCommand(UniformVelocityCommand):
             self.history = self.physical.clone()
             anchor = torch.ones_like(refill)
         self.age = torch.where(carried, self.age + 1, self.age)
+        if self.replay is not None:
+            self.replay_clock = torch.where(
+                carried, self.replay_clock + self.dt_star, self.replay_clock
+            )
         self.anchored = torch.where(carried, self.anchored + 1, self.anchored)
         draw = refill | (carried & (self.replan | (self.age >= self.commit_env)))
         ids = draw.nonzero().squeeze(-1)
@@ -998,6 +1154,39 @@ class ReferenceCommand(UniformVelocityCommand):
         self.needs_refill = self.needs_refill & ~ready
         self.just_reset[:] = False
         self.estimate = estimate
+
+    def _credit_curriculum(self) -> None:
+        """Feed the biped's curriculum the step just simulated: each procedural env's share
+        of feet whose contact state is not its due plan row's (the contact reward's reading,
+        ``contact_reward.py``), for the bias score its feet's mean reached minus planned
+        contact, for the gait score each foot's contact error and planned contact and the
+        touchdowns reached and planned (a contact starting against the step before), and save
+        the curriculum's record at each refresh."""
+        norm = self.generator.skill_norm
+        threshold = self.cfg.procedural_curriculum_contact
+        planned = norm.inverse(self.due())[:, self._load] > threshold
+        reached = norm.inverse(self._true_now)[:, self._load] > threshold
+        if self.biped.curriculum.kind == "gait":
+            was_planned, was_reached = self._curriculum_previous or (planned, reached)
+            self._curriculum_previous = (planned, reached)
+            miss = torch.cat(
+                [
+                    reached.float() - planned.float(),
+                    planned.float(),
+                    (reached & ~was_reached).float().sum(dim=-1, keepdim=True),
+                    (planned & ~was_planned).float().sum(dim=-1, keepdim=True),
+                ],
+                dim=-1,
+            )
+        elif self.biped.curriculum.kind == "bias":
+            miss = (reached.float() - planned.float()).mean(dim=-1)
+        else:
+            miss = (planned != reached).float().mean(dim=-1)
+        counts = self.procedural & self.has_plan & ~self.just_reset
+        if self.biped.credit(miss, counts) and self.cfg.procedural_curriculum_log:
+            path = Path(self.cfg.procedural_curriculum_log)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(path, **self.biped.curriculum.record())
 
     def plan_gain(self) -> torch.Tensor:
         """``(N, length, 27)``: how far each env's plan is trusted at each lead time, by its
@@ -1198,6 +1387,38 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     procedural_seed: int = 0
 
+    procedural_duty: tuple[float, float] | None = None
+    """Range of the biped's mean duty (``GaitRanges.duty``); None keeps the family's
+    (0.30, 0.95), which reaches flight phases. (0.55, 0.95): walks only, the paper's scope."""
+
+    procedural_curriculum: bool = False
+    """Draw the biped's segments in proportion to the tracker's contact disagreement on their
+    kind of gait (``latent/curriculum.py``); off, the uniform draw, bit for bit. Never with
+    probes."""
+
+    procedural_curriculum_score: str = "disagreement"
+    """The curriculum's score (``latent/curriculum.py``, ``SCORES``): ``"disagreement"``, the
+    share of feet off the plan's contact, ``"bias"``, the feet's signed contact error, or
+    ``"gait"``, the largest relative duty or cadence error."""
+
+    procedural_curriculum_contact: float = 0.05
+    """Load (in the body's weight) above which the curriculum reads a foot as in contact:
+    the contact reward's threshold."""
+
+    procedural_curriculum_log: str | None = None
+    """Where the curriculum's record (per-cell score, counts and draw share at every refresh)
+    is saved, an ``.npz``; None: not saved."""
+
+    failure_replay: float = float(os.environ.get("HUMANOID_FAILURE_REPLAY", "0"))
+    """Share of task commands and procedural segments drawn again from the training episodes that
+    terminated (not by time-out; not after the procedural biped fell): ``latent/failure_replay.py``.
+    0 (default): off, the draw is the usual one, bit for bit."""
+
+    plan_max_load: float | None = None
+    """Largest load, in body weights, a generator's plan may ask of one foot; None keeps
+    the contracts' ten. The generators model log loads, whose sampling errors multiply a
+    stance's load: task plans asked > 4 W on 3 % of steps, their data on 0.04 %."""
+
     procedural_load_shape: tuple[float, float] = (1.0, 1.0)
     """Range of the time warp of a walking stance's half-sine of load (``GaitRanges.load_shape``,
     ``latent/procedural.py``): ``(1, 1)``, the half-sine, as every tracker before 2026-11-04
@@ -1236,6 +1457,16 @@ class ReferenceCommandCfg(UniformVelocityCommandCfg):
 
     task_weights: list[float] | None = None
     """Relative weight of each task, task 0 first; uniform by default."""
+
+    replay_plans: str | None = None
+    """A replay file (``latent/replay.py``): env ``i`` follows chain ``i % K`` of fixed plans
+    from a fixed instant, the same on every body, so states pair across bodies by (chain,
+    instant): co-executions. Every episode starts inside its chain (the history its window
+    there, the base its CoM velocity). Excludes ``tasks``, procedural plans and
+    ``plan_trust``."""
+
+    replay_spacing: float = 0.0
+    """Envs sharing a chain (``i // K``) start this many body times apart along it."""
 
 
 OCTAVES = tuple(2.0**j for j in range(8))

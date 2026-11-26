@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The evaluation ladder of the zero-shot study.
 #
-#   [ZS_TASK=flat|rough] transfer/scripts/zero_shot_ladder.sh <g1|nao> <run dir> <checkpoint> <tag> [stage...]
+#   [ZS_TASK=flat|rough] transfer/scripts/zero_shot_ladder.sh <body> <run dir> <checkpoint> <tag> [stage...]
 #
 # Stages, all of them by default:
 #   l1       random procedural schedules, as in training (true state):  competence_<body>_<tag>_random
@@ -67,27 +67,29 @@ teacher_rollout="${ZS_TEACHER_ROLLOUT:-play}"
 observe="${ZS_OBSERVE:-task}"
 own=""
 if [ "$observe" = own ]; then own="_own"; fi
-if [ "$body" = g1 ]; then
-  # ZS_TASK_ID: another tracking task of the same body (the physics tracker's, say).
-  task_id="${ZS_TASK_ID:-G1Track-Play-v0}"
-  walk="logs/contract/walk_dagger3e/generator.pt"
-  rollouts=g1/rollouts
-  mirror=g1/body/mirror.json
-  scale="1 1"
-else
-  task_id="${ZS_TASK_ID:-NaoTrack-Play-v0}"
-  walk="logs/contract/walk_dagger2e/generator.pt"
-  rollouts=nao/rollouts
-  mirror=nao/body/mirror.json
-  export HUMANOID_POSTURE_CONTRACT="$root/$walk"
-  scale="$("$python" -c "
-import math
-g1, nao = 0.6545728842979989, 0.24801
-print(math.sqrt(nao / g1), math.sqrt(g1 / nao))")"
+# The body's play task, walk contract, posture contract, rollouts, mirror and Froude scales
+# (commands are written in G1 units) come from transfer/bodies/teachers.json; the load space
+# stays the caller's. ZS_TASK_ID: another tracking task of the same body (the physics tracker's).
+body_vars="$("$python" transfer/scripts/body_conditions.py "$body" --prefix body_)"
+eval "$(grep -v 'HUMANOID_LOAD_SPACE' <<< "$body_vars")"
+task_id="${ZS_TASK_ID:-$body_play_task}"
+walk="$body_contract"
+rollouts="$body_rollouts"
+mirror="$body_mirror"
+speed_scale="$body_speed_scale"
+turn_scale="$body_turn_scale"
+# ZS_ENCODER_TAG: use another tag's refitted encoder (its "encoder" stage), e.g. to deploy two
+# policies of one body through the same state estimate.
+encoder_tag="${ZS_ENCODER_TAG:-$tag}"
+walk_zs="logs/contract/walk_zs_${body}_${encoder_tag}/generator.pt"
+task_zs="logs/contract/${generator_name}_zs_${body}_${encoder_tag}/generator.pt"
+# ZS_PACT_MODEL: the shared PACT policy drives the body in every capture; the tracker of
+# <run> stays the labeller (capture_contract.py --pact-model). The tag should say so.
+pact=()
+if [ -n "${ZS_PACT_MODEL:-}" ]; then
+  pact=(--pact-model "$ZS_PACT_MODEL" --pact-body "$body")
+  [ "${ZS_SYMMETRIZE:-0}" = 1 ] && pact+=(--pact-symmetrize)
 fi
-read -r speed_scale turn_scale <<< "$scale"
-walk_zs="logs/contract/walk_zs_${body}_${tag}/generator.pt"
-task_zs="logs/contract/${generator_name}_zs_${body}_${tag}/generator.pt"
 mkdir -p "$rollouts"
 
 "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt" > /dev/null
@@ -121,7 +123,7 @@ capture() {
     until assets_online; do sleep 60; done
     "$python" -u transfer/scripts/capture_contract.py --headless --task-id "$task_id" \
       --driver-policy "$policy" --steps "${ZS_STEPS:-900}" --settle-steps "${ZS_SETTLE:-100}" "$@" \
-      --output "$rollouts/zs_${tag}_${name}.npz" > "$log" 2>&1
+      "${pact[@]}" --output "$rollouts/zs_${tag}_${name}.npz" > "$log" 2>&1
     grep -aqE "Unable to open the usd file at path: https|USD file not found at path at: 'https" "$log" || break
     echo "capture $name: an asset could not be opened (attempt $attempt); retrying"
   done

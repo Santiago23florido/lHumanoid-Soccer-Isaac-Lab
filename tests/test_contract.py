@@ -23,6 +23,7 @@ from humanoid_transfer.transfer.latent.contract import (  # noqa: E402
     ContractClock,
     ContractDims,
     ContractGenerator,
+    contact_slip,
     contract_loss,
     load_contract,
     save_contract,
@@ -254,3 +255,130 @@ def test_a_warped_generator_never_asks_for_a_negative_load() -> None:
         )
     loads = generator.skill_norm.inverse(plan)[..., LOAD]
     assert float(loads.min()) >= -1e-5
+
+
+FOOT_VELOCITY = SKILL_LAYOUT.slice_of("foot_velocity")
+
+
+def _fitted(dims: ContractDims) -> ContractGenerator:
+    generator = ContractGenerator(dims, CLOCK)
+    skill = torch.randn(500, 27)
+    skill[:, LOAD] = torch.where(torch.rand(500, 2) < 0.3, 0.0, torch.rand(500, 2))
+    generator.skill_norm.fit(skill)
+    generator.fit_warp(skill)
+    return generator
+
+
+def test_a_loaded_foot_standing_still_does_not_slip_and_only_its_speed_is_pushed() -> None:
+    torch.manual_seed(0)
+    generator = _fitted(replace(SMALL, warp_loads=True))
+    physical = torch.randn(4, CLOCK.horizon, 27)
+    physical[..., LOAD.start] = 0.8  # the left foot carries load
+    physical[..., LOAD.start + 1] = 0.0  # the right foot is in the air
+    physical[..., FOOT_VELOCITY.start : FOOT_VELOCITY.start + 3] = 0.0
+    plan = generator.skill_norm(physical)
+    # zero up to the float32 round trip through the normaliser
+    assert float(contact_slip(generator, plan)) == pytest.approx(0.0, abs=1e-6)
+
+    physical[..., FOOT_VELOCITY.start] = 0.3  # the loaded foot slides forward
+    plan = generator.skill_norm(physical).requires_grad_(True)
+    slip = contact_slip(generator, plan)
+    std = generator.skill_norm.std[FOOT_VELOCITY.start]
+    # The left foot's 0.8 x (0.3 / std)^2, averaged over the two feet.
+    assert float(slip) == pytest.approx(float(0.8 * (0.3 / std) ** 2 / 2), rel=1e-5)
+    slip.backward()
+    grad = plan.grad
+    assert float(grad[..., LOAD].abs().max()) == 0.0  # never asked to unload
+    right = slice(FOOT_VELOCITY.start + 3, FOOT_VELOCITY.stop)
+    pushed = float(grad[..., FOOT_VELOCITY.start].abs().min())
+    assert pushed > 0.0
+    # A foot in the air moves freely (its load is zero up to the float32 round trip).
+    assert float(grad[..., right].abs().max()) < 1e-6 * pushed
+
+
+def test_the_stick_loss_joins_the_flow_loss_and_a_saved_contract_keeps_its_weight(
+    tmp_path,
+) -> None:
+    torch.manual_seed(0)
+    dims = replace(SMALL, warp_loads=True, stick_weight=0.5)
+    generator = _fitted(dims).train()
+    plain = ContractGenerator(replace(dims, stick_weight=0.0), CLOCK).train()
+    plain.load_state_dict(generator.state_dict())
+    window, command = torch.randn(5, CLOCK.history, 27), torch.randn(5, 3)
+    future = torch.randn(5, CLOCK.horizon, 27)
+    torch.manual_seed(1)
+    loss = contract_loss(generator, window, command, future, 0.0)
+    torch.manual_seed(1)
+    base = contract_loss(plain, window, command, future, 0.0)
+    assert set(loss) == {"total", "flow", "stick"} and set(base) == {"total", "flow"}
+    assert torch.equal(loss["flow"], base["flow"])  # the flow term is untouched
+    assert float(loss["stick"]) > 0.0
+    assert torch.allclose(loss["total"], loss["flow"] + 0.5 * loss["stick"])
+    loss["total"].backward()
+    assert all(p.grad is not None for p in generator.velocity.parameters())
+
+    path = tmp_path / "generator.pt"
+    save_contract(path, Contract(generator.eval(), None, torch.rand(27), {}), dims, CLOCK, 120)
+    assert load_contract(path).generator.stick_weight == 0.5
+
+
+def _guided_setup():
+    torch.manual_seed(0)
+    generator = _fitted(replace(SMALL, warp_loads=True, flow_solver="midpoint")).eval()
+    skill = torch.randn(13, 27)
+    skill[:, LOAD] = torch.rand(13, 2)
+    window = generator.skill_norm(skill)[None].expand(16, -1, -1)
+    return generator, window, torch.zeros(16, 3), torch.randn(16, generator.noise_size)
+
+
+def test_guided_sampling_lands_on_the_constraint_and_an_identity_guide_changes_nothing() -> None:
+    from humanoid_transfer.transfer.latent.plan_contact import stick_loaded_feet
+
+    generator, window, command, noise = _guided_setup()
+    with torch.no_grad():
+        plain = generator.sample(window, command, noise)
+        same = generator.sample(window, command, noise, guide=lambda plan: plan)
+        guided = generator.sample(
+            window, command, noise, guide=lambda plan: stick_loaded_feet(plan, generator.skill_norm)
+        )
+    assert torch.allclose(same, plain, atol=1e-5)
+    # The last step lands on the projection: a guided plan is its own projection.
+    assert torch.allclose(stick_loaded_feet(guided, generator.skill_norm), guided, atol=1e-5)
+    physical = generator.skill_norm.inverse(guided)
+    for side in range(2):
+        loaded = physical[..., LOAD.start + side] > 0.05
+        velocity = physical[..., FOOT_VELOCITY.start + 3 * side : FOOT_VELOCITY.start + 3 * side + 3]
+        assert bool(loaded.any())
+        assert float(velocity[loaded].abs().max()) < 1e-5
+    # The loads are the field's own: the guide never changes them, but the other fields
+    # are re-predicted from the guided sample, so the plan is not the drawn one projected.
+    assert not torch.allclose(guided, stick_loaded_feet(plain, generator.skill_norm), atol=1e-3)
+
+
+def test_a_guide_may_not_change_the_loads_of_a_warped_generator() -> None:
+    generator, window, command, noise = _guided_setup()
+
+    def unload(plan: torch.Tensor) -> torch.Tensor:
+        out = plan.clone()
+        out[..., LOAD] = out[..., LOAD] - 0.1
+        return out
+
+    with pytest.raises(ValueError):
+        generator.sample(window, command, noise, guide=unload)
+
+
+@pytest.mark.parametrize("mode", ["stick", "guided"])
+def test_a_chain_of_consistent_plans_keeps_its_loaded_feet_still(mode: str) -> None:
+    from humanoid_transfer.transfer.latent.train_contract import chain_states
+
+    generator, window, command, _ = _guided_setup()
+    sigma = torch.zeros(27)
+    with torch.no_grad():
+        z = chain_states(generator, window.clone(), command, sigma, 18, CLOCK.commit, 0, plan_contact=mode)
+    for side in range(2):
+        loaded = z[..., LOAD.start + side] > 0.05
+        velocity = z[..., FOOT_VELOCITY.start + 3 * side : FOOT_VELOCITY.start + 3 * side + 3]
+        assert loaded.any()
+        assert abs(velocity[loaded]).max() < 1e-5
+    with pytest.raises(ValueError):
+        chain_states(generator, window.clone(), command, sigma, 6, CLOCK.commit, plan_contact="slide")

@@ -49,6 +49,7 @@ from ....transfer.tasks.tracking import (
     contract_privileged,
     contract_view,
 )
+from ....transfer.tasks.tracking.contact_reward import contact_schedule
 from ..g1_walk.g1_walk_env_cfg import FROUDE_MATCHED_SPEED, G1WalkTeacherEnvCfg
 
 REPO_ROOT = Path(__file__).resolve().parents[6]
@@ -74,6 +75,23 @@ OBSERVE_UNITS = os.environ.get("HUMANOID_OBSERVE_UNITS") or None
 """The contract whose units the tracker observes in (``ReferenceCommandCfg.observe_units``)."""
 """How plans and histories are read between the generator's grid and this body's steps
 (``ReferenceCommandCfg.resample_space``)."""
+PROCEDURAL_DUTY = (
+    tuple(float(v) for v in os.environ["HUMANOID_PROCEDURAL_DUTY"].split(","))
+    if os.environ.get("HUMANOID_PROCEDURAL_DUTY")
+    else None
+)
+"""The procedural biped's duty range (``ReferenceCommandCfg.procedural_duty``); unset keeps
+the family's, "0.55,0.95" restricts it to walks."""
+CONTACT_REWARD = float(os.environ.get("HUMANOID_CONTACT_REWARD", "0"))
+"""Weight of the plan's contact schedule in the reward (``tracking/contact_reward.py``); 0: off."""
+CURRICULUM_MODE = os.environ.get("HUMANOID_CURRICULUM", "0")
+"""Draw the procedural plans by the tracker's contact error (``latent/curriculum.py``): "1" by
+its disagreement, "bias" by its signed contact error, "gait" by its largest relative duty
+or cadence error; its record goes to
+``HUMANOID_CURRICULUM_LOG`` (an ``.npz``) when that is set."""
+CURRICULUM = CURRICULUM_MODE in ("1", "bias", "gait")
+CURRICULUM_SCORE = CURRICULUM_MODE if CURRICULUM_MODE in ("bias", "gait") else "disagreement"
+CURRICULUM_LOG = os.environ.get("HUMANOID_CURRICULUM_LOG") or None
 LOAD_SHAPE = tuple(float(v) for v in os.environ.get("HUMANOID_LOAD_SHAPE", "1,1").split(","))
 """Range of the procedural stances' load-profile warp
 (``ReferenceCommandCfg.procedural_load_shape``)."""
@@ -172,6 +190,11 @@ class G1TrackRewards(G1Rewards):
         weight=1.0,
         params={"command_name": COMMAND, "kernels": OCTAVES, "weights": OCTAVE_WEIGHTS},
     )
+    contact_schedule = (
+        RewTerm(func=contact_schedule, weight=CONTACT_REWARD, params={"command_name": COMMAND})
+        if CONTACT_REWARD
+        else None
+    )
 
 
 @configclass
@@ -220,6 +243,10 @@ class G1TrackEnvCfg(G1WalkTeacherEnvCfg):
             plan_contact=PLAN_CONTACT,
             observe_units=OBSERVE_UNITS,
             procedural_load_shape=LOAD_SHAPE,
+            procedural_duty=PROCEDURAL_DUTY,
+            procedural_curriculum=CURRICULUM,
+            procedural_curriculum_score=CURRICULUM_SCORE,
+            procedural_curriculum_log=CURRICULUM_LOG,
             load_precision=str(LOAD_PRECISION),
             # The G1 starts each task inside its own expert's states.
             tasks=task_specs(TASKS, REPO_ROOT, own_states=True) if TASKS else None,

@@ -1,0 +1,180 @@
+{
+  "$comment": [
+    "Registry of the bodies the multi-body latent is trained and evaluated on.",
+    "Names are exact Isaac Lab body and joint names; feet and hip joints are listed left, right.",
+    "measure_task is a play task that spawns the body as the experts and trackers simulate it;",
+    "transfer/scripts/measure_body.py --body <name> writes card from it.",
+    "tracker: what a contract tracker of the body needs beyond its card (bodies/body_track_env_cfg.py)."
+  ],
+  "g1": {
+    "measure_task": "G1Walk-Teacher-Play-v0",
+    "base_body": "pelvis",
+    "foot_bodies": [
+      "left_ankle_roll_link",
+      "right_ankle_roll_link"
+    ],
+    "hip_pitch_joints": [
+      "left_hip_pitch_joint",
+      "right_hip_pitch_joint"
+    ],
+    "hip_roll_joints": [
+      "left_hip_roll_joint",
+      "right_hip_roll_joint"
+    ],
+    "mirror_naming": "prefix",
+    "experts": {
+      "flat": "Isaac-Velocity-Flat-G1-v0",
+      "rough": "Isaac-Velocity-Rough-G1-v0"
+    },
+    "card": "transfer/bodies/g1/body_card.json"
+  },
+  "nao": {
+    "measure_task": "NaoTrack-Play-v0",
+    "base_body": "base_link",
+    "foot_bodies": [
+      "l_ankle",
+      "r_ankle"
+    ],
+    "hip_pitch_joints": [
+      "LHipPitch",
+      "RHipPitch"
+    ],
+    "hip_roll_joints": [
+      "LHipRoll",
+      "RHipRoll"
+    ],
+    "mirror_naming": "prefix",
+    "experts": {},
+    "leg_length_unit": 0.24801,
+    "leg_length_unit_source": "transfer/embodiment.py NAO: the unit every NAO tracker was trained in (URDF sole frame); the card measures the sole where the collision boxes meet the ground, 2.49 mm below that frame (SOLE_REST), 1.34 % longer",
+    "card": "transfer/bodies/nao/body_card.json"
+  },
+  "h1": {
+    "measure_task": "Isaac-Velocity-Flat-H1-Play-v0",
+    "base_body": "pelvis",
+    "foot_bodies": [
+      "left_ankle_link",
+      "right_ankle_link"
+    ],
+    "hip_pitch_joints": [
+      "left_hip_pitch",
+      "right_hip_pitch"
+    ],
+    "hip_roll_joints": [
+      "left_hip_roll",
+      "right_hip_roll"
+    ],
+    "mirror_naming": "prefix",
+    "experts": {
+      "flat": "Isaac-Velocity-Flat-H1-v0",
+      "rough": "Isaac-Velocity-Rough-H1-v0"
+    },
+    "card": "transfer/bodies/h1/body_card.json",
+    "tracker": {
+      "robot": "isaaclab_assets:H1_MINIMAL_CFG",
+      "action_scale": 0.5,
+      "posture": "crouch",
+      "sagittal_chains": [
+        [
+          "left_hip_pitch",
+          "left_knee",
+          "left_ankle"
+        ],
+        [
+          "right_hip_pitch",
+          "right_knee",
+          "right_ankle"
+        ]
+      ],
+      "fall_contact": ".*torso_link",
+      "free_joints": [
+        ".*_shoulder_.*",
+        ".*_elbow",
+        "torso"
+      ],
+      "init_std": 1.0,
+      "mirror_prefix": [
+        "left_",
+        "right_"
+      ]
+    }
+  },
+  "cassie": {
+    "measure_task": "Isaac-Velocity-Flat-Cassie-Play-v0",
+    "base_body": "pelvis",
+    "foot_bodies": [
+      "left_toe",
+      "right_toe"
+    ],
+    "hip_pitch_joints": [
+      "hip_flexion_left",
+      "hip_flexion_right"
+    ],
+    "hip_roll_joints": [
+      "hip_abduction_left",
+      "hip_abduction_right"
+    ],
+    "mirror_naming": "suffix",
+    "experts": {
+      "flat": "Isaac-Velocity-Flat-Cassie-v0",
+      "rough": "Isaac-Velocity-Rough-Cassie-v0"
+    },
+    "card": "transfer/bodies/cassie/body_card.json",
+    "tracker": {
+      "robot": "isaaclab_assets.robots.cassie:CASSIE_CFG",
+      "action_scale": 0.5,
+      "posture": "default",
+      "sagittal_chains": [],
+      "fall_contact": "pelvis",
+      "free_joints": [],
+      "init_std": 1.0,
+      "mirror_suffix": [
+        "_left",
+        "_right"
+      ]
+    }
+  },
+  "digit": {
+    "measure_task": "Isaac-Velocity-Flat-Digit-Play-v0",
+    "base_body": "torso_base",
+    "foot_bodies": [
+      "left_leg_toe_roll",
+      "right_leg_toe_roll"
+    ],
+    "hip_pitch_joints": [
+      "left_leg_hip_pitch",
+      "right_leg_hip_pitch"
+    ],
+    "hip_roll_joints": [
+      "left_leg_hip_roll",
+      "right_leg_hip_roll"
+    ],
+    "mirror_naming": "prefix",
+    "experts": {},
+    "card": "transfer/bodies/digit/body_card.json",
+    "tracker": {
+      "robot": "isaaclab_assets.robots.agility:DIGIT_V4_CFG",
+      "action_scale": 0.5,
+      "posture": "default",
+      "sagittal_chains": [],
+      "fall_contact": "torso_base",
+      "free_joints": [
+        ".*_arm_.*"
+      ],
+      "init_std": 1.0,
+      "mirror_prefix": [
+        "left_",
+        "right_"
+      ],
+      "action_joints": [
+        ".*_hip_roll",
+        ".*_hip_yaw",
+        ".*_hip_pitch",
+        ".*_knee",
+        ".*_toe_a",
+        ".*_toe_b",
+        ".*_arm_.*"
+      ]
+    }
+  }
+}

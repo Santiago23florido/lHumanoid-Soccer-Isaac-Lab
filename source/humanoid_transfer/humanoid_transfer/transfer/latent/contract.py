@@ -46,6 +46,7 @@ that produced the data.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -121,11 +122,17 @@ class ContractDims:
     what is worth its cost in predicting the plan. At inference it is used without noise.
     0: none, the generator as before."""
 
+    stick_weight: float = 0.0
+    """Weight of the contact-complementarity loss (:func:`contact_slip`, ``flow`` only): a
+    loaded foot does not move. 0: none, the generator as before."""
+
 
 _LOAD = SKILL_LAYOUT.slice_of("foot_load")
+_FOOT_VELOCITY = SKILL_LAYOUT.slice_of("foot_velocity")
 _LOAD_EPS = 0.01
 _LOG_MAX_LOAD = 2.303
-"""One percent of body weight: the scale below which a load is a foot in the air."""
+"""``log 10``: by default no plan asks a foot for more than ten body weights
+(:attr:`ContractGenerator.max_log_load` lowers it)."""
 
 _FREQUENCIES = (1.0, 2.0, 4.0, 8.0)
 _TIME_FEATURES = 1 + 2 * len(_FREQUENCIES)
@@ -186,8 +193,11 @@ class ContractGenerator(nn.Module):
         self.flow_steps = dims.flow_steps
         self.flow_solver = dims.flow_solver
         self.warp_loads = dims.warp_loads
+        # The largest load a plan may ask of a foot, in log units of the body's weight.
+        self.max_log_load = _LOG_MAX_LOAD
         self.noise_conditional = dims.noise_conditional
         self.summary_beta = dims.summary_beta
+        self.stick_weight = dims.stick_weight
         if self.noise_conditional:
             # log of the history noise's scale, in units of the encoder's own error: zero is
             # what a deployed body's encoder reads with (see :meth:`condition`).
@@ -232,7 +242,7 @@ class ContractGenerator(nn.Module):
             return w
         # Ten body weights is beyond any load a foot carries; it keeps exp finite on
         # the wild histories of a body that is still learning to stand.
-        logged = (w[..., _LOAD] * self.warp_std + self.warp_mean).clamp(max=_LOG_MAX_LOAD)
+        logged = (w[..., _LOAD] * self.warp_std + self.warp_mean).clamp(max=self.max_log_load)
         load = torch.exp(logged) - _LOAD_EPS
         mean, std = self.skill_norm.mean[_LOAD], self.skill_norm.std[_LOAD]
         loads = (load.clamp(min=0.0) - mean) / std
@@ -305,15 +315,27 @@ class ContractGenerator(nn.Module):
         command: torch.Tensor,
         noise: torch.Tensor,
         level: torch.Tensor | None = None,
+        guide: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """One plan per row, ``(B, horizon, skill)`` absolute and normalised.
 
         ``noise`` is a standard normal ``(B, noise_size)``; it alone decides which
         plausible future is drawn.
+
+        ``guide`` (flow only): a projection of plans (normalised ``z*``, ``(B, horizon,
+        skill)``) onto a constraint, e.g. :func:`~.plan_contact.stick_loaded_feet`. At every
+        flow step the endpoint the velocity points to, ``x + (1 - t) v``, is projected and
+        the step is taken toward the projected endpoint, so the field re-predicts every
+        other field from a sample that keeps the constraint; the last step lands on it.
+        This is constraint guidance (``-λ ∇ ½‖C‖²`` on the predicted endpoint) with the
+        step that solves the constraint exactly, so it has no step size. The projection
+        may not change the loads: they are modelled in log units (:meth:`warp`).
         """
         window = self.warp(window)
         condition = self.condition(window, command, level)
         if self.kind == "cvae":
+            if guide is not None:
+                raise ValueError("guided sampling needs a flow generator")
             mean, log_std = self.prior_params(condition)
             residual = self.decode(condition, mean + torch.exp(log_std) * noise)
         else:
@@ -325,9 +347,30 @@ class ContractGenerator(nn.Module):
                 if self.flow_solver == "midpoint":
                     middle = x + 0.5 * step * velocity
                     velocity = self.flow_velocity(middle, t + 0.5 * step, condition)
+                if guide is not None:
+                    remaining = 1.0 - i * step
+                    endpoint = x + remaining * velocity
+                    velocity = (self._guided(endpoint, window, guide) - x) / remaining
                 x = x + step * velocity
             residual = self.residual_norm.inverse(x).reshape(-1, self.horizon, self.skill)
         return self.unwarp(window[:, -1:] + residual)
+
+    def _guided(
+        self,
+        endpoint: torch.Tensor,
+        window: torch.Tensor,
+        guide: Callable[[torch.Tensor], torch.Tensor],
+    ) -> torch.Tensor:
+        """``endpoint`` (the flow's normalised residual, ``(B, horizon * skill)``) with the
+        plan it decodes to projected by ``guide``. ``window`` is in the generator's space."""
+        residual = self.residual_norm.inverse(endpoint).reshape(-1, self.horizon, self.skill)
+        plan = self.unwarp(window[:, -1:] + residual)
+        change = guide(plan) - plan
+        if self.warp_loads and bool((change[..., _LOAD] != 0).any()):
+            raise ValueError("a guide may not change the loads (they are modelled in log units)")
+        # Outside the loads the generator's space is normalised z* itself, so the change
+        # carries over to the residual unchanged.
+        return self.residual_norm((residual + change).reshape(endpoint.shape))
 
 
 _VX, _VY = (
@@ -365,6 +408,34 @@ def gaussian_kl(
     return log_std_p - log_std_q + (var_q + (mean_q - mean_p) ** 2) / (2 * var_p) - 0.5
 
 
+def contact_slip(
+    generator: ContractGenerator, plan: torch.Tensor, weight: torch.Tensor | None = None
+) -> torch.Tensor:
+    """Contact complementarity of plans ``(B, horizon, skill)`` (normalised ``z*``): each
+    foot's load times its squared sole speed, averaged over feet and samples, batch mean.
+
+    On rigid ground a loaded foot does not slide (Coulomb friction inside its cone:
+    ``λ_n |v| = 0``). The teachers' captures keep it: their firmly loaded feet move at
+    0.002 V. The flow generators' plans do not: they move them at about 0.10 V, from the
+    teacher's own clean history as well as from their chains, at 8 or 32 integration steps
+    (``transfer/scripts/pact_gate_p.py``). A foot that carries load for a whole stance has
+    an exact zero velocity in the data, and a smooth velocity field spreads it.
+
+    The load is the plan's own and is not differentiated: the loss asks a loaded foot to
+    stand still, never a moving foot to unload. The speed is in units of the skill
+    normaliser's spread per dimension, the flow loss's own units. ``weight`` ``(B, 1)``
+    scales each row (the flow time: a one-step estimate is the plan only near t = 1).
+    """
+    physical = generator.skill_norm.inverse(plan)
+    load = physical[..., _LOAD].clamp(min=0.0).detach()
+    velocity = physical[..., _FOOT_VELOCITY] / generator.skill_norm.std[_FOOT_VELOCITY]
+    speed = velocity.unflatten(-1, (load.shape[-1], -1)).pow(2).sum(-1)
+    per_row = (load * speed).mean((1, 2))
+    if weight is not None:
+        per_row = per_row * weight.reshape(-1)
+    return per_row.mean()
+
+
 def contract_loss(
     generator: ContractGenerator,
     window: torch.Tensor,
@@ -382,6 +453,10 @@ def contract_loss(
     for ``cvae``, the negative evidence lower bound, with ``free_bits`` a
     floor on the KL of each intent dimension so the intent cannot collapse.
 
+    With :attr:`ContractGenerator.stick_weight` > 0 (``flow``), the contact complementarity
+    (:func:`contact_slip`) of the plan the predicted velocity points to joins ``total``,
+    weighted by the flow time, and is reported as ``stick``.
+
     With :attr:`ContractGenerator.summary_beta` > 0, the history bottleneck's cost
     (``summary_beta`` times half the summary's squared norm, batch mean) joins ``total``
     and is reported as ``summary_kl`` (the KL itself, without the weight).
@@ -395,8 +470,16 @@ def contract_loss(
         source = torch.randn_like(target)
         t = torch.rand(target.shape[0], 1, device=target.device)
         moved = (1.0 - t) * source + t * target
-        flow = (generator.flow_velocity(moved, t, condition) - (target - source)).pow(2).mean()
-        return _with_bottleneck(generator, summary, {"total": flow, "flow": flow})
+        velocity = generator.flow_velocity(moved, t, condition)
+        flow = (velocity - (target - source)).pow(2).mean()
+        losses = {"total": flow, "flow": flow}
+        if generator.stick_weight > 0.0:
+            # The plan this velocity points to: one Euler step from ``moved`` to t = 1.
+            estimate = generator.residual_norm.inverse(moved + (1.0 - t) * velocity)
+            plan = generator.unwarp(window[:, -1:] + estimate.reshape(residual.shape))
+            stick = contact_slip(generator, plan, t)
+            losses = {"total": flow + generator.stick_weight * stick, "flow": flow, "stick": stick}
+        return _with_bottleneck(generator, summary, losses)
     mean_q, log_std_q = generator.posterior_params(condition, residual)
     mean_p, log_std_p = generator.prior_params(condition)
     intent = mean_q + torch.exp(log_std_q) * torch.randn_like(mean_q)
@@ -496,6 +579,7 @@ __all__ = [
     "ContractClock",
     "ContractDims",
     "ContractGenerator",
+    "contact_slip",
     "contract_loss",
     "gaussian_kl",
     "load_contract",

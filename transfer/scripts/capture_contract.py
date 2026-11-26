@@ -12,11 +12,19 @@ step; a second body has no teacher. This capture needs only a contract task
 * the body's units, so speeds compare across bodies in ``V = sqrt(g L)``;
 * ``encoder_input``: what the body's encoder reads, to fit one
   (``train_body_encoder.py``);
+* with ``--joints``, the joint angles and speeds and the projected gravity; with
+  ``--policy-obs``, the tracker's observation (both before each step);
+* with ``--replay-plans``, fixed plans every body follows alike: per step each env's
+  instant along its chain (``replay_clock``), and its chain (``replay_chain``);
 * with ``--procedural-fraction`` or ``--gait-probes``, plans from the
   point-mass biped instead of the task (``transfer/latent/procedural.py``):
   per step which envs follow it (``procedural``), and whether their biped has
   fallen or is recovering; with probes, which probe each env follows
-  (``probe_index``, ``probes``).
+  (``probe_index``, ``probes``);
+* with ``--pact-model``, a PACT policy (``pact_gate_d.py``) drives the body and the
+  ``--driver-policy`` tracker becomes the teacher: it labels every step
+  (``action_teacher``) and, with ``--teacher-share``, drives that share of the
+  environments (``teacher_driven``) -- DAgger's rollouts (G-D1).
 
 Usage::
 
@@ -60,6 +68,12 @@ parser.add_argument(
 )
 parser.add_argument("--reference", choices=("autonomous", "physical"), default=None)
 parser.add_argument(
+    "--plan-max-load",
+    type=float,
+    default=None,
+    help="Cap, in body weights, on the load a generator's plan asks of one foot (default 10).",
+)
+parser.add_argument(
     "--standing-fraction",
     type=float,
     default=None,
@@ -101,6 +115,13 @@ parser.add_argument(
 )
 parser.add_argument("--procedural-seed", type=int, default=0)
 parser.add_argument(
+    "--replay-plans",
+    type=Path,
+    default=None,
+    help="A replay file (latent/replay.py): env i follows chain i %% K, the same on every body.",
+)
+parser.add_argument("--replay-spacing", type=float, default=None)
+parser.add_argument(
     "--push",
     type=float,
     nargs=2,
@@ -116,6 +137,35 @@ parser.add_argument(
     default=None,
     help="Robustness probe on the deployed path: noise on the estimate, in multiples of the "
     "estimator's precision.",
+)
+parser.add_argument(
+    "--joints",
+    action="store_true",
+    help="Also record the joint angles and speeds and the projected gravity before each step "
+    "(what the PACT anchors and encoder read).",
+)
+parser.add_argument(
+    "--policy-obs",
+    action="store_true",
+    help="Also record the tracker's observation before each step (distillation data).",
+)
+parser.add_argument(
+    "--pact-model",
+    type=Path,
+    default=None,
+    help="A PACT policy checkpoint (pact_gate_d.py) drives; --driver-policy labels each step.",
+)
+parser.add_argument("--pact-body", default=None, help="The body's name in transfer/bodies.")
+parser.add_argument(
+    "--pact-symmetrize",
+    action="store_true",
+    help="Deploy --pact-model averaged with its sagittal mirror (Reynolds projection, matching symmetrize_actor.py).",
+)
+parser.add_argument(
+    "--teacher-share",
+    type=float,
+    default=0.0,
+    help="With --pact-model: the share of environments the teacher drives (DAgger's mixture).",
 )
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--output", type=Path, required=True)
@@ -133,6 +183,111 @@ from humanoid_transfer.common.skill_state import SKILL_LAYOUT
 from humanoid_transfer.transfer.tasks.tracking.balance import balance_state
 
 COMMAND = "base_velocity"
+
+
+def drive_parameters(robot) -> dict | None:
+    """Per joint, the drives' stiffness, damping and effort limit as the simulation holds
+    them, and the default joint positions; None if any cannot be read."""
+    try:
+        count = len(robot.joint_names)
+        out = {
+            key: np.full(count, np.nan, dtype=np.float32)
+            for key in ("drive_stiffness", "drive_damping", "drive_effort_limit")
+        }
+        for actuator in robot.actuators.values():
+            index = actuator.joint_indices
+            if isinstance(index, slice):
+                index = list(range(count))[index]
+            index = [int(i) for i in (index.tolist() if hasattr(index, "tolist") else index)]
+            for key, value in (
+                ("drive_stiffness", actuator.stiffness),
+                ("drive_damping", actuator.damping),
+                ("drive_effort_limit", actuator.effort_limit),
+            ):
+                row = value[0] if isinstance(value, torch.Tensor) and value.ndim == 2 else value
+                row = row.detach().cpu().numpy() if isinstance(row, torch.Tensor) else row
+                out[key][index] = np.broadcast_to(np.asarray(row, dtype=np.float32), len(index))
+        out["default_joint_pos"] = robot.data.default_joint_pos[0].cpu().numpy()
+        if any(np.isnan(v).any() for v in out.values()):
+            raise ValueError("a joint without an actuator model")
+        return out
+    except Exception as error:  # noqa: BLE001
+        print(f"[capture] drive parameters not recorded: {error}")
+        return None
+
+
+def make_pact(inner, term, robot):
+    """A :class:`PactDriver` for this body, from ``--pact-model`` and its card."""
+    from humanoid_transfer.transfer.latent.pact.anchors import DriveLoads, KinematicAnchors
+    from humanoid_transfer.transfer.latent.pact.descriptors import contact_joints, describe
+    from humanoid_transfer.transfer.latent.pact.driver import PactDriver
+    from humanoid_transfer.transfer.latent.pact.mirror import SampleMirror
+    from pact_check_anchors import sole_override
+
+    body = args_cli.pact_body
+    if body is None:
+        raise ValueError("--pact-model needs --pact-body")
+    registry = json.loads((_REPO_ROOT / "transfer/bodies/bodies.json").read_text("utf-8"))
+    entry = registry[body]
+    card = json.loads((_REPO_ROOT / entry["card"]).read_text("utf-8"))
+    unit = entry.get("leg_length_unit")
+    descriptor = describe(card, leg_length=unit)
+    if tuple(robot.joint_names) != tuple(descriptor.joint_names):
+        raise ValueError(f"{body}: the card's joints are not the simulation's")
+    anchors = KinematicAnchors(card, unit, sole_override(body))
+    drive = DriveLoads(card, anchors)
+    drives = drive_parameters(robot)
+    if drives is None:
+        raise ValueError("PACT's drive loads need the drives' gains")
+    gains = (drives[k] for k in ("drive_stiffness", "drive_damping", "drive_effort_limit"))
+    drive.set_drives(*gains)
+    actions = inner.action_manager
+    if len(actions.active_terms) != 1:
+        raise ValueError(f"PACT drives one joint-position action, not {actions.active_terms}")
+    action = actions.get_term(actions.active_terms[0])
+    joints = action._joint_ids
+    joints = joints if isinstance(joints, slice) else [int(j) for j in joints]
+    scale = action._scale
+    scale = scale[0] if isinstance(scale, torch.Tensor) else float(scale)
+    offset = action._offset
+    default = robot.data.default_joint_pos[0]
+    if isinstance(offset, torch.Tensor) and not torch.allclose(offset[0], default[joints]):
+        raise ValueError("PACT's targets are relative to the default pose; the action's are not")
+    checkpoint = torch.load(args_cli.pact_model, map_location="cpu", weights_only=False)
+    # The view is in the tracker's own units when the command observes in them
+    # (``observe_units``), else in the contract's.
+    norm = term.generator.skill_norm
+    if getattr(term.cfg, "observe_units", None):
+        from humanoid_transfer.transfer.latent.contract import load_contract
+
+        norm = load_contract(term.cfg.observe_units, inner.device).generator.skill_norm
+    mirror = (
+        SampleMirror.for_body(_REPO_ROOT, body, descriptor.joint_names, default.cpu().numpy())
+        if args_cli.pact_symmetrize
+        else None
+    )
+    print(
+        f"[capture] PACT {args_cli.pact_model} drives {body}; view {term.view}, units "
+        f"{term.cfg.observe_units or 'the contract'}"
+        f"{', symmetrised' if mirror is not None else ''}"
+    )
+    return PactDriver(
+        checkpoint,
+        descriptor,
+        contact_joints(card),
+        anchors,
+        drive,
+        default,
+        joints,
+        scale,
+        term.view,
+        norm.mean,
+        norm.std,
+        float(inner.step_dt),
+        inner.num_envs,
+        inner.device,
+        mirror=mirror,
+    )
 
 
 def main() -> int:
@@ -153,6 +308,8 @@ def main() -> int:
         command_cfg.start_fraction = args_cli.start_fraction
     if args_cli.standing_fraction is not None:
         command_cfg.rel_standing_envs = args_cli.standing_fraction
+    if args_cli.plan_max_load is not None:
+        command_cfg.plan_max_load = args_cli.plan_max_load
     if args_cli.resample_seconds is not None:
         command_cfg.resampling_time_range = tuple(args_cli.resample_seconds)
     if args_cli.procedural_fraction is not None:
@@ -162,6 +319,10 @@ def main() -> int:
         probes = json.loads(args_cli.gait_probes.read_text(encoding="utf-8"))
         command_cfg.procedural_probes = probes
     command_cfg.procedural_seed = args_cli.procedural_seed
+    if args_cli.replay_plans is not None:
+        command_cfg.replay_plans = str(args_cli.replay_plans)
+    if args_cli.replay_spacing is not None:
+        command_cfg.replay_spacing = args_cli.replay_spacing
     if args_cli.estimate_noise is not None:
         command_cfg.estimate_noise = args_cli.estimate_noise
     if args_cli.push is not None:
@@ -192,15 +353,43 @@ def main() -> int:
     driver = torch.jit.load(str(args_cli.driver_policy), map_location=inner.device).eval()
     if not hasattr(term, "due"):
         raise ValueError(f"{args_cli.task_id} has no contract command")
+    pact = make_pact(inner, term, robot) if args_cli.pact_model is not None else None
+    generator = torch.Generator(device="cpu").manual_seed(args_cli.seed)
+    teacher_driven = (torch.rand(inner.num_envs, generator=generator) < args_cli.teacher_share).to(
+        inner.device
+    )
+
+    def act(obs) -> tuple[torch.Tensor, torch.Tensor]:
+        """``(executed, teacher)`` actions for this step."""
+        with torch.inference_mode():
+            teacher = driver(obs["policy"])
+            if pact is None:
+                return teacher, teacher
+            student = pact(
+                obs["policy"],
+                robot.data.joint_pos,
+                robot.data.joint_vel,
+                robot.data.joint_pos_target,
+                robot.data.projected_gravity_b,
+                robot.data.root_ang_vel_b,
+            )
+        return torch.where(teacher_driven[:, None], teacher, student), teacher
+
+    def step(action):
+        out = env.step(action)
+        if pact is not None:
+            ended = torch.nonzero(out[2] | out[3]).flatten()
+            if len(ended):
+                pact.reset(ended)
+        return out
 
     def skill_now() -> np.ndarray:
         return term.generator.skill_norm.inverse(term.true_skill()).cpu().numpy()
 
     obs, _ = env.reset()
     for _ in range(args_cli.settle_steps):
-        with torch.inference_mode():
-            action = driver(obs["policy"])
-        obs, _, _, _, _ = env.step(action)
+        action, _ = act(obs)
+        obs, _, _, _, _ = step(action)
 
     keys = (
         "skill_state", "command", "action_executed", "base_lin_vel", "base_ang_vel",
@@ -209,6 +398,25 @@ def main() -> int:
         "encoder_input", "procedural", "biped_fallen", "biped_recovering", "estimate",
         "balance", "biped_phase", "plan_gain",
     )  # fmt: skip
+    if args_cli.joints:
+        keys += ("joint_pos", "joint_vel", "projected_gravity")
+    # With --joints, also each joint's PD target before the step (the previous action's, as
+    # the drives hold it) and the drives' gains once: what the PACT drive-load anchors read.
+    # Never allowed to fail a capture: without these attributes the keys are left out.
+    drives = drive_parameters(robot) if args_cli.joints else None
+    if drives is not None:
+        try:
+            robot.data.joint_pos_target.cpu()
+            keys += ("joint_pos_target",)
+        except Exception as error:  # noqa: BLE001
+            print(f"[capture] joint_pos_target not recorded: {error}")
+    if args_cli.policy_obs:
+        keys += ("policy_obs",)
+    if pact is not None:
+        keys += ("action_teacher",)
+    replay = getattr(term, "replay", None)
+    if replay is not None:
+        keys += ("replay_clock",)
     record: dict[str, list] = {k: [] for k in keys}
     origins = inner.scene.env_origins
     for _ in range(args_cli.steps):
@@ -237,10 +445,22 @@ def main() -> int:
         record["biped_phase"].append(phase if biped is None else biped.phase.cpu().numpy())
         # How far each env's plan is trusted (1 everywhere without the command's plan_trust).
         record["plan_gain"].append(term.plan_gain()[:, 0].cpu().numpy())
-        with torch.inference_mode():
-            action = driver(obs["policy"])
+        if args_cli.joints:
+            record["joint_pos"].append(robot.data.joint_pos.cpu().numpy())
+            record["joint_vel"].append(robot.data.joint_vel.cpu().numpy())
+            record["projected_gravity"].append(robot.data.projected_gravity_b.cpu().numpy())
+        if "joint_pos_target" in record:
+            record["joint_pos_target"].append(robot.data.joint_pos_target.cpu().numpy())
+        if args_cli.policy_obs:
+            record["policy_obs"].append(obs["policy"].cpu().numpy())
+        if replay is not None:
+            # The instant of the chain this row's state is paired at (body times).
+            record["replay_clock"].append(term.replay_clock.cpu().numpy())
+        action, teacher = act(obs)
         record["action_executed"].append(action.cpu().numpy())
-        obs, _, terminated, truncated, _ = env.step(action)
+        if pact is not None:
+            record["action_teacher"].append(teacher.cpu().numpy())
+        obs, _, terminated, truncated, _ = step(action)
         record["contract_error"].append(term.last_error.cpu().numpy())
         record["contract_error_other"].append(term.last_error_other.cpu().numpy())
         record["contract_error_state"].append(term.last_error_state.cpu().numpy())
@@ -260,14 +480,28 @@ def main() -> int:
         for k, v in record.items()
     }
     units = term.units
+    if drives is not None:
+        arrays.update(drives)
+    if replay is not None:
+        arrays["replay_chain"] = term.replay_chain.cpu().numpy()
+        arrays["replay_file"] = np.array(str(args_cli.replay_plans))
     if probes is not None:
         arrays["probe_index"] = term.probe_index.cpu().numpy()
         arrays["probes"] = np.array(json.dumps(probes))
+    if pact is not None:
+        arrays["teacher_driven"] = teacher_driven.cpu().numpy()
+        arrays["pact_model"] = np.array(str(args_cli.pact_model))
+        # What turns the teacher's actions into joint targets: q0 + scale * a on these joints.
+        joints = np.arange(len(robot.joint_names))[pact.action_joints]
+        scale = pact.action_scale
+        scale = scale.cpu().numpy() if isinstance(scale, torch.Tensor) else scale
+        arrays["action_joints"] = joints
+        arrays["action_scale"] = np.broadcast_to(np.float32(scale), joints.shape).copy()
     args_cli.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         args_cli.output,
-        # No teacher on this body: the label slot repeats the executed action.
-        action_teacher=arrays["action_executed"],
+        # Without --pact-model the tracker is its own label: the slot repeats the action.
+        action_teacher=arrays.pop("action_teacher", arrays["action_executed"]),
         joint_names=np.array(robot.data.joint_names),
         skill_components=np.array(SKILL_LAYOUT.component_names()),
         control_dt=np.float32(inner.step_dt),

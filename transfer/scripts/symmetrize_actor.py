@@ -86,12 +86,15 @@ def main() -> int:
     parser.add_argument("--mirror", type=Path, required=True, help="The body's measure_mirror.py.")
     parser.add_argument("--contract", type=Path, required=True, help="Fixes the plan's units.")
     parser.add_argument("--view", type=int, default=None, help="Default: from the actor's width.")
+    registry = json.loads((REPO_ROOT / "transfer/bodies/bodies.json").read_text(encoding="utf-8"))
     parser.add_argument(
         "--body",
-        choices=("g1", "nao"),
+        choices=sorted(k for k, v in registry.items() if isinstance(v, dict)),
         default="g1",
         help="g1: every joint, base velocity observed; nao: the actuated joints "
-        "(nao_kinematics.ACTUATED_JOINTS), no base linear velocity.",
+        "(nao_kinematics.ACTUATED_JOINTS), no base linear velocity; any other registered body "
+        "(transfer/bodies/bodies.json; bodies/body_track_env_cfg.BodyTrackPolicyCfg): its "
+        "action joints as its measured mirror recorded them, no base linear velocity.",
     )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
@@ -102,9 +105,11 @@ def main() -> int:
         from humanoid_transfer.nao.assets.nao_kinematics import ACTUATED_JOINTS
 
         names = list(ACTUATED_JOINTS)
+    elif args.body != "g1":
+        names = list(spec["action"]["joints"])
     contract = load_contract(args.contract)
     actor = torch.jit.load(str(args.actor), map_location="cpu").eval()
-    imu = args.body == "nao"
+    imu = args.body != "g1"
     # The view is the tracker's, counted on its own body's grid, not the generator's: the
     # NAO's control step is longer in body time, and it sees 4 of the plan's samples where
     # the G1 sees 8. It follows from the actor's input width.

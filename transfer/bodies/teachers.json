@@ -1,0 +1,71 @@
+{
+  "$comment": [
+    "Each body's chosen teacher and the conditions every tracker of that body trains and runs under.",
+    "conditions: environment variables of the body's tracking task (paths relative to the repository).",
+    "teacher: the run tag of the chosen teacher (logs/rsl_rl/<body>_track/<stamp>_<tag>_<body>, latest",
+    "checkpoint); symmetrised: the teacher is that checkpoint averaged with its mirror image",
+    "(symmetrize_actor.py, exported as model_<n>_sym_pact.pt). Chosen by the final teacher audit",
+    "(transfer/scripts/pact_teacher_final_read.py): one recipe for every body, entropy 0 and symmetrised;",
+    "Cassie's run carries the corrected sole card (contactsole).",
+    "variant: the teacher's name in the audit (pact_teacher_audit.sh): its captures",
+    "logs/pact/teachers/<body>_<variant>_{probes,train}.npz are the base data of every arm.",
+    "rollouts: where a body's evaluation captures are written; mirror: its joint mirror map.",
+    "transfer/scripts/body_conditions.py turns an entry into shell assignments."
+  ],
+  "g1": {
+    "conditions": {
+      "HUMANOID_CONTRACT": "logs/contract/walk_dagger3e/generator.pt",
+      "HUMANOID_LOAD_SPACE": "log"
+    },
+    "teacher": "contactprec",
+    "variant": "prec",
+    "symmetrised": true,
+    "rollouts": "g1/rollouts",
+    "mirror": "g1/body/mirror.json"
+  },
+  "nao": {
+    "conditions": {
+      "HUMANOID_CONTRACT": "logs/contract/walk_dagger2e/generator.pt",
+      "HUMANOID_LOAD_SPACE": "linear",
+      "HUMANOID_POSTURE_CONTRACT": "logs/contract/walk_dagger2e/generator.pt"
+    },
+    "teacher": "contactprec",
+    "variant": "prec",
+    "symmetrised": true,
+    "rollouts": "nao/rollouts",
+    "mirror": "nao/body/mirror.json"
+  },
+  "h1": {
+    "conditions": {
+      "HUMANOID_CONTRACT": "logs/contract/walk_dagger3e/generator.pt",
+      "HUMANOID_LOAD_SPACE": "log"
+    },
+    "teacher": "contactprec",
+    "variant": "prec",
+    "symmetrised": true,
+    "rollouts": "logs/rollouts/h1",
+    "mirror": "transfer/bodies/h1/mirror.json"
+  },
+  "cassie": {
+    "conditions": {
+      "HUMANOID_CONTRACT": "logs/contract/walk_dagger3e/generator.pt",
+      "HUMANOID_LOAD_SPACE": "log"
+    },
+    "teacher": "contactsole",
+    "variant": "sole",
+    "symmetrised": true,
+    "rollouts": "logs/rollouts/cassie",
+    "mirror": "transfer/bodies/cassie/mirror.json"
+  },
+  "digit": {
+    "conditions": {
+      "HUMANOID_CONTRACT": "logs/contract/walk_dagger3e/generator.pt",
+      "HUMANOID_LOAD_SPACE": "log"
+    },
+    "teacher": "contactprec",
+    "variant": "prec",
+    "symmetrised": true,
+    "rollouts": "logs/rollouts/digit",
+    "mirror": "transfer/bodies/digit/mirror.json"
+  }
+}

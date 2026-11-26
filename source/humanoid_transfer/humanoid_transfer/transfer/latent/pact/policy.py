@@ -125,14 +125,16 @@ class PactPolicy(nn.Module):
             )
             # Physical friction-cone / ZMP support-polygon wrench bounds (m g force, m g L moment)
             # and operational-space motion cap for state_anchor=True (even under sagittal mirror).
+            # Moment bounds (0.50/0.25) accommodate large-sole bodies (NAO) while blocking internal
+            # mechanical-stop saturation torques (e.g. Cassie hip_rotation at +-0.98 m g L).
             self.register_buffer(
                 "w_cap",
-                torch.tensor([1.5, 1.5, 2.0, 0.25, 0.25, 0.15] * 2, dtype=torch.float32),
+                torch.tensor([1.5, 1.5, 2.0, 0.50, 0.50, 0.25] * 2, dtype=torch.float32),
                 persistent=False,
             )
             self.register_buffer(
                 "x_cap",
-                torch.full((12,), 0.5, dtype=torch.float32),
+                torch.full((12,), 1.0, dtype=torch.float32),
                 persistent=False,
             )
 

@@ -46,7 +46,7 @@ if [ "$smoke" = 1 ]; then
 else
   name="${arm}_s${seed}"
   bodies="${ICML_BODIES:-$("$python" transfer/scripts/body_conditions.py --bodies)}"
-  offline_steps=24000 dagger_steps=8000 probe_rounds=4 train_rounds=3
+  offline_steps=32000 dagger_steps=10000 probe_rounds=4 train_rounds=3
   results_final="transfer/results"
 fi
 dir="logs/icml/$name"

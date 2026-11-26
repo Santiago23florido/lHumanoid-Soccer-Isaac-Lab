@@ -551,10 +551,10 @@ def main() -> int:
     parser.add_argument("--contracts", default=CONTRACTS)
     parser.add_argument("--history", type=int, default=4)
     parser.add_argument("--stride", type=int, default=1, help="keep every n-th window")
-    parser.add_argument("--width", type=int, default=128)
+    parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--steps", type=int, default=24000)
     parser.add_argument("--batch", type=int, default=512)
-    parser.add_argument("--lr", type=float, default=None, help="3e-4; with --adapt, ADAPT_LR")
+    parser.add_argument("--lr", type=float, default=None, help="3e-4 (1.5e-4 on --init); with --adapt, ADAPT_LR")
     parser.add_argument(
         "--adapt",
         default="",
@@ -631,7 +631,13 @@ def main() -> int:
         train_index = [added]
         train_rows[added], probes_used = budget_rows(bodies[added], args.probes, args.seed)
         print(f"adding {args.hold_out}: {len(train_rows[added])} samples, probes {probes_used}")
-    lr = args.lr if args.lr is not None else ADAPT_LR[args.adapt] if args.adapt else 3e-4
+    lr = (
+        args.lr
+        if args.lr is not None
+        else ADAPT_LR[args.adapt]
+        if args.adapt
+        else (1.5e-4 if init is not None else 3e-4)
+    )
     if init is not None:
         z_mean, z_std, a_mean, a_std, t_mean, t_std = (
             np.asarray(init[k]) for k in ("z_mean", "z_std", "a_mean", "a_std", "t_mean", "t_std")
@@ -822,42 +828,71 @@ def main() -> int:
             kind = "pact"
             anchored = arm != "pact_na"
             use_imp = anchored and not args.no_impedance_anchor
-            imp_extra = {}
-            if use_imp:
-                if init is not None and init.get("kind", "pact") == "pact":
-                    idims = init.get("dims", {})
-                    imp_extra = {
-                        "state_anchor": bool(idims.get("state_anchor", False)),
-                        "leg_cap": float(idims.get("leg_cap", 0.8)),
-                        "arm_cap": float(idims.get("arm_cap", 1.5)),
-                    }
-                else:
-                    imp_extra = {"state_anchor": True, "leg_cap": 2.0, "arm_cap": 3.0}
-            dims = PactDims(
-                observation=3,
-                history=args.history,
-                width=args.width,
-                anchor_inputs=anchored,
-                timed_plan=True,
-                impedance_anchor=use_imp,
-                **imp_extra,
-                **({"body_tokens": 0} if arm == "pact_nb" else {}),
-            )
+            if init is not None and init.get("kind", "pact") == "pact":
+                idims = {k: tuple(v) if isinstance(v, list) else v for k, v in init["dims"].items()}
+                dims = PactDims(**idims)
+                use_imp = bool(dims.impedance_anchor)
+            else:
+                heads = 8 if args.width >= 256 else 4
+                op_w = 384 if args.width >= 256 else 256
+                imp_extra = (
+                    {"state_anchor": True, "leg_cap": 2.0, "arm_cap": 3.0} if use_imp else {}
+                )
+                dims = PactDims(
+                    observation=3,
+                    history=args.history,
+                    width=args.width,
+                    heads=heads,
+                    op_width=op_w,
+                    emb_drop=0.10,
+                    desc_noise=0.02,
+                    anchor_inputs=anchored,
+                    timed_plan=True,
+                    impedance_anchor=use_imp,
+                    **imp_extra,
+                    **({"body_tokens": 0} if arm == "pact_nb" else {}),
+                )
             model = PactPolicy(dims).to(device)
             default_aw = 0.1 if use_imp else 1.0
             anchor_weight = (args.anchor_weight if args.anchor_weight is not None else default_aw) if anchored else 0.0
         elif arm == "urma_d":
             kind = "urma"
-            dims = UrmaDims(history=args.history, plan_steps=steps_max)
+            if init is not None and init.get("kind") == "urma":
+                dims = UrmaDims(**init["dims"])
+            elif args.width >= 256:
+                dims = UrmaDims(
+                    history=args.history,
+                    plan_steps=steps_max,
+                    description=256,
+                    joint=512,
+                    core=2048,
+                    action=512,
+                    decoder=1024,
+                )
+            else:
+                dims = UrmaDims(history=args.history, plan_steps=steps_max)
             model = UrmaPolicy(dims).to(device)
             anchor_weight = 0.0  # no anchored fields
         else:
             kind = "hpt"
-            dims = HptDims(
-                bodies=tuple(names),
-                joints=tuple(len(b.descriptor.joint_names) for b in bodies),
-                history=args.history,
-            )
+            if init is not None and init.get("kind") == "hpt":
+                idims = {k: tuple(v) if isinstance(v, list) else v for k, v in init["dims"].items()}
+                dims = HptDims(**idims)
+            elif args.width >= 256:
+                dims = HptDims(
+                    bodies=tuple(names),
+                    joints=tuple(len(b.descriptor.joint_names) for b in bodies),
+                    history=args.history,
+                    width=384,
+                    heads=8,
+                    head_hidden=512,
+                )
+            else:
+                dims = HptDims(
+                    bodies=tuple(names),
+                    joints=tuple(len(b.descriptor.joint_names) for b in bodies),
+                    history=args.history,
+                )
             model = HptPolicy(dims).to(device)
             anchor_weight = 0.0
         if init is not None:
@@ -951,7 +986,7 @@ def main() -> int:
                     reg_leg = aux["delta_rel"].square()[leg_m].mean() if leg_m.any() else 0.0
                     reg_arm = aux["delta_rel"].square()[arm_m].mean() if arm_m.any() else 0.0
                     reg_op = aux["op_out"].square().mean()
-                    loss = bc + 0.5 * bc_anc + 0.01 * reg_leg + 0.005 * reg_arm + 2e-4 * reg_op
+                    loss = bc + 0.5 * bc_anc + 0.001 * reg_leg + 0.001 * reg_arm + 2e-4 * reg_op
                     if anchor_weight > 0.0:
                         loss = loss + anchor_weight * (out_learned - learned).square().mean()
                     return loss

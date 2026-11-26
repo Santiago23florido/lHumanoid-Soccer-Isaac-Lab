@@ -86,7 +86,10 @@ task_zs="logs/contract/${generator_name}_zs_${body}_${encoder_tag}/generator.pt"
 # ZS_PACT_MODEL: the shared PACT policy drives the body in every capture; the tracker of
 # <run> stays the labeller (capture_contract.py --pact-model). The tag should say so.
 pact=()
-if [ -n "${ZS_PACT_MODEL:-}" ]; then pact=(--pact-model "$ZS_PACT_MODEL" --pact-body "$body"); fi
+if [ -n "${ZS_PACT_MODEL:-}" ]; then
+  pact=(--pact-model "$ZS_PACT_MODEL" --pact-body "$body")
+  [ "${ZS_SYMMETRIZE:-0}" = 1 ] && pact+=(--pact-symmetrize)
+fi
 mkdir -p "$rollouts"
 
 "$python" transfer/scripts/export_actor.py "$run/$checkpoint.pt" > /dev/null

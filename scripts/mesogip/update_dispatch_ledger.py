@@ -126,9 +126,10 @@ def build_ledger() -> dict:
             "cluster_guards": {
                 "max_walltime": "03:50:00",
                 "signal": "B:USR1@120",
-                "max_concurrent_gpus_per_array": 2,
+                "qos_mode": "packed single-job sequential wave (respects QOSMaxJobsPerUserLimit=1)",
                 "login_node_compute": False,
-                "nfs_data_bundle_gb": 8.4,
+                "nfs_data_bundle_gb": 6.3,
+                "nfs_symlink_dedup_saved_gb": 2.1,
                 "node_local_tmp_cache": True,
                 "venv_path": "~/venvs/pact-icml",
                 "coexistence_note": "Leaves ENSTA-l40s uncontested for active Musculoskeletal-Hand-Simulation jobs",

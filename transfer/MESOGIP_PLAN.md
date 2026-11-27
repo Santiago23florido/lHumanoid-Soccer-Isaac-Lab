@@ -16,12 +16,13 @@ Every script under `scripts/mesogip/` enforces the cluster operational requireme
 
 1. **Zero compute on the login node:** all tests, probes, and trainings execute strictly inside `sbatch` jobs.
 2. **Short resumable walltimes:** every job uses `#SBATCH --time <= 03:50:00` with `#SBATCH --signal=B:USR1@120` and skips tasks whose registered outputs already exist.
-3. **Fairshare GPU throttling:** SLURM job arrays cap concurrent GPUs via `--array=0-N%2` (at most 2 of 4 H100 GPUs simultaneously), leaving cluster capacity open for other ENSTA/Télécom Paris users.
-4. **Minimal NFS `$HOME` footprint:**
+3. **QOS-aware packed execution (`QOSMaxJobsPerUserLimit`):** Mesogip's `ensta-etudiant` QOS enforces a strict concurrent job limit per user. `04_submit_offline_wave.sh` defaults to **packed mode**, running short offline tasks sequentially inside a single resumable `03:50:00` H100 job (with a 15-minute soft deadline guard before walltime), avoiding `MaxSubmit` waste and respecting active `Musculoskeletal-Hand-Simulation` jobs on `ENSTA-l40s`.
+4. **Minimal NFS `$HOME` footprint (storage-safe):**
    - Checkout at `~/proyectos/lHumanoid-Soccer-Isaac-Lab` (branch `feat/icml-token-latent`).
-   - Isolated virtual environment at `~/venvs/pact-icml` (Python 3.12, `torch==2.7.0+cu126`, `numpy==1.26.4`, editable `source/humanoid_transfer`), separate from `~/venvs/pareto-mc`.
-   - Data sync (`scripts/mesogip/02_sync_data.ps1`) transfers **only** the 22 frozen files (`8.4 GB`) listed by `transfer/scripts/icml_cluster_data.py` with exact byte-size verification; rollouts, backups, and temporary captures never touch NFS.
-   - Temporary caches (`TORCH_HOME`, `pytest` basetemp, container layers) stay strictly in node-local `/tmp` and are removed at job exit.
+   - Isolated virtual environment at `~/venvs/pact-icml` (`pip install --no-cache-dir`, `~/.cache/pip` purged immediately after install).
+   - Data sync (`scripts/mesogip/02_sync_data.ps1`) transfers **only** the 17 unique frozen files (**`6.3 GB`**) and symlinks the 5 SHA256-identical `coexec/{body}_map.npz` files to `teachers/{body}_{variant}_probes.npz` (saving `2.1 GB` on NFS vs raw `8.4 GB`); rollouts, backups, and temporary captures never touch NFS.
+   - Temporary caches (`TORCH_HOME`, `pytest` basetemp, container layers) stay strictly in node-local `/tmp` (`970 GB` free) and are removed at job exit.
+   - Intermediate Wave 2 `.pt` checkpoints not needed by downstream jobs are pruned after scoring (or archived to Google Drive `lHumanoid-Soccer-Isaac-Lab-Archive`).
 5. **Single-branch git traceability:** all verified results and dispatch ledgers are pulled back via `scripts/mesogip/05_pull_results.ps1` and committed on `feat/icml-token-latent` under `Santiago23florido <sanflogom@gmail.com>`.
 
 ## 3. Staged Wave Schedule (Zero Throwaway Compute)

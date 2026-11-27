@@ -15,10 +15,11 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
 fi
 source "$VENV_DIR/bin/activate"
 
-python -m pip install --upgrade pip wheel setuptools
-python -m pip install "numpy==1.26.4" pytest scipy matplotlib
-python -m pip install "torch==2.7.0" --index-url https://download.pytorch.org/whl/cu126
-python -m pip install --no-deps -e "$REPO_ROOT/source/humanoid_transfer"
+python -m pip install --no-cache-dir --upgrade pip wheel setuptools
+python -m pip install --no-cache-dir "numpy==1.26.4" pytest scipy matplotlib
+python -m pip install --no-cache-dir "torch==2.7.0" --index-url https://download.pytorch.org/whl/cu126
+python -m pip install --no-cache-dir --no-deps -e "$REPO_ROOT/source/humanoid_transfer"
+rm -rf "$HOME/.cache/pip"
 
 python -c "import torch, numpy, humanoid_transfer; print('Python:', __import__('sys').version.split()[0], 'Torch:', torch.__version__, 'NumPy:', numpy.__version__)"
 echo "=== Setup complete ($VENV_DIR) ==="

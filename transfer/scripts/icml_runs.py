@@ -99,7 +99,7 @@ def manifest() -> list[Job]:
         jobs.append(Job(
             f"loo/{arm}_{body}_s{seed}", "loo", "offline",
             f"{PY} transfer/scripts/pact_gate_d.py --bodies {csv} --hold-out {body} --captures '{BASE_MAP}'"
-            f" --dagger '{BASE_TRAIN}' --min-duty 0.55 --steps 24000 --arms hold,{arm} --seed {seed}"
+            f" --dagger '{BASE_TRAIN}' --min-duty 0.55 --mirror --steps 24000 --arms hold,{arm} --seed {seed}"
             f" --save logs/icml/models/{name}.pt --output transfer/results/icml_{name}.json",
             [f"transfer/results/icml_{name}.json", f"logs/icml/models/{name}.pt"], 1.0,
         ))  # fmt: skip
@@ -112,7 +112,7 @@ def manifest() -> list[Job]:
                 jobs.append(Job(
                     f"scaling/{held}_{key}_s{seed}", "scaling", "offline",
                     f"{PY} transfer/scripts/pact_gate_d.py --bodies {','.join((*subset, held))} --hold-out {held}"
-                    f" --captures '{BASE_MAP}' --dagger '{BASE_TRAIN}' --min-duty 0.55 --steps 24000"
+                    f" --captures '{BASE_MAP}' --dagger '{BASE_TRAIN}' --min-duty 0.55 --mirror --steps 24000"
                     f" --arms hold,pact_d --seed {seed} --save logs/icml/models/{name}.pt"
                     f" --output transfer/results/icml_{name}.json",
                     [f"transfer/results/icml_{name}.json"], 0.8,
@@ -126,7 +126,7 @@ def manifest() -> list[Job]:
             jobs.append(Job(
                 f"adapt/{arm}_{body}_{mode}_k{k or 'all'}_s{seed}", "adapt", "offline",
                 f"{PY} transfer/scripts/pact_gate_d.py --bodies {csv} --hold-out {body} --captures '{BASE_MAP}'"
-                f" --dagger '{BASE_TRAIN}' --min-duty 0.55 --init logs/icml/models/{base}.pt --adapt {mode}"
+                f" --dagger '{BASE_TRAIN}' --min-duty 0.55 --mirror --init logs/icml/models/{base}.pt --adapt {mode}"
                 f" --probes {k} --steps 2000 --arms hold,{arm} --seed {seed}"
                 f" --save logs/icml/models/{name}.pt --output transfer/results/icml_{name}.json",
                 [f"transfer/results/icml_{name}.json"], 0.1, [f"loo/{arm}_{body}_s{seed}"],

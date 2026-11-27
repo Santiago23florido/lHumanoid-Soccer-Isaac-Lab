@@ -17,7 +17,7 @@
 #   bash scripts/mesogip/04_submit_offline_wave.sh loo      ENSTA-h100 03:50:00 --submit --array 1
 set -euo pipefail
 
-GROUPS="${1:?usage: $0 <groups_csv: cross,r4|loo|scaling|adapt> [partition] [walltime] [--submit] [--after <jobid>] [--array <max_conc>]}"
+WAVE_GROUPS="${1:?usage: $0 <groups_csv: cross,r4|loo|scaling|adapt> [partition] [walltime] [--submit] [--after <jobid>] [--array <max_conc>]}"
 PARTITION="${2:-ENSTA-h100}"
 WALLTIME="${3:-03:50:00}"
 shift $(( $# < 3 ? $# : 3 ))
@@ -44,10 +44,10 @@ mkdir -p "$OUT_DIR" "$PROV_DIR"
 
 cd "$REPO_ROOT"
 PYTHON="$VENV_DIR/bin/python"
-WAVE_TAG="${GROUPS//,/_}"
+WAVE_TAG="${WAVE_GROUPS//,/_}"
 TASK_JSON="$OUT_DIR/wave_${WAVE_TAG}_tasks.json"
 
-"$PYTHON" - "$GROUPS" "$TASK_JSON" <<'PY'
+"$PYTHON" - "$WAVE_GROUPS" "$TASK_JSON" <<'PY'
 import json, sys
 from pathlib import Path
 sys.path.insert(0, "transfer/scripts")
@@ -65,7 +65,7 @@ PY
 
 COUNT="$("$PYTHON" -c "import json; print(len(json.load(open('$TASK_JSON'))))")"
 if [ "$COUNT" -eq 0 ]; then
-    echo "No runnable offline jobs left for groups '$GROUPS'."
+    echo "No runnable offline jobs left for groups '$WAVE_GROUPS'."
     exit 0
 fi
 

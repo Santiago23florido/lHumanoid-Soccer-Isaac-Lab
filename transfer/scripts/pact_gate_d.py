@@ -571,6 +571,12 @@ def main() -> int:
         help="legacy v1 radian decoder without the operational-space impedance anchor",
     )
     parser.add_argument(
+        "--decoupled-anchor",
+        default="",
+        choices=("", "radian", "mgl"),
+        help="PACT v2.3 decoupled operational-space ZMP prior ('radian' or 'mgl' residual)",
+    )
+    parser.add_argument(
         "--labels",
         default="",
         help="train on another teacher's labels: <capture>.labels_<name>.npz (pact_relabel.py)",
@@ -599,9 +605,11 @@ def main() -> int:
         torch.backends.cudnn.allow_tf32 = True
     init = torch.load(args.init, map_location="cpu", weights_only=False) if args.init else None
     if init is not None and init.get("kind", "pact") == "pact":
-        # Follow the --init checkpoint's architecture (v1 vs v2) automatically.
+        # Follow the --init checkpoint's architecture (v1 vs v2 vs v2.3) automatically.
         if not init.get("dims", {}).get("impedance_anchor", False):
             args.no_impedance_anchor = True
+        elif init.get("dims", {}).get("decoupled_anchor", ""):
+            args.decoupled_anchor = init["dims"]["decoupled_anchor"]
     arms = args.arms.split(",")
     registry = json.loads((REPO / "transfer/bodies/bodies.json").read_text("utf-8"))
     names = [b for b in args.bodies.split(",") if b]
@@ -835,17 +843,30 @@ def main() -> int:
             else:
                 heads = 8 if args.width >= 256 else 4
                 op_w = 384 if args.width >= 256 else 256
-                imp_extra = (
-                    {"state_anchor": True, "leg_cap": 2.0, "arm_cap": 3.0} if use_imp else {}
-                )
+                decoupled = args.decoupled_anchor if use_imp else ""
+                if use_imp and decoupled:
+                    imp_extra = {
+                        "state_anchor": True,
+                        "decoupled_anchor": decoupled,
+                        "emb_drop": 0.0,
+                        "desc_noise": 0.0,
+                    }
+                elif use_imp:
+                    imp_extra = {
+                        "state_anchor": True,
+                        "leg_cap": 2.0,
+                        "arm_cap": 3.0,
+                        "emb_drop": 0.10,
+                        "desc_noise": 0.02,
+                    }
+                else:
+                    imp_extra = {"emb_drop": 0.10, "desc_noise": 0.02}
                 dims = PactDims(
                     observation=3,
                     history=args.history,
                     width=args.width,
                     heads=heads,
                     op_width=op_w,
-                    emb_drop=0.10,
-                    desc_noise=0.02,
                     anchor_inputs=anchored,
                     timed_plan=True,
                     impedance_anchor=use_imp,
@@ -951,6 +972,7 @@ def main() -> int:
                     * b_batch.mask[..., None]
                 )
                 x["joint_obs"] = jo
+            dec_mode = getattr(dims, "decoupled_anchor", "") if use_imp else ""
             if use_imp:
                 phys = {
                     "tau_g": x.pop("tau_g"),
@@ -961,6 +983,9 @@ def main() -> int:
                     "tau_eff_dimless": teff_table[which],
                     "alpha_dt": alpha_table[which],
                 }
+                if dec_mode == "radian":
+                    phys["drive_gain"] = gain_table[which]
+                    phys["drive_offset"] = offset
                 extra["phys"] = phys
                 extra["return_aux"] = True
             with amp_ctx():
@@ -969,24 +994,32 @@ def main() -> int:
                     extra["emb_cached"] = (e_all[which], d_all[which])
                 res = model(b_batch, **x, **extra)
                 if use_imp:
-                    out_learned, out_tau, aux = res
+                    out_learned, out_pred, aux = res
                     taught_r = torch.tanh(gain_table[which] * label + offset)
-                    pred_r = torch.tanh(out_tau * inv_teff_table[which])
                     anc_r = torch.tanh(aux["tau_anchor"] * inv_teff_table[which])
+                    if dec_mode == "radian":
+                        pred_r = torch.tanh(gain_table[which] * out_pred + offset)
+                    else:
+                        pred_r = torch.tanh(out_pred * inv_teff_table[which])
                     bc = (
                         ((pred_r - taught_r).square() * jw_batch).sum(1)
                         / moved.sum(1).clamp_min(1)
                     ).mean() * 0.05
-                    leg_m = leg_table[which]
-                    arm_m = arm_table[which]
                     bc_anc = (
                         ((anc_r - taught_r).square() * aw_batch).sum(1)
                         / (aw_batch > 0).sum(1).clamp_min(1)
                     ).mean() * 0.05
-                    reg_leg = aux["delta_rel"].square()[leg_m].mean() if leg_m.any() else 0.0
-                    reg_arm = aux["delta_rel"].square()[arm_m].mean() if arm_m.any() else 0.0
                     reg_op = aux["op_out"].square().mean()
-                    loss = bc + 0.5 * bc_anc + 0.001 * reg_leg + 0.001 * reg_arm + 2e-4 * reg_op
+                    if dec_mode in ("radian", "mgl"):
+                        d_key = "delta_q" if dec_mode == "radian" else "delta_mgl"
+                        reg_delta = aux[d_key].square()[moved].mean()
+                        loss = bc + 0.5 * bc_anc + 1e-4 * reg_delta + 2e-4 * reg_op
+                    else:
+                        leg_m = leg_table[which]
+                        arm_m = arm_table[which]
+                        reg_leg = aux["delta_rel"].square()[leg_m].mean() if leg_m.any() else 0.0
+                        reg_arm = aux["delta_rel"].square()[arm_m].mean() if arm_m.any() else 0.0
+                        loss = bc + 0.5 * bc_anc + 0.001 * reg_leg + 0.001 * reg_arm + 2e-4 * reg_op
                     if anchor_weight > 0.0:
                         loss = loss + anchor_weight * (out_learned - learned).square().mean()
                     return loss
@@ -1024,8 +1057,9 @@ def main() -> int:
                     extra = routed(which)
                     if e_all is not None:
                         extra["emb_cached"] = (e_all[which], d_all[which])
+                    dec_mode = getattr(dims, "decoupled_anchor", "") if use_imp else ""
                     if use_imp:
-                        extra["phys"] = {
+                        phys_ev = {
                             "tau_g": x.pop("tau_g"),
                             "j_eff": x.pop("j_eff"),
                             "j_pinv": x.pop("j_pinv"),
@@ -1034,9 +1068,13 @@ def main() -> int:
                             "tau_eff_dimless": teff_table[which],
                             "alpha_dt": alpha_table[which],
                         }
+                        if dec_mode == "radian":
+                            phys_ev["drive_gain"] = gain_table[which]
+                            phys_ev["drive_offset"] = off
+                        extra["phys"] = phys_ev
                     with amp_ctx():
                         pred = model(table.take(which), **x, **extra)[1]
-                    if use_imp:
+                    if use_imp and dec_mode != "radian":
                         # Exact analytic PD target inversion (same as DriveLoads.targets_from_torque)
                         u_cmd = (pred.float() * inv_teff_table[which]).clamp(-3.0, 3.0)
                         g_safe = gain_table[which].clamp_min(1e-6)

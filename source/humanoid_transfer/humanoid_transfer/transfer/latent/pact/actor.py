@@ -176,6 +176,9 @@ class PactActor(nn.Module):
             self.policy.embodiment, table, dims.body_tokens, dims.width
         )
         self.impedance_anchor = bool(dims.impedance_anchor)
+        self.decoupled_anchor = (
+            str(getattr(dims, "decoupled_anchor", "")) if self.impedance_anchor else ""
+        )
         self.joints = table.mask.shape[1]
         self.history = dims.history
         self.view = view
@@ -259,6 +262,10 @@ class PactActor(nn.Module):
             with torch.no_grad():
                 phys = self.drive.operational_anchor_from_ratio(q, gravity, cmd_r)
                 phys["alpha_dt"] = flat.new_full((n,), self.alpha_dt)
+                if self.decoupled_anchor == "radian":
+                    d_gain, d_offset = self.drive.drive_gain_offset(q, qd, default_pos=self.q0)
+                    phys["drive_gain"] = d_gain.expand(n, -1)
+                    phys["drive_offset"] = d_offset
             extra["phys"] = phys
         _, out = self.policy(
             bodies,
@@ -272,7 +279,7 @@ class PactActor(nn.Module):
             torch.ones(n, self.view, dtype=torch.bool, device=flat.device),
             **extra,
         )
-        if self.impedance_anchor:
+        if self.impedance_anchor and self.decoupled_anchor != "radian":
             out = self.drive.targets_from_torque(q, qd, out, default_pos=self.q0)
         return out[:, self.action_joints] / self.action_scale
 

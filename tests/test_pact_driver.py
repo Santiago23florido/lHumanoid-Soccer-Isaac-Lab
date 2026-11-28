@@ -168,8 +168,13 @@ def test_a_reset_refills_the_history_with_the_current_reading():
 
 
 @pytest.mark.parametrize("body", ["nao", "h1", "digit"])
-@pytest.mark.parametrize("state_anchor", [False, True])
-def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body, state_anchor):
+@pytest.mark.parametrize(
+    "state_anchor,decoupled_anchor",
+    [(False, ""), (True, ""), (True, "radian"), (True, "mgl")],
+)
+def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(
+    body, state_anchor, decoupled_anchor
+):
     import math
 
     card = _card(body)
@@ -181,7 +186,7 @@ def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body, s
     dims = PactDims(
         width=32, heads=4, history=3, free_tokens=2, body_tokens=2, observation=3,
         anchor_inputs=True, timed_plan=True, impedance_anchor=True, op_width=48,
-        state_anchor=state_anchor, leg_cap=2.0, arm_cap=3.0,
+        state_anchor=state_anchor, decoupled_anchor=decoupled_anchor, leg_cap=2.0, arm_cap=3.0,
     )  # fmt: skip
     torch.manual_seed(3)
     policy = PactPolicy(dims).eval()
@@ -198,7 +203,7 @@ def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body, s
     skill_mean, skill_std = torch.randn(27, generator=gen), torch.rand(27, generator=gen) + 0.5
     action_joints = [0, 2, 4, 6]
     # Shift env default pose away from the card's default_pos (as H1Track-Play-v0 does):
-    # targets_from_torque must subtract the env default pose q0, never the card's default.
+    # targets_from_torque / drive_gain_offset must subtract the env default pose q0, never the card's.
     q0 = torch.as_tensor(card["joints"]["default_pos"], dtype=torch.float32) + 0.35
     driver = PactDriver(
         checkpoint, descriptor, contacts, anchors, drive, q0,
@@ -220,22 +225,32 @@ def test_impedance_anchor_driver_matches_offline_policy_and_pd_inversion(body, s
         anchor = anchor_inputs(anchors, drive, q, qd, g, w, t)
         phys = drive.operational_anchor(q, qd, g, t)
         phys["alpha_dt"] = q.new_full((n,), 1.0 - math.exp(-(control_dt / time_unit) / 0.08))
+        if decoupled_anchor == "radian":
+            d_gain, d_offset = drive.drive_gain_offset(q, qd, default_pos=q0)
+            phys["drive_gain"] = d_gain.expand(n, -1)
+            phys["drive_offset"] = d_offset
         up, est, path = plan_from_view(obs[-1][:, -(view * 30 + 27) :], view, skill_mean, skill_std)
         z_mean, z_std = (torch.as_tensor(checkpoint[k]) for k in ("z_mean", "z_std"))
         a_mean, a_std = (torch.as_tensor(checkpoint[k]) for k in ("a_mean", "a_std"))
-        _, out_tau = policy(
+        _, out_pred = policy(
             stack_bodies([descriptor], [contacts]).take(torch.zeros(n, dtype=torch.long)),
             joint_obs, imu, (anchor - a_mean) / a_std, (up - z_mean) / z_std,
             (up - est[:, None]) / z_std,
             (torch.arange(1, view + 1) * control_dt / time_unit).expand(n, -1),
             path, torch.ones(n, view, dtype=torch.bool), phys=phys,
         )
-        out_rad = drive.targets_from_torque(q, qd, out_tau, default_pos=q0)
+        out_rad = (
+            out_pred
+            if decoupled_anchor == "radian"
+            else drive.targets_from_torque(q, qd, out_pred, default_pos=q0)
+        )
     torch.testing.assert_close(actions[-1], out_rad[:, action_joints] / 0.25, atol=1e-5, rtol=1e-4)
 
 
 @pytest.mark.parametrize("body", ["g1", "nao", "h1", "cassie", "digit"])
-@pytest.mark.parametrize("mode", ["radian", "imp_v20", "imp_v21_state"])
+@pytest.mark.parametrize(
+    "mode", ["radian", "imp_v20", "imp_v21_state", "decoupled_radian", "decoupled_mgl"]
+)
 def test_symmetrized_driver_is_exact_equivariant(body, mode):
     from humanoid_transfer.transfer.latent.pact.mirror import SampleMirror
 
@@ -245,11 +260,19 @@ def test_symmetrized_driver_is_exact_equivariant(body, mode):
     contacts = contact_joints(card)
     anchors = KinematicAnchors(card, unit)
     drive = DriveLoads(card, anchors)
+    dec_mode = (
+        "radian"
+        if mode == "decoupled_radian"
+        else "mgl"
+        if mode == "decoupled_mgl"
+        else ""
+    )
     dims = PactDims(
         width=32, heads=4, history=3, free_tokens=2, body_tokens=2, observation=3,
         anchor_inputs=True, timed_plan=True,
         impedance_anchor=(mode != "radian"),
-        state_anchor=(mode == "imp_v21_state"),
+        state_anchor=(mode in ("imp_v21_state", "decoupled_radian", "decoupled_mgl")),
+        decoupled_anchor=dec_mode,
         leg_cap=2.0 if mode == "imp_v21_state" else 0.8,
         arm_cap=3.0 if mode == "imp_v21_state" else 1.5,
         op_width=48,
@@ -320,4 +343,67 @@ def test_symmetrized_driver_is_exact_equivariant(body, mode):
     driven = (drive.stiffness > 0) & (drive.effective_effort() > 0)
     out1_m = torch.as_tensor(mirror.drive_positions(out1.numpy()))
     gap = float((out2[:, driven] - out1_m[:, driven]).abs().max())
-    assert gap < (1e-2 if body == "digit" else 1e-3), (body, impedance_anchor, gap)
+    assert gap < (1e-2 if body == "digit" else 1e-3), (body, mode, gap)
+
+
+@pytest.mark.parametrize("decoupled_anchor", ["radian", "mgl"])
+def test_decoupled_anchor_stop_gradient_and_zmp_polygon_bounds(decoupled_anchor):
+    import math
+
+    card = _card("cassie")
+    unit = REGISTRY["cassie"].get("leg_length_unit")
+    descriptor = describe(card, leg_length=unit)
+    contacts = contact_joints(card)
+    anchors = KinematicAnchors(card, unit)
+    drive = DriveLoads(card, anchors)
+    dims = PactDims(
+        width=32, heads=4, history=3, free_tokens=2, body_tokens=2, observation=3,
+        anchor_inputs=True, timed_plan=True, impedance_anchor=True, op_width=48,
+        state_anchor=True, decoupled_anchor=decoupled_anchor, emb_drop=0.0, desc_noise=0.0,
+    )  # fmt: skip
+    torch.manual_seed(11)
+    policy = PactPolicy(dims).train()
+    q0, q, qd, g, w, t = _state(card, 4, seed=12)
+    time_unit = float(np.sqrt(descriptor.leg_length / GRAVITY))
+    joint_obs = torch.stack([q - q0, qd * time_unit, drive.drive_ratio(q, qd, t)], -1)[:, :, None].expand(-1, -1, 3, -1)
+    imu = torch.cat([g, w * time_unit], -1)[:, None].expand(-1, 3, -1)
+    anchor = anchor_inputs(anchors, drive, q, qd, g, w, t)
+    phys = drive.operational_anchor(q, qd, g, t)
+    phys["alpha_dt"] = q.new_full((4,), 1.0 - math.exp(-(0.02 / time_unit) / 0.08))
+    if decoupled_anchor == "radian":
+        d_gain, d_offset = drive.drive_gain_offset(q, qd, default_pos=q0)
+        phys["drive_gain"] = d_gain.expand(4, -1)
+        phys["drive_offset"] = d_offset
+    bodies = stack_bodies([descriptor], [contacts]).take(torch.zeros(4, dtype=torch.long))
+    _, out_pred, aux = policy(
+        bodies, joint_obs, imu, anchor,
+        torch.zeros(4, 4, 27), torch.zeros(4, 4, 27),
+        torch.ones(4, 4) * 0.1, torch.zeros(4, 4, 3), torch.ones(4, 4, dtype=torch.bool),
+        phys=phys, return_aux=True,
+    )
+    # 1. Stop-gradient isolation: main output loss sends ZERO gradient to op_head
+    policy.zero_grad()
+    out_pred.square().mean().backward(retain_graph=True)
+    op_grad = sum(
+        p.grad.abs().sum().item() for p in policy.op_head.parameters() if p.grad is not None
+    )
+    dec_grad = sum(
+        p.grad.abs().sum().item() for p in policy.decoder.parameters() if p.grad is not None
+    )
+    assert op_grad == 0.0 and dec_grad > 0.0
+
+    # 2. Anchor supervision loss sends gradient ONLY to op_head, ZERO to decoder
+    policy.zero_grad()
+    aux["tau_anchor"].square().mean().backward()
+    op_grad_anc = sum(
+        p.grad.abs().sum().item() for p in policy.op_head.parameters() if p.grad is not None
+    )
+    dec_grad_anc = sum(
+        p.grad.abs().sum().item() for p in policy.decoder.parameters() if p.grad is not None
+    )
+    assert op_grad_anc > 0.0 and dec_grad_anc == 0.0
+
+    # 3. For decoupled_anchor == "radian", q_anc matches DriveLoads.targets_from_torque(tau_anchor)
+    if decoupled_anchor == "radian":
+        expected = drive.targets_from_torque(q, qd, aux["tau_anchor"].detach(), default_pos=q0)
+        torch.testing.assert_close(aux["q_anc"], expected, atol=1e-5, rtol=1e-4)

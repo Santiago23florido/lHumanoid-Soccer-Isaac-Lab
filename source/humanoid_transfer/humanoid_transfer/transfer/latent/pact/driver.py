@@ -120,6 +120,9 @@ class PactDriver:
             self.model.embodiment = shifted.to(device).eval()
         self.kind = kind
         self.impedance_anchor = bool(kind == "pact" and getattr(dims, "impedance_anchor", False))
+        self.decoupled_anchor = (
+            str(getattr(dims, "decoupled_anchor", "")) if self.impedance_anchor else ""
+        )
         self.anchors, self.drive = anchors.to(device), drive.to(device)
         self.q0 = default_joint_pos.to(device)
         self.action_joints = action_joints
@@ -195,6 +198,10 @@ class PactDriver:
             if self.impedance_anchor:
                 phys = self.drive.operational_anchor_from_ratio(q, gravity, commanded)
                 phys["alpha_dt"] = q.new_full((n,), self.alpha_dt)
+                if self.decoupled_anchor == "radian":
+                    d_gain, d_offset = self.drive.drive_gain_offset(q, qd, default_pos=self.q0)
+                    phys["drive_gain"] = d_gain.expand(n, -1)
+                    phys["drive_offset"] = d_offset
                 extra["phys"] = phys
             _, out = self.model(
                 self.table.take(torch.zeros(n, dtype=torch.long, device=self.device)),
@@ -208,7 +215,7 @@ class PactDriver:
                 mask,
                 **extra,
             )
-            if self.impedance_anchor:
+            if self.impedance_anchor and self.decoupled_anchor != "radian":
                 out = self.drive.targets_from_torque(q, qd, out, default_pos=self.q0)
             return out[:, self.action_joints] / self.action_scale
 
@@ -261,6 +268,11 @@ class PactDriver:
                 "tau_eff_dimless": phys["tau_eff_dimless"],
                 "alpha_dt": q.new_full((n2,), self.alpha_dt),
             }
+            if self.decoupled_anchor == "radian":
+                d_gain, d_offset = self.drive.drive_gain_offset(q, qd, default_pos=self.q0)
+                d_offset_m = d_offset @ self._m_drives.T - d_gain * self._m_drive_offset
+                phys_2["drive_gain"] = d_gain.expand(n2, -1)
+                phys_2["drive_offset"] = torch.cat([d_offset, d_offset_m], dim=0)
             extra["phys"] = phys_2
         _, out_2 = self.model(
             self.table.take(torch.zeros(n2, dtype=torch.long, device=self.device)),
@@ -274,7 +286,7 @@ class PactDriver:
             mask,
             **extra,
         )
-        if self.impedance_anchor:
+        if self.impedance_anchor and self.decoupled_anchor != "radian":
             tau_sym = 0.5 * (out_2[:n] + out_2[n:] @ self._m_drives.T)
             out = self.drive.targets_from_torque(q, qd, tau_sym, default_pos=self.q0)
         else:

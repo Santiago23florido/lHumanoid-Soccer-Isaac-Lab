@@ -412,6 +412,27 @@ class DriveLoads(torch.nn.Module):
         cap = getattr(self, "effort_cap", None)
         return self.effort if cap is None else torch.minimum(self.effort, cap)
 
+    def drive_gain_offset(
+        self,
+        joint_pos: torch.Tensor,
+        joint_vel: torch.Tensor,
+        default_pos: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-joint dimensionless PD gain ``kp / tau_eff`` ``(J,)`` and state torque offset
+        ``(kp (q0 - q) - kd qd) / tau_eff`` ``(N, J)`` (matching ``pact_gate_d.drive_gain`` /
+        ``drive_offset``), so ``gain * (T - q0) + offset == tau_cmd / tau_eff``."""
+        effort = self.effective_effort()
+        active = (self.stiffness > 0) & (effort > 0)
+        limit = torch.where(active, effort, torch.ones_like(effort))
+        base = self.default if default_pos is None else default_pos
+        gain = torch.where(active, self.stiffness / limit, torch.zeros_like(self.stiffness))
+        offset = torch.where(
+            active,
+            (self.stiffness * (base - joint_pos) - self.damping * joint_vel) / limit,
+            torch.zeros_like(joint_pos),
+        )
+        return gain, offset
+
     def drive_ratio(
         self, joint_pos: torch.Tensor, joint_vel: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:

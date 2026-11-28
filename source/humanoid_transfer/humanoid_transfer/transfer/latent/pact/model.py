@@ -114,6 +114,11 @@ class PactDims:
     zero_cmd_history: bool = False
     """Zero out previous-action channel ``joint_obs[..., 2]`` in the state encoder (pure
     kinematic/state-feedback policy without action-history causal confusion)."""
+    decoupled_anchor: str = ""
+    """PACT v2.3 decoupled operational-space ZMP prior + dimensionally consistent residual:
+    ``""`` keeps legacy v2.2 coupled torque residual; ``"radian"`` detaches the ZMP torque prior,
+    inverts it analytically to ``q_anc``, and learns an unconstrained radian residual ``delta_q``;
+    ``"mgl"`` detaches the ZMP prior and learns a Buckingham-Pi ``m g L`` residual ``delta_mgl``."""
 
 
 @dataclass

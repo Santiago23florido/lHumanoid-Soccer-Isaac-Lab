@@ -228,7 +228,21 @@ class PactPolicy(nn.Module):
         if self.dims.state_anchor:
             zero_w = st_dyn.new_zeros(st_dyn.shape[0], 12)
             op_out = self.op_head(torch.cat([st_dyn, zero_w, pooled], dim=-1))
-            w_cap = self.w_cap.to(op_out.dtype)
+            if self.dims.decoupled_anchor:
+                # Analytical Coulomb friction-cone + ZMP support-polygon wrench bounds derived from
+                # each body's dimensionless sole polygon (foot_length/L, foot_width/L in body[:, 4:6]).
+                foot_l = bodies.body[:, 4]
+                foot_w = bodies.body[:, 5]
+                fx = foot_l.new_full((foot_l.shape[0],), 1.5)
+                fy = foot_l.new_full((foot_l.shape[0],), 1.5)
+                fz = foot_l.new_full((foot_l.shape[0],), 2.0)
+                mx = (1.5 * foot_w).clamp(0.05, 0.50)
+                my = (1.2 * foot_l).clamp(0.08, 0.55)
+                mz = (0.4 * (foot_l + foot_w)).clamp(0.04, 0.25)
+                w6 = torch.stack([fx, fy, fz, mx, my, mz], dim=-1)
+                w_cap = torch.cat([w6, w6], dim=-1).to(op_out.dtype)
+            else:
+                w_cap = self.w_cap.to(op_out.dtype)
             x_cap = self.x_cap.to(op_out.dtype)
             w_cmd = w_cap * torch.tanh(op_out[:, :12] / w_cap)
             x_cmd = x_cap * torch.tanh(op_out[:, 12:] / x_cap)
@@ -248,9 +262,53 @@ class PactPolicy(nn.Module):
                 + alpha_dt[:, None] * k_eff * torch.einsum("njk,nk->nj", j_pinv, x_cmd)
             ) * bodies.mask
 
-        # 2. Actuator-relative bounded residual decoder (BoT-Mix graph-local + global)
+        # 2. Residual joint decoder
         phys_feat = torch.cat([tau_g[..., None], j_eff, j_pinv], dim=-1)
         joints_tok = out["joints"] + self.joint_phys(phys_feat) * bodies.mask[..., None]
+        if self.dims.decoupled_anchor in ("radian", "mgl"):
+            delta_raw = self.decoder(
+                bodies,
+                joints_tok,
+                out["latent"],
+                embodiment,
+                plan_c,
+                plan_k,
+                plan_time=plan_time,
+                plan_path=plan_path,
+                plan_mask=plan_mask,
+                bot_mix=False,
+            )
+            # Stop-gradient decouples the morphology-blind ZMP prior from the body-specific residual:
+            # op_head is trained purely by bc_anc while the residual learns clean seen-body precision.
+            tau_prior = tau_anchor.detach()
+            if self.dims.decoupled_anchor == "radian":
+                drive_gain = phys["drive_gain"]
+                drive_offset = phys["drive_offset"]
+                u_anc = (tau_prior / tau_eff.clamp_min(1e-6)).clamp(-3.0, 3.0)
+                active = drive_gain > 0
+                g_safe = drive_gain.clamp_min(1e-6)
+                q_anc = torch.where(active, (u_anc - drive_offset) / g_safe, torch.zeros_like(u_anc))
+                q_out = (q_anc + delta_raw) * bodies.mask
+                if return_aux:
+                    return learned, q_out, {
+                        "tau_anchor": tau_anchor,
+                        "q_anc": q_anc,
+                        "delta_q": delta_raw * bodies.mask,
+                        "op_out": op_out,
+                    }
+                return learned, q_out
+            # decoupled_anchor == "mgl": dimensionally invariant residual in m g L units
+            total_tau = (tau_prior + delta_raw) * bodies.mask
+            if return_aux:
+                return learned, total_tau, {
+                    "tau_anchor": tau_anchor,
+                    "delta_mgl": delta_raw * bodies.mask,
+                    "op_out": op_out,
+                }
+            return learned, total_tau
+        if self.dims.decoupled_anchor:
+            raise ValueError(f"unknown decoupled_anchor mode: {self.dims.decoupled_anchor!r}")
+
         delta_raw = self.decoder(
             bodies,
             joints_tok,

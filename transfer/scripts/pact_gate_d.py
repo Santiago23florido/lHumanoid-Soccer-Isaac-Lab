@@ -806,7 +806,8 @@ def main() -> int:
             sched.step()
             if step % 2000 == 0 or step == args.steps - 1:
                 print(
-                    f"{label} step {step:5d} loss {loss.item():.5f} ({time.time() - start:.0f} s)"
+                    f"{label} step {step:5d} loss {loss.item():.5f} ({time.time() - start:.0f} s)",
+                    flush=True,
                 )
         return time.time() - start
 

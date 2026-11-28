@@ -93,11 +93,14 @@ class PactPolicy(nn.Module):
         self.decoder = JointDecoder(dims)
         if dims.impedance_anchor:
             w, op_w = dims.width, dims.op_width
+            # Decoupled mode detaches tau_anchor before the residual decoder; keeping dropout
+            # inside op_head would inject irreducible stochastic noise into the residual target.
+            op_drop = 0.0 if dims.decoupled_anchor else 0.10
             self.op_step_enc = nn.Sequential(
                 nn.Linear(SKILL + 3 + 1, op_w),
                 nn.LayerNorm(op_w),
                 nn.GELU(),
-                nn.Dropout(0.10),
+                nn.Dropout(op_drop),
                 nn.Linear(op_w, op_w),
             )
             self.op_step_attn = nn.Linear(op_w, 4)
@@ -105,15 +108,16 @@ class PactPolicy(nn.Module):
                 nn.Linear(len(DYNAMIC_Z_INDEX) + 12 + 4 * op_w, op_w),
                 nn.LayerNorm(op_w),
                 nn.GELU(),
-                nn.Dropout(0.10),
+                nn.Dropout(op_drop),
                 nn.Linear(op_w, op_w),
                 nn.LayerNorm(op_w),
                 nn.GELU(),
-                nn.Dropout(0.10),
+                nn.Dropout(op_drop),
                 nn.Linear(op_w, 24),
             )
+            phys_in = 27 if dims.decoupled_anchor else 25
             self.joint_phys = nn.Sequential(
-                nn.Linear(25, w), nn.LayerNorm(w), nn.GELU(), nn.Linear(w, w)
+                nn.Linear(phys_in, w), nn.LayerNorm(w), nn.GELU(), nn.Linear(w, w)
             )
             # Tiny near-zero init: starts at exact physical hold while keeping step-0 grad live.
             nn.init.normal_(self.op_head[-1].weight, std=1e-3)
@@ -263,9 +267,16 @@ class PactPolicy(nn.Module):
             ) * bodies.mask
 
         # 2. Residual joint decoder
-        phys_feat = torch.cat([tau_g[..., None], j_eff, j_pinv], dim=-1)
-        joints_tok = out["joints"] + self.joint_phys(phys_feat) * bodies.mask[..., None]
         if self.dims.decoupled_anchor in ("radian", "mgl"):
+            # Stop-gradient decouples the morphology-blind ZMP prior from the body-specific residual:
+            # op_head is trained purely by bc_anc while the residual sees the exact deterministic
+            # prior (tau_prior, u_anc) it refines and learns clean seen-body precision.
+            tau_prior = tau_anchor.detach()
+            u_anc = (tau_prior / tau_eff.clamp_min(1e-6)).clamp(-3.0, 3.0)
+            phys_feat = torch.cat(
+                [tau_g[..., None], u_anc[..., None], tau_prior[..., None], j_eff, j_pinv], dim=-1
+            )
+            joints_tok = out["joints"] + self.joint_phys(phys_feat) * bodies.mask[..., None]
             delta_raw = self.decoder(
                 bodies,
                 joints_tok,
@@ -278,13 +289,9 @@ class PactPolicy(nn.Module):
                 plan_mask=plan_mask,
                 bot_mix=False,
             )
-            # Stop-gradient decouples the morphology-blind ZMP prior from the body-specific residual:
-            # op_head is trained purely by bc_anc while the residual learns clean seen-body precision.
-            tau_prior = tau_anchor.detach()
             if self.dims.decoupled_anchor == "radian":
                 drive_gain = phys["drive_gain"]
                 drive_offset = phys["drive_offset"]
-                u_anc = (tau_prior / tau_eff.clamp_min(1e-6)).clamp(-3.0, 3.0)
                 active = drive_gain > 0
                 g_safe = drive_gain.clamp_min(1e-6)
                 q_anc = torch.where(active, (u_anc - drive_offset) / g_safe, torch.zeros_like(u_anc))
@@ -308,6 +315,9 @@ class PactPolicy(nn.Module):
             return learned, total_tau
         if self.dims.decoupled_anchor:
             raise ValueError(f"unknown decoupled_anchor mode: {self.dims.decoupled_anchor!r}")
+
+        phys_feat = torch.cat([tau_g[..., None], j_eff, j_pinv], dim=-1)
+        joints_tok = out["joints"] + self.joint_phys(phys_feat) * bodies.mask[..., None]
 
         delta_raw = self.decoder(
             bodies,
